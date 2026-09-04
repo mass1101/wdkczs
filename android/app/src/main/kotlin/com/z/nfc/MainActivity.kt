@@ -1,4 +1,4 @@
-package com.geektoy.nfctool_app
+package com.z.nfc
 
 import io.flutter.embedding.android.FlutterActivity
 
