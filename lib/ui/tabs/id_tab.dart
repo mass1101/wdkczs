@@ -1,0 +1,408 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+
+import '../../main.dart';
+import '../../models/enums.dart';
+import '../../models/models.dart';
+import '../../services/device_service.dart';
+import '../../state/app_controller.dart';
+import '../widgets/common.dart';
+
+/// ID 卡 Tab：4 密钥 / Hex+Dec 显示 / 卡列表 / 读卡与写卡槽
+class IdTab extends StatefulWidget {
+  const IdTab({super.key});
+
+  @override
+  State<IdTab> createState() => _IdTabState();
+}
+
+class _IdTabState extends State<IdTab> {
+  AppController get _app => AppScope.instance.controller;
+  DeviceService get _dev => _app.device;
+
+  final _decCtrl = TextEditingController();
+  final _hexCtrl = TextEditingController();
+  final _keysCtrl = TextEditingController();
+
+  bool _hexMode = false;
+  List<IdCardItem> _cards = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _decCtrl.text = _app.idCard.idCard;
+    _hexCtrl.text = _app.idCard.idCardHex;
+    _keysCtrl.text = _app.idCard.idCardKeys;
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _decCtrl.dispose();
+    _hexCtrl.dispose();
+    _keysCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final cards = await _app.storage.getIdCards();
+    final keys = await _app.storage.getIdCardKeys();
+    if (mounted) {
+      setState(() {
+        _cards = cards;
+        _keysCtrl.text = keys;
+      });
+    }
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
+  }
+
+  void _syncHex(String dec) {
+    final v = int.tryParse(dec);
+    _hexCtrl.text = v == null
+        ? ''
+        : v.toRadixString(16).toUpperCase().padLeft(8, '0');
+  }
+
+  // ========== 读卡 ==========
+  Future<void> _readCard() async {
+    try {
+      await _dev.assureDeviceMode(DeviceMode.reader);
+      final res = await _dev.cmdEm410xScan();
+      if (res.id.length < 5) throw DeviceException(1, '未发现 ID 卡');
+      final id = res.id.sublist(1);
+      final bytes = id.sublist(0, id.length > 4 ? 4 : id.length);
+      final dec = _bytesToDec(bytes);
+      setState(() {
+        _decCtrl.text = dec;
+        _syncHex(dec);
+        _app.idCard.setCard(dec);
+      });
+      _toast('读到 ID：$dec');
+    } catch (e) {
+      _toast('读卡失败: $e');
+    }
+  }
+
+  String _bytesToDec(Uint8List b) {
+    final padded = Uint8List(4);
+    padded.setRange(4 - b.length, 4, b);
+    final v = ByteData.sublistView(padded).getUint32(0);
+    return v.toString().padLeft(10, '0');
+  }
+
+  // ========== 写卡槽 ==========
+  Future<void> _writeSlot() async {
+    final dec = int.tryParse(_decCtrl.text.trim());
+    if (dec == null || dec < 0) {
+      _toast('请输入有效的十进制卡号');
+      return;
+    }
+    try {
+      // 按 EM4100 5 字节格式写入（1 校验字节 + 4 数据字节）
+      final idBytes = Uint8List(5);
+      idBytes[0] = 0;
+      idBytes[1] = (dec >> 24) & 0xFF;
+      idBytes[2] = (dec >> 16) & 0xFF;
+      idBytes[3] = (dec >> 8) & 0xFF;
+      idBytes[4] = dec & 0xFF;
+      await _dev.cmdEm410xSetEmuId(idBytes);
+      await _app.storage.saveIdCards([
+        ..._cards.where((c) => c.id != _decCtrl.text),
+        IdCardItem(id: _decCtrl.text, name: _cards.isEmpty ? '未命名' : _cards.first.name),
+      ]);
+      _toast('已写入 ID 卡槽');
+    } catch (e) {
+      _toast('写卡槽失败: $e');
+    }
+  }
+
+  // ========== 卡列表 ==========
+  Future<void> _showCardList() async {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+                title: Text('已保存 ID 卡', style: TextStyle(fontWeight: FontWeight.w600))),
+            Expanded(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _cards.length,
+                itemBuilder: (_, i) {
+                  final c = _cards[i];
+                  return ListTile(
+                    title: Text(c.id),
+                    subtitle: Text(c.name),
+                    onTap: () {
+                      setState(() {
+                        _decCtrl.text = c.id;
+                        _syncHex(c.id);
+                        _app.idCard.setCard(c.id);
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.grey),
+                      onPressed: () async {
+                        setState(() => _cards.removeAt(i));
+                        await _app.storage.saveIdCards(_cards);
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addCard() async {
+    final dec = int.tryParse(_decCtrl.text.trim());
+    if (dec == null) {
+      _toast('请输入有效卡号');
+      return;
+    }
+    setState(() {
+      _cards = [
+        ..._cards,
+        IdCardItem(id: _decCtrl.text, name: '卡${_cards.length + 1}'),
+      ];
+    });
+    await _app.storage.saveIdCards(_cards);
+    _toast('已保存到列表');
+  }
+
+  // ========== 编辑密钥 ==========
+  Future<void> _editKeys() async {
+    await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑密钥', style: TextStyle(fontSize: 16)),
+        content: TextField(
+          controller: _keysCtrl,
+          maxLines: 4,
+          style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+          decoration: const InputDecoration(
+            hintText: '每行一个密钥，8 位十六进制',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+              onPressed: () async {
+                await _app.storage.saveIdCardKeys(_keysCtrl.text);
+                if (ctx.mounted) Navigator.pop(ctx);
+                _toast('已保存');
+              },
+              child: const Text('确定')),
+        ],
+      ),
+    );
+  }
+
+  // ========== UI ==========
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return ListenableBuilder(
+      listenable: _app,
+      builder: (context, _) {
+        final keys = _keysCtrl.text.trim().split('\n').where((e) => e.isNotEmpty).toList();
+        while (keys.length < 4) {
+          keys.add('--------');
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 16),
+                children: [
+                  // 卡号
+                  SectionCard(
+                    title: 'ID 卡号',
+                    child: Column(
+                      children: [
+                        _numRow('十进制', _decCtrl, '1122334455',
+                            onChanged: _syncHex),
+                        _numRow('十六进制', _hexCtrl, '00000000'),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text('显示：',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600])),
+                            const SizedBox(width: 6),
+                            ChoiceChip(
+                              label: const Text('十进制'),
+                              selected: !_hexMode,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (_) =>
+                                  setState(() => _hexMode = false),
+                            ),
+                            const SizedBox(width: 6),
+                            ChoiceChip(
+                              label: const Text('十六进制'),
+                              selected: _hexMode,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (_) => setState(() => _hexMode = true),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // 密钥
+                  SectionCard(
+                    title: '密钥',
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < keys.length; i++)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 40,
+                                  child: Text('K${i + 1}',
+                                      style: const TextStyle(
+                                          fontSize: 13, color: Color(0xFF666666))),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    keys[i],
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontFamily: 'monospace',
+                                        color: Color(0xFF333333)),
+                                  ),
+                                ),
+                                if (i == keys.length - 1)
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, size: 18),
+                                    onPressed: _editKeys,
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // 卡列表
+                  SectionCard(
+                    title: '卡列表',
+                    child: _cards.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Text('暂无保存的 ID 卡',
+                                style: TextStyle(fontSize: 13, color: Colors.grey)),
+                          )
+                        : Column(
+                            children: _cards
+                                .take(5)
+                                .map((c) => ListTile(
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      title: Text(c.id,
+                                          style: const TextStyle(
+                                              fontSize: 13,
+                                              fontFamily: 'monospace')),
+                                      subtitle: Text(c.name,
+                                          style: const TextStyle(fontSize: 11)),
+                                    ))
+                                .toList(),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            // 右侧按钮
+            Container(
+              width: 96,
+              margin: const EdgeInsets.fromLTRB(0, 8, 6, 0),
+              child: Column(
+                children: [
+                  ActionButton(
+                      label: '读卡',
+                      icon: Icons.radio_button_checked,
+                      color: primary,
+                      onTap: _readCard,
+                      enabled: _app.connected),
+                  const SizedBox(height: 8),
+                  ActionButton(
+                      label: '写卡槽',
+                      icon: Icons.memory,
+                      color: primary,
+                      onTap: _writeSlot,
+                      enabled: _app.connected),
+                  const SizedBox(height: 8),
+                  ActionButton(
+                      label: '卡列表',
+                      icon: Icons.list,
+                      color: primary,
+                      onTap: _showCardList),
+                  const SizedBox(height: 8),
+                  ActionButton(
+                      label: '添加到列表',
+                      icon: Icons.add,
+                      color: primary,
+                      onTap: _addCard),
+                  const SizedBox(height: 8),
+                  ActionButton(
+                      label: '编辑密钥',
+                      icon: Icons.edit,
+                      color: primary,
+                      onTap: _editKeys),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _numRow(String label, TextEditingController ctrl, String hint,
+      {ValueChanged<String>? onChanged}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+              width: 64,
+              child: Text(label,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+          Expanded(
+            child: TextField(
+              controller: ctrl,
+              onChanged: onChanged,
+              style: const TextStyle(fontSize: 14, fontFamily: 'monospace'),
+              decoration: InputDecoration(
+                hintText: hint,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
