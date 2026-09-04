@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../ble/ble_service.dart';
 import '../models/models.dart';
@@ -77,11 +80,25 @@ class AppController extends ChangeNotifier {
 
   /// 扫描并弹出选择
   Future<BluetoothDevice?> scanAndPick() async {
+    await ensureBlePermissions();
     final found = await ble.scan();
     if (found.isEmpty) {
       throw Exception('未发现 Chameleon Ultra 设备，请确保设备已开机');
     }
     return found.first;
+  }
+
+  /// 请求 BLE 所需运行时权限（Android 12+ 蓝牙权限；低版本位置权限）
+  Future<void> ensureBlePermissions() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    final scan = await Permission.bluetoothScan.status;
+    if (!scan.isGranted) {
+      await Permission.bluetoothScan.request();
+    }
+    final connect = await Permission.bluetoothConnect.status;
+    if (!connect.isGranted) {
+      await Permission.bluetoothConnect.request();
+    }
   }
 
   Future<void> connect(BluetoothDevice device) async {

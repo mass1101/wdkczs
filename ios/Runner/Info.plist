@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>需要蓝牙权限以连接 Chameleon Ultra 设备进行 NFC 读写</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>需要蓝牙权限以连接 Chameleon Ultra 设备进行 NFC 读写</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
