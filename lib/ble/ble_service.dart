@@ -157,7 +157,7 @@ class BleService {
     status.value = BleStatus(BleState.connected);
   }
 
-  /// 发送数据（自动按 20B 分块）
+  /// 发送数据（自动按 20B 分块，块间小间隔避免缓冲区溢出）
   Future<void> send(Uint8List data) async {
     if (_writeChar == null) {
       throw Exception('未连接');
@@ -169,6 +169,9 @@ class BleService {
         await _writeChar!.write(chunk, withoutResponse: false);
       } else {
         await _writeChar!.write(chunk, withoutResponse: true);
+      }
+      if (end < data.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
       }
     }
   }

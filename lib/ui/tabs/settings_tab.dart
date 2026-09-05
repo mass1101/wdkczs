@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../main.dart';
+import '../../models/enums.dart';
 import '../../services/device_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common.dart';
@@ -148,6 +149,119 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
+  // ========== 固件刷写 ==========
+  Future<void> _dfuUpdate() async {
+    final controller = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('固件刷写', style: TextStyle(fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('请输入固件包 zip 的下载地址\n（nRF DFU 格式，含 manifest.json）',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: 'https://.../firmware.zip',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('开始刷写'),
+          ),
+        ],
+      ),
+    );
+    if (url == null || url.isEmpty) return;
+    if (!_app.connected) {
+      _toast('设备未连接');
+      return;
+    }
+    try {
+      // 进入 DFU 模式
+      await _dev.cmdDfuEnter();
+      _toast('已进入 DFU 模式，正在连接 bootloader...');
+      // bootloader 重连由扫描选择
+      final found = await _app.ble.scan(timeout: const Duration(seconds: 8));
+      final target = found.firstWhere(
+        (d) {
+          final n = d.platformName;
+          return n.isNotEmpty && (n.contains('DFU') || n.contains('CU-'));
+        },
+        orElse: () => found.isNotEmpty ? found.first : (throw Exception('未发现 DFU 设备，请确认设备已重启到 bootloader')),
+      );
+      await _app.ble.connect(target);
+
+      // 刷写
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AlertDialog(
+          title: Text('固件刷写中...', style: TextStyle(fontSize: 16)),
+          content: Text('正在传输固件，请勿断开设备'),
+        ),
+      );
+      try {
+        await _app.dfuUpdateFromUrl(url);
+      } finally {
+        if (mounted) Navigator.of(context).pop();
+      }
+      _toast('刷写成功，设备将自动重启');
+    } catch (e) {
+      _toast('刷写失败: $e');
+    }
+  }
+
+  // ========== 读取卡槽（仅刷新卡槽相关） ==========
+  Future<void> _readSlotsOnly() async {
+    try {
+      await _app.loadEnabledSlots();
+      final active = await _dev.cmdSlotGetActive();
+      _app.currentSlot = active;
+      _toast('已读取卡槽配置');
+    } catch (e) {
+      _toast('读取卡槽失败: $e');
+    }
+  }
+
+  // ========== 配对密钥编辑 ==========
+  Future<void> _editPairingKey() async {
+    final controller = TextEditingController(text: _app.settings.blePairingKey);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('配对密钥', style: TextStyle(fontSize: 16)),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(hintText: '6 位数字'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      _app.setBlePairingKey(result);
+      _toast('已设置配对密钥');
+    }
+  }
+
   // ========== UI ==========
   @override
   Widget build(BuildContext context) {
@@ -187,11 +301,13 @@ class _SettingsTabState extends State<SettingsTab> {
                             _app.settings.blePairing, (v) {
                           _app.setBlePairing(v);
                         }),
+                        _infoRow('配对密钥', _app.settings.blePairingKey,
+                            onTap: _editPairingKey),
                         _switchRow('按钮配对模式',
                             _app.settings.buttonModePairing, (v) {
                           _app.setButtonModePairing(v);
                         }),
-                        _infoRow('配对密钥', _app.settings.blePairingKey),
+                        _animationRow(),
                         _switchRow('恢复出厂设置', false, (v) {}),
                       ],
                     ),
@@ -224,10 +340,13 @@ class _SettingsTabState extends State<SettingsTab> {
               margin: const EdgeInsets.fromLTRB(0, 8, 6, 0),
               child: Column(
                 children: [
+                  _sideBtn('读取设置', Icons.download, _refresh, primary),
+                  _sideBtn('读取卡槽', Icons.memory, _readSlotsOnly, primary),
                   _sideBtn('保存设置', Icons.save, _saveSettings, primary),
                   _sideBtn('恢复出厂', Icons.refresh, _resetSettings, primary),
                   _sideBtn('清除数据', Icons.cleaning_services, _wipeFds, primary),
                   _sideBtn('清除配对', Icons.link_off, _deleteBonds, primary),
+                  _sideBtn('固件刷写', Icons.system_update_alt, _dfuUpdate, primary),
                   _sideBtn('卡槽设置', Icons.tune, _showSlotSettings, primary),
                   _sideBtn('保存卡槽', Icons.save, _saveSlots, primary),
                   const SizedBox(height: 16),
@@ -252,18 +371,52 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  Widget _infoRow(String label, String value) {
+  Widget _infoRow(String label, String value, {VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+                width: 72,
+                child: Text(label,
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+            Expanded(
+              child: Text(value,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF333333))),
+            ),
+            if (onTap != null)
+              const Icon(Icons.chevron_right, size: 16, color: Color(0xFFBBBBBB)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _animationRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          SizedBox(
+          const SizedBox(
               width: 72,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+              child: Text('动画模式',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF666666)))),
           Expanded(
-            child: Text(value,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF333333))),
+            child: Wrap(
+              spacing: 6,
+              children: AnimationMode.values.map((m) {
+                final selected = _app.settings.animation == m;
+                return ChoiceChip(
+                  label: Text(m.label,
+                      style: const TextStyle(fontSize: 12)),
+                  selected: selected,
+                  visualDensity: VisualDensity.compact,
+                  onSelected: (_) => _app.setAnimationMode(m),
+                );
+              }).toList(),
+            ),
           ),
         ],
       ),

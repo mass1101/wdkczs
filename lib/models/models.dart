@@ -272,28 +272,27 @@ class CardState {
 
 /// ID 卡数据（对应逆向 vT 的 id_card 部分）
 class IdCardState {
-  String idCard; // 10 位十进制卡号
-  String idCardHex; // 十六进制
+  /// 卡号统一以 10 位十六进制为准（EM4100 5 字节），十进制为显示辅助
+  String idCardHex; // 十六进制（10 位）
   List<IdCardItem> idCards; // 已保存卡列表
   String idCardKeys; // 4 个密钥，每行 8 hex
 
   IdCardState({
-    this.idCard = '1122334455',
+    String? idCardHex,
     List<IdCardItem>? idCards,
     String? idCardKeys,
-  })  : idCardHex = int.parse(idCard.isEmpty ? '0' : idCard)
-            .toRadixString(16)
-            .toUpperCase()
-            .padLeft(8, '0'),
-        idCards = idCards ?? [IdCardItem(id: '1122334455', name: '未命名')],
+  })  : idCardHex = (idCardHex ?? '0000000000').toLowerCase(),
+        idCards = idCards ?? [IdCardItem(id: '0000000000', name: '未命名')],
         idCardKeys = idCardKeys ?? '19920427\n1dd00a11\n20206666\n51243648';
 
-  void setCard(String card) {
-    idCard = card;
-    idCardHex = int.parse(card.isEmpty ? '0' : card)
-        .toRadixString(16)
-        .toUpperCase()
-        .padLeft(8, '0');
+  /// 十进制显示值（由 40bit hex 换算，13 位补齐）
+  String get idCardDec {
+    final v = BigInt.parse(idCardHex.isEmpty ? '0' : idCardHex, radix: 16);
+    return v.toString().padLeft(13, '0');
+  }
+
+  void setCard(String hex) {
+    idCardHex = hex.toLowerCase().padLeft(10, '0');
   }
 }
 

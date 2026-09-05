@@ -75,15 +75,16 @@ class CloudService {
     }).toList();
   }
 
-  /// 添加云破解任务（对应逆向 add_job）
+  /// 添加云破解任务（对应逆向 add_job，nonce 携带采集数据）
   Future<String> addJob({
     required String userId,
     required String openid,
     required String cardId,
     required int sector,
     required KeyType keyType,
+    String? nonceData,
   }) async {
-    final nonce = DateTime.now().millisecondsSinceEpoch.toString();
+    final nonce = nonceData ?? DateTime.now().millisecondsSinceEpoch.toString();
     final ep = Uri.parse(await _endpoint());
     final body = await _api(ep, {
       'user_id': userId,

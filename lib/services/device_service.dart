@@ -19,37 +19,85 @@ class DeviceException implements Exception {
 }
 
 /// 是否错误状态码
-bool _isErrStatus(int s) => s != 0 && s != 104;
+/// 设备错误状态码集合（对应逆向 rk：HF 1-8 / LF 65-67 / 通用错误）
+/// 成功码：0 (HF), 64 (LF), 104 (Device) 均不在该集合中
+final Set<int> _errorStatuses = {1, 2, 3, 4, 5, 6, 7, 8, 65, 66, 67, 96, 102, 103, 105, 112, 113, 114};
+
+bool _isErrStatus(int s) => _errorStatuses.contains(s);
 
 /// 设备命令层：封装 UltraFrame 协议的全部命令（对应逆向 Kk 类）
 class DeviceService {
   final BleService _ble;
   bool _ready = false;
   final _pending = <int, Completer<Uint8List>>{};
+  final _dfuPending = <int, Completer<Uint8List>>{};
   StreamSubscription? _sub;
+  Future<void> _txQueue = Future.value();
 
   DeviceService(this._ble);
 
-  /// 初始化（监听接收流，解析响应帧）
+  /// 初始化（监听接收流，解析响应帧，支持 BLE 粘包/分片重组）
   void init() {
     if (_ready) return;
     _ready = true;
+    var buf = Uint8List(0);
     _sub = _ble.rx.listen((bytes) {
       if (bytes.isEmpty) return;
+      if (bytes[0] == 0x60) {
+        _handleDfuFrame(bytes);
+        return;
+      }
+      buf = _concat(buf, bytes);
       try {
-        final (cmd, status, data) = UltraFrame.decode(bytes);
-        final completer = _pending.remove(cmd);
-        if (completer != null) {
-          if (_isErrStatus(status)) {
-            completer.completeError(DeviceException(status, ''));
-          } else {
-            completer.complete(data);
+        for (;;) {
+          if (buf.length < 10) break;
+          // 查找帧 magic（0x11EF 大端）
+          var magicAt = -1;
+          for (var i = 0; i + 2 <= buf.length; i++) {
+            if (buf[i] == 0x11 && buf[i + 1] == 0xEF) {
+              magicAt = i;
+              break;
+            }
+          }
+          if (magicAt < 0) {
+            buf = Uint8List(0);
+            break;
+          }
+          if (magicAt > 0) buf = buf.sublist(magicAt);
+          if (buf.length < 10) break;
+          // 头 LRC 校验（第 0..7 字节，第 8 字节为 LRC）
+          if (!UltraFrame.checkHeadLrc(buf)) {
+            buf = buf.sublist(1);
+            continue;
+          }
+          final bd = ByteData.sublistView(buf);
+          final len = bd.getUint16(6);
+          final total = len + 10;
+          if (buf.length < total) break; // 等待后续分片
+          final frame = buf.sublist(0, total);
+          buf = buf.sublist(total);
+          if (!UltraFrame.checkLrc(frame)) continue;
+          final (cmd, status, data) = UltraFrame.decode(frame);
+          final completer = _pending.remove(cmd);
+          if (completer != null) {
+            if (_isErrStatus(status)) {
+              completer.completeError(DeviceException(status, ''));
+            } else {
+              completer.complete(data);
+            }
           }
         }
       } catch (e) {
         debugPrint('frame decode error: $e');
       }
     });
+  }
+
+  static Uint8List _concat(Uint8List a, Uint8List b) {
+    final out = Uint8List(a.length + b.length);
+    out.setRange(0, a.length, a);
+    out.setRange(a.length, out.length, b);
+    return out;
   }
 
   bool isConnected() => _ble.isConnected;
@@ -60,8 +108,16 @@ class DeviceService {
     }
   }
 
-  /// 底层发送请求并等待响应
+  /// 底层发送请求并等待响应（命令串行化，避免并发导致响应错乱）
   Future<Uint8List> _request(int cmd, Uint8List? data,
+      {int timeout = UltraFrame.defaultTimeoutMs}) {
+    final task = _txQueue
+        .then((_) => _requestRaw(cmd, data, timeout: timeout));
+    _txQueue = task.then<void>((_) {}, onError: (_) {});
+    return task;
+  }
+
+  Future<Uint8List> _requestRaw(int cmd, Uint8List? data,
       {int timeout = UltraFrame.defaultTimeoutMs}) async {
     await ensureConnected();
     init();
@@ -287,6 +343,186 @@ class DeviceService {
     await _request(Cmd.deleteAllBleBonds.value, null);
   }
 
+  // ========== DFU 固件刷写（对应逆向 DfuFrame / DfuZip） ==========
+
+  /// 进入 DFU 模式（cmd 1010），设备随后断开进入 bootloader
+  Future<void> cmdDfuEnter() async {
+    await _request(Cmd.enterBootloader.value, null);
+  }
+
+  /// DFU 模式下向 bootloader 发送协议帧（op + data），返回响应数据
+  Future<Uint8List> _dfuRequest(int op, [Uint8List? data]) async {
+    final d = data ?? Uint8List(0);
+    final buf = Uint8List(1 + d.length);
+    buf[0] = op;
+    if (d.isNotEmpty) buf.setRange(1, 1 + d.length, d);
+    final completer = Completer<Uint8List>();
+    _dfuPending[op] = completer;
+    try {
+      await _ble.dfuWrite(buf);
+      return await completer.future.timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      _dfuPending.remove(op);
+      throw DeviceException(-2, 'DFU 响应超时');
+    } catch (e) {
+      _dfuPending.remove(op);
+      rethrow;
+    }
+  }
+
+  Future<int> cmdDfuGetProtocol() async {
+    final r = await _dfuRequest(0);
+    return r.isEmpty ? 0 : r[0];
+  }
+
+  Future<void> cmdDfuCreateObject(int type, int size) async {
+    final b = Uint8List(5);
+    b[0] = type;
+    ByteData.sublistView(b).setUint32(1, size, Endian.little);
+    await _dfuRequest(1, b);
+  }
+
+  Future<void> cmdDfuSetPrn(int prn) async {
+    final b = Uint8List(4);
+    ByteData.sublistView(b).setUint32(0, prn, Endian.little);
+    await _dfuRequest(2, b);
+  }
+
+  Future<(int, int)> cmdDfuGetObjectCrc() async {
+    final r = await _dfuRequest(3);
+    final bd = ByteData.sublistView(r);
+    return (bd.getUint32(0, Endian.little), bd.getUint32(4, Endian.little));
+  }
+
+  Future<void> cmdDfuExecuteObject() async {
+    await _dfuRequest(4);
+  }
+
+  Future<({int offset, int crc, int maxSize})> cmdDfuSelectObject(
+      int type) async {
+    final r = await _dfuRequest(6, Uint8List.fromList([type]));
+    final bd = ByteData.sublistView(r);
+    return (
+      offset: bd.getUint32(1, Endian.little),
+      crc: bd.getUint32(5, Endian.little),
+      maxSize: bd.getUint32(9, Endian.little),
+    );
+  }
+
+  Future<int> cmdDfuGetMtu() async {
+    final r = await _dfuRequest(7);
+    if (r.length < 2) return 0;
+    return ByteData.sublistView(r).getUint16(0, Endian.little);
+  }
+
+  Future<int> cmdDfuPing(int id) async {
+    final r = await _dfuRequest(9, Uint8List.fromList([id]));
+    return r.isEmpty ? 0 : r[0];
+  }
+
+  Future<void> cmdDfuAbort() async {
+    await _dfuRequest(12);
+  }
+
+  /// 更新单个对象（对应逆向 dfuUpdateObject：select→分段 create/write→crc 校验→execute）
+  Future<void> dfuUpdateObject(
+      int type, Uint8List data, void Function(int offset, int size)? onProgress) async {
+    var selected = await cmdDfuSelectObject(type);
+    if (selected.offset == data.length) {
+      // 对象已完整上传
+      if (onProgress != null) onProgress(data.length, data.length);
+      return;
+    }
+    if (selected.offset > 0) {
+      // 已存在部分对象：校验已上传偏移的 CRC，不一致则中止重建
+      final expected = _crc32(data.sublist(0, selected.offset));
+      if (selected.crc != expected) {
+        await cmdDfuAbort();
+        selected = await cmdDfuSelectObject(type);
+      }
+    }
+    if (onProgress != null) onProgress(0, data.length);
+    final mtu = await cmdDfuGetMtu();
+    final chunkSize = mtu > 0 ? mtu : 20;
+    var offset = selected.offset > 0 ? selected.offset : 0;
+    var failures = 0;
+    while (offset < data.length) {
+      final size = (data.length - offset) < chunkSize
+          ? (data.length - offset)
+          : chunkSize;
+      final chunk = data.sublist(offset, offset + size);
+      await cmdDfuCreateObject(type, chunk.length);
+      await _ble.dfuWrite(chunk);
+      final (crcOff, crcVal) = await cmdDfuGetObjectCrc();
+      final expected = _crc32(data.sublist(0, offset + chunk.length));
+      if (crcOff == offset + chunk.length && crcVal == expected) {
+        await cmdDfuExecuteObject();
+        offset += chunk.length;
+        failures = 0;
+        if (onProgress != null) onProgress(offset, data.length);
+      } else {
+        failures++;
+        if (failures > 10) throw DeviceException(-1, 'crc32 check failed 10 times');
+        await cmdDfuSelectObject(type);
+      }
+    }
+  }
+
+  /// 刷写固件镜像（header 对象 + body 对象）
+  Future<void> dfuUpdateImage({
+    required Uint8List header,
+    required Uint8List body,
+    void Function(int offset, int size)? onProgress,
+  }) async {
+    await dfuUpdateObject(1, header, onProgress);
+    await dfuUpdateObject(2, body, onProgress);
+    // 等待重启（逆向等待最多 5000ms 后断开）
+    for (var t = 0; t < 50 && isConnected(); t++) {
+      await Future.delayed(const Duration(milliseconds: 10));
+    }
+  }
+
+  /// CRC32（IEEE，对应逆向 db()）
+  static final Uint8List _crcTable = _buildCrcTable();
+  static Uint8List _buildCrcTable() {
+    final table = Uint8List(256);
+    for (var i = 0; i < 256; i++) {
+      var c = i;
+      for (var k = 0; k < 8; k++) {
+        c = (c & 1) == 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+      }
+      table[i] = c & 0xFF;
+    }
+    return table;
+  }
+
+  static int _crc32(Uint8List data) {
+    var crc = 0xFFFFFFFF;
+    for (final b in data) {
+      crc = (crc >> 8) ^ _crcTable[(crc ^ b) & 0xFF];
+    }
+    return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+  }
+
+  // DFU 响应帧监听（qk：buf[0]==0x60 表示响应）
+  void _handleDfuFrame(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    if (bytes[0] != 0x60) {
+      debugPrint('DFU frame: not resp: ${bytes.map((b) => b.toRadixString(16)).join()}');
+      return;
+    }
+    if (bytes.length < 3) return;
+    final op = bytes[1];
+    final result = bytes.length > 2 ? bytes[2] : 0;
+    final completer = _dfuPending.remove(op);
+    if (completer == null) return;
+    if (result != 1) {
+      completer.completeError(DeviceException(result, 'DFU 操作失败 (op=$op)'));
+      return;
+    }
+    completer.complete(bytes.sublist(3));
+  }
+
   Future<int> cmdGetDeviceModel() async {
     final r = await _request(Cmd.getDeviceModel.value, null);
     return r[0];
@@ -294,16 +530,15 @@ class DeviceService {
 
   Future<DeviceSettings> cmdGetDeviceSettings() async {
     final r = await _request(Cmd.getDeviceSettings.value, null);
-    // 布局：version[6] animation btnPress[2] longPress[2] pairingMode? pairingKey[6]
-    final key = String.fromCharCodes(r.sublist(7));
+    // 布局（对应逆向 `!6B?6s`）：version[0] animation[1] press[2..3] longPress[4..5] pairing[6] key[7..12]
     return DeviceSettings(
-      animation: AnimationMode.from(r[6]),
-      pressBtnA: ButtonAction.from(r[7]),
-      pressBtnB: ButtonAction.from(r[8]),
-      longPressBtnA: ButtonAction.from(r[9]),
-      longPressBtnB: ButtonAction.from(r[10]),
-      blePairing: r[11] == 1,
-      blePairingKey: key,
+      animation: AnimationMode.from(r[1]),
+      pressBtnA: ButtonAction.from(r[2]),
+      pressBtnB: ButtonAction.from(r[3]),
+      longPressBtnA: ButtonAction.from(r[4]),
+      longPressBtnB: ButtonAction.from(r[5]),
+      blePairing: r[6] == 1,
+      blePairingKey: String.fromCharCodes(r.sublist(7, 13)),
     );
   }
 
@@ -547,6 +782,12 @@ class DeviceService {
   }
 
   /// HF14A 透传
+  ///
+  /// 请求体布局（对应逆向 `!xHH{len}s` + 标志位写第 0 字节 MSB）：
+  ///   [0]      标志位 bit7-2（activateRfField/waitResponse/appendCrc/autoSelect/keepRfField/checkResponseCrc）
+  ///   [1..2]   timeout  UInt16BE
+  ///   [3..4]   bitLen   UInt16BE
+  ///   [5..]    data
   Future<Uint8List> cmdHf14aRaw({
     Uint8List? data,
     bool activateRfField = false,
@@ -561,16 +802,263 @@ class DeviceService {
     final d = data ?? Uint8List(0);
     final l = d.isEmpty ? 1 : d.length;
     final bitLen = 8 * (l - 1) + ((dataBitLength + 7) % 8) + 1;
-    final u = Uint8List(2 + 2 + d.length + 1);
+    final u = Uint8List(1 + 2 + 2 + d.length);
     final bd = ByteData.sublistView(u);
-    bd.setUint16(0, timeout);
-    bd.setUint16(2, bitLen);
-    if (d.isNotEmpty) u.setRange(4, 4 + d.length, d);
-    // 第 4 字节起为标志位（bit0-5），后续填充
-    u[4 + d.length] = 0;
+    // 标志位：bit7=activateRfField bit6=waitResponse bit5=appendCrc bit4=autoSelect bit3=keepRfField bit2=checkResponseCrc
+    u[0] = (activateRfField ? 0x80 : 0) |
+        (waitResponse ? 0x40 : 0) |
+        (appendCrc ? 0x20 : 0) |
+        (autoSelect ? 0x10 : 0) |
+        (keepRfField ? 0x08 : 0) |
+        (checkResponseCrc ? 0x04 : 0);
+    bd.setUint16(1, timeout);
+    bd.setUint16(3, bitLen);
+    if (d.isNotEmpty) u.setRange(5, 5 + d.length, d);
     await assureDeviceMode(DeviceMode.reader);
     return _request(Cmd.hf14aRaw.value, u, timeout: UltraFrame.defaultTimeoutMs + timeout);
   }
+
+  /// MIFARE Halt 指令（对应逆向 mf1Halt：`xw.pack("!H", 20480)`）
+  Future<void> mf1Halt() async {
+    await cmdHf14aRaw(
+        appendCrc: true, data: Uint8List.fromList([0x50, 0x00]), waitResponse: false);
+  }
+
+  /// Gen1a 免密认证包裹：halt → 0x40(7bit) → 0x43 → 执行回调 → halt
+  Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
+    await mf1Halt();
+    try {
+      final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
+          .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 1: $e'));
+      if (r1.isEmpty || r1[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 1');
+      final r2 = await cmdHf14aRaw(data: Uint8List.fromList([0x43]), keepRfField: true)
+          .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 2: $e'));
+      if (r2.isEmpty || r2[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 2');
+      return await cb();
+    } finally {
+      if (isConnected()) {
+        try {
+          await mf1Halt();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// Gen1a 免密读块（对应逆向 mf1Gen1aReadBlocks）
+  Future<Uint8List> mf1Gen1aReadBlocks(int offset, [int length = 1]) async {
+    return _mf1Gen1aAuth(() async {
+      final out = Uint8List(16 * length);
+      for (var i = 0; i < length; i++) {
+        final r = await cmdHf14aRaw(
+            appendCrc: true,
+            checkResponseCrc: true,
+            data: Uint8List.fromList([0x30, offset + i]),
+            keepRfField: true);
+        out.setRange(16 * i, 16 * i + 16, r);
+      }
+      return out;
+    });
+  }
+
+  /// Gen1a 免密写块（对应逆向 mf1Gen1aWriteBlocks）
+  Future<void> mf1Gen1aWriteBlocks(int offset, Uint8List data) async {
+    if (data.length % 16 != 0) throw DeviceException(96, 'data must be multiples of 16');
+    await _mf1Gen1aAuth(() async {
+      for (var i = 0; i < data.length ~/ 16; i++) {
+        final cmd = await cmdHf14aRaw(
+            appendCrc: true,
+            data: Uint8List.fromList([0xA0, offset + i]),
+            keepRfField: true);
+        if (cmd.isEmpty || cmd[0] != 10) throw DeviceException(-1, 'Gen1a write failed 1');
+        final body = await cmdHf14aRaw(
+            appendCrc: true,
+            data: data.sublist(16 * i, 16 * i + 16),
+            keepRfField: true);
+        if (body.isEmpty || body[0] != 10) throw DeviceException(-1, 'Gen1a write failed 2');
+      }
+    });
+  }
+
+  /// 检查扇区密钥，返回命中的密钥（对应逆向 mf1CheckSectorKeys）
+  Future<Map<int, Uint8List>> mf1CheckSectorKeys(int sector, List<Uint8List> keys) async {
+    final mask = Uint8List(10);
+    for (var i = 0; i < 10; i++) {
+      mask[i] = 0xFF;
+    }
+    mask[sector >> 2] ^= (3 << (6 - (sector % 4) * 2));
+    final res = await cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
+    final out = <int, Uint8List>{};
+    // 扇区 sector 的 keyA（块 4*sector）与 keyB（块 4*sector+1）
+    final a = res.sectorKeys[sector * 2];
+    final b = res.sectorKeys[sector * 2 + 1];
+    if (a != null) out[KeyType.keyA.value] = a;
+    if (b != null) out[KeyType.keyB.value] = b;
+    return out;
+  }
+
+  /// 空卡体（对应逆向 jT()：16 扇区 × 4 块，含块0 UID、ACL 默认密钥）
+  static List<String> emptyCardBody() {
+    const block0 = 'deadbeef220804000177a2cc35afa51d';
+    const empty = '00000000000000000000000000000000';
+    const acl = 'ffffffffffffff078069ffffffffffff';
+    return List.generate(16, (s) {
+      return List.generate(4, (b) {
+        if (s == 0 && b == 0) return block0;
+        if (b == 3) return acl;
+        return empty;
+      }).join('\n');
+    });
+  }
+
+  /// 空卡体（保留当前 UID，对应逆向 getEmptyCardBodyWithoutUID）
+  Future<List<String>> getEmptyCardBodyWithoutUID() async {
+    final factory = (await cmdHf14aScan()).isNotEmpty
+        ? (await mf1Gen1aReadBlocks(0)).map((b) => b.toRadixString(16).padLeft(2, '0')).join()
+        : 'deadbeef220804000177a2cc35afa51d';
+    const empty = '00000000000000000000000000000000';
+    const acl = 'ffffffffffffff078069ffffffffffff';
+    return List.generate(16, (s) {
+      return List.generate(4, (b) {
+        if (s == 0 && b == 0) return factory;
+        if (b == 3) return acl;
+        return empty;
+      }).join('\n');
+    });
+  }
+
+  /// 格式化卡片（对应逆向 formatCard：空卡体逐块 Gen1a 写入）
+  Future<void> formatCard() async {
+    final body = await getEmptyCardBodyWithoutUID();
+    await _mf1Gen1aAuth(() async {
+      for (var s = 0; s < 16; s++) {
+        for (var b = 0; b < 4; b++) {
+          final data = _hexToBytes(body[s].split('\n')[b]);
+          final cmd = await cmdHf14aRaw(
+              appendCrc: true, data: Uint8List.fromList([0xA0, 4 * s + b]), keepRfField: true);
+          if (cmd.isEmpty || cmd[0] != 10) throw DeviceException(-1, 'Gen1a write failed 1');
+          final bodyRes = await cmdHf14aRaw(appendCrc: true, data: data, keepRfField: true);
+          if (bodyRes.isEmpty || bodyRes[0] != 10) throw DeviceException(-1, 'Gen1a write failed 2');
+        }
+      }
+    });
+  }
+
+  /// 重置 UID（对应逆向 wipeUID：空卡体逐块 Gen1a 写入）
+  Future<void> wipeUid() async {
+    final body = emptyCardBody();
+    await _mf1Gen1aAuth(() async {
+      for (var s = 0; s < 16; s++) {
+        for (var b = 0; b < 4; b++) {
+          final data = _hexToBytes(body[s].split('\n')[b]);
+          final cmd = await cmdHf14aRaw(
+              appendCrc: true, data: Uint8List.fromList([0xA0, 4 * s + b]), keepRfField: true);
+          if (cmd.isEmpty || cmd[0] != 10) throw DeviceException(-1, 'Gen1a write failed 1');
+          final bodyRes = await cmdHf14aRaw(appendCrc: true, data: data, keepRfField: true);
+          if (bodyRes.isEmpty || bodyRes[0] != 10) throw DeviceException(-1, 'Gen1a write failed 2');
+        }
+      }
+    });
+  }
+
+  /// 修改卡号（对应逆向 writeUID：Gen1a 免密写 block0，失败则普通卡密钥写）
+  Future<void> writeUid({
+    required String uid,
+    required String sak,
+    required String atqa,
+  }) async {
+    if (!RegExp(r'^([\dA-Fa-f]{8}\s*)+$').hasMatch(uid)) {
+      throw DeviceException(96, '卡号有误，IC卡号应为8位16进制数');
+    }
+    if (!RegExp(r'^([\dA-Fa-f]{2}\s*)+$').hasMatch(sak)) {
+      throw DeviceException(96, 'SAK有误，SAK应为2位16进制数');
+    }
+    if (!RegExp(r'^([\dA-Fa-f]{4}\s*)+$').hasMatch(atqa)) {
+      throw DeviceException(96, 'ATQA有误，ATQA应为4位16进制数');
+    }
+    final uidClean = uid.replaceAll(' ', '');
+    final atqaClean = atqa.replaceAll(' ', '');
+    final bcc = int.parse(uidClean.substring(0, 2), radix: 16) ^
+        int.parse(uidClean.substring(2, 4), radix: 16) ^
+        int.parse(uidClean.substring(4, 6), radix: 16) ^
+        int.parse(uidClean.substring(6, 8), radix: 16);
+    final block0Hex = '$uidClean${bcc.toRadixString(16).padLeft(2, '0')}08'
+        '${atqaClean.substring(2, 4)}${atqaClean.substring(0, 2)}0177a2cc35afa51d';
+    final block0 = _hexToBytes(block0Hex);
+
+    await cmdHf14aScan();
+    try {
+      await _mf1Gen1aAuth(() async {
+        final cmd = await cmdHf14aRaw(
+            appendCrc: true, data: Uint8List.fromList([0xA0, 0]), keepRfField: true);
+        if (cmd.isEmpty || cmd[0] != 10) throw DeviceException(-1, 'Gen1a write failed 1');
+        final body = await cmdHf14aRaw(appendCrc: true, data: block0, keepRfField: true);
+        if (body.isEmpty || body[0] != 10) throw DeviceException(-1, 'Gen1a write failed 2');
+      });
+    } catch (e) {
+      // 普通卡：使用密钥写 block0
+      final keys = _keyList(_defaultKeysText.join('\n'));
+      final found = await mf1CheckSectorKeys(0, keys);
+      if (found.isEmpty) {
+        throw DeviceException(6, '卡片有加密，请先使用 解卡片 功能获取密钥！');
+      }
+      var wrote = false;
+      final a = found[KeyType.keyA.value];
+      if (a != null) {
+        try {
+          await cmdMf1WriteBlock(block: 0, keyType: KeyType.keyA, key: a, data: block0);
+          wrote = true;
+        } catch (_) {}
+      }
+      if (!wrote) {
+        final b = found[KeyType.keyB.value];
+        if (b == null) throw DeviceException(6, '没有可用 keyB');
+        await cmdMf1WriteBlock(block: 0, keyType: KeyType.keyB, key: b, data: block0);
+      }
+    }
+  }
+
+  /// 锁 UFUID 卡（对应逆向 lockUFUID：固定 5 段指令流）
+  Future<void> lockUfuid() async {
+    await cmdHf14aScan();
+    try {
+      await mf1Halt();
+    } catch (e) {
+      throw DeviceException(-1, 'failed 0，不支持锁卡指令');
+    }
+    final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
+        .catchError((e) => throw DeviceException(-1, 'failed 1，不支持锁卡指令'));
+    if (r1.isEmpty || r1[0] != 10) throw DeviceException(-1, 'failed 1，不支持锁卡指令');
+    final r2 = await cmdHf14aRaw(data: Uint8List.fromList([0x43]), keepRfField: true)
+        .catchError((e) => throw DeviceException(-1, 'failed 2，不支持锁卡指令'));
+    if (r2.isEmpty || r2[0] != 10) throw DeviceException(-1, 'failed 2，不支持锁卡指令');
+    final r3 = await cmdHf14aRaw(data: _hexToBytes('e100e1ee'), keepRfField: true)
+        .catchError((e) => throw DeviceException(-1, 'failed 3，不支持锁卡指令'));
+    if (r3.isEmpty || r3[0] != 10) throw DeviceException(-1, 'failed 3，不支持锁卡指令');
+    final r4 = await cmdHf14aRaw(data: _hexToBytes('850000000000000000000000000000081847'), keepRfField: true)
+        .catchError((e) => throw DeviceException(-1, 'failed 4，不支持锁卡指令'));
+    if (r4.isEmpty || r4[0] != 10) throw DeviceException(-1, 'failed 4，不支持锁卡指令');
+  }
+
+  /// 默认密钥表（用于普通卡写卡）
+  static final List<String> _defaultKeysText = [
+    'FFFFFFFFFFFF',
+    '000000000000',
+    'A0A1A2A3A4A5',
+    'B0B1B2B3B4B5',
+    'AABBCCDDEEFF',
+    '4D3A99C351DD',
+    '1A982C7E459A',
+    'D3F7D3F7D3F7',
+    '000000000000',
+    'FFFFFFFFFFFF',
+  ];
+
+  List<Uint8List> _keyList(String text) => text
+      .split('\n')
+      .map((e) => e.trim())
+      .where((e) => e.length == 12)
+      .map(_hexToBytes)
+      .toList();
 
   /// 检查多扇区密钥
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({

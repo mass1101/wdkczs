@@ -85,4 +85,12 @@ class UltraFrame {
     tail.setRange(0, frame.length - 1, frame, 0);
     return frame[frame.length - 1] == lrc(tail);
   }
+
+  /// 仅校验头 LRC（用于流式重组前判断帧起点）
+  static bool checkHeadLrc(Uint8List buf) {
+    if (buf.length < 9) return false;
+    final head = Uint8List(8);
+    head.setRange(0, 8, buf, 0);
+    return buf[8] == lrc(head);
+  }
 }

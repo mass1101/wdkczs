@@ -41,6 +41,7 @@ dependencies:
   intl: ^0.20.3
   uuid: ^4.6.0
   permission_handler: ^13.0.2
+  archive: ^4.2.0
 
 dev_dependencies:
   flutter_test:

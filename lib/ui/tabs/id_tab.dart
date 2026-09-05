@@ -31,7 +31,7 @@ class _IdTabState extends State<IdTab> {
   @override
   void initState() {
     super.initState();
-    _decCtrl.text = _app.idCard.idCard;
+    _decCtrl.text = _app.idCard.idCardDec;
     _hexCtrl.text = _app.idCard.idCardHex;
     _keysCtrl.text = _app.idCard.idCardKeys;
     _load();
@@ -64,10 +64,20 @@ class _IdTabState extends State<IdTab> {
   }
 
   void _syncHex(String dec) {
-    final v = int.tryParse(dec);
+    final v = BigInt.tryParse(dec.trim());
     _hexCtrl.text = v == null
         ? ''
-        : v.toRadixString(16).toUpperCase().padLeft(8, '0');
+        : v.toRadixString(16).toUpperCase().padLeft(10, '0');
+  }
+
+  void _syncDec(String hex) {
+    final clean = hex.trim();
+    if (clean.isEmpty || !RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) {
+      _decCtrl.text = '';
+      return;
+    }
+    final v = BigInt.parse(clean, radix: 16);
+    _decCtrl.text = v.toString().padLeft(13, '0');
   }
 
   // ========== 读卡 ==========
@@ -75,51 +85,87 @@ class _IdTabState extends State<IdTab> {
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final res = await _dev.cmdEm410xScan();
-      if (res.id.length < 5) throw DeviceException(1, '未发现 ID 卡');
-      final id = res.id.sublist(1);
-      final bytes = id.sublist(0, id.length > 4 ? 4 : id.length);
-      final dec = _bytesToDec(bytes);
+      if (res.id.length != 5) throw DeviceException(1, '未发现 ID 卡');
+      final hex = res.id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
       setState(() {
-        _decCtrl.text = dec;
-        _syncHex(dec);
-        _app.idCard.setCard(dec);
+        _hexCtrl.text = hex.toUpperCase();
+        _syncDec(hex);
+        _app.idCard.setCard(hex);
       });
-      _toast('读到 ID：$dec');
+      _toast('读到 ID：${_app.idCard.idCardDec}');
     } catch (e) {
       _toast('读卡失败: $e');
     }
   }
 
-  String _bytesToDec(Uint8List b) {
-    final padded = Uint8List(4);
-    padded.setRange(4 - b.length, 4, b);
-    final v = ByteData.sublistView(padded).getUint32(0);
-    return v.toString().padLeft(10, '0');
-  }
-
   // ========== 写卡槽 ==========
   Future<void> _writeSlot() async {
-    final dec = int.tryParse(_decCtrl.text.trim());
-    if (dec == null || dec < 0) {
-      _toast('请输入有效的十进制卡号');
+    final hex = _hexCtrl.text.trim();
+    if (hex.isEmpty || !RegExp(r'^[0-9a-fA-F]{10}$').hasMatch(hex)) {
+      _toast('请输入有效的 10 位十六进制卡号');
       return;
     }
     try {
-      // 按 EM4100 5 字节格式写入（1 校验字节 + 4 数据字节）
+      // EM4100 5 字节卡号直接由 10 位 hex 转换
       final idBytes = Uint8List(5);
-      idBytes[0] = 0;
-      idBytes[1] = (dec >> 24) & 0xFF;
-      idBytes[2] = (dec >> 16) & 0xFF;
-      idBytes[3] = (dec >> 8) & 0xFF;
-      idBytes[4] = dec & 0xFF;
+      for (var i = 0; i < 5; i++) {
+        idBytes[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);
+      }
       await _dev.cmdEm410xSetEmuId(idBytes);
       await _app.storage.saveIdCards([
-        ..._cards.where((c) => c.id != _decCtrl.text),
-        IdCardItem(id: _decCtrl.text, name: _cards.isEmpty ? '未命名' : _cards.first.name),
+        ..._cards.where((c) => c.id != hex),
+        IdCardItem(id: hex, name: _cards.isEmpty ? '未命名' : _cards.first.name),
       ]);
       _toast('已写入 ID 卡槽');
     } catch (e) {
       _toast('写卡槽失败: $e');
+    }
+  }
+
+  // ========== 写卡（写 T55xx 实体卡） ==========
+  Future<void> _writeCard() async {
+    final hex = _hexCtrl.text.trim();
+    if (hex.isEmpty || !RegExp(r'^[0-9a-fA-F]{10}$').hasMatch(hex)) {
+      _toast('请输入有效的 10 位十六进制卡号');
+      return;
+    }
+    final keys = _keysCtrl.text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => RegExp(r'^[0-9a-fA-F]{8}$').hasMatch(e))
+        .toList();
+    if (keys.isEmpty) {
+      _toast('请先在密钥中填入有效的 T55xx 密钥（8 位十六进制）');
+      return;
+    }
+    try {
+      final idBytes = Uint8List(5);
+      for (var i = 0; i < 5; i++) {
+        idBytes[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);
+      }
+      final newKey = Uint8List(4);
+      for (var i = 0; i < 4; i++) {
+        newKey[i] = int.parse(keys[0].substring(i * 2, i * 2 + 2), radix: 16);
+      }
+      // 逐个尝试旧密钥写入并回读验证
+      for (final k in keys) {
+        final oldKey = Uint8List(4);
+        for (var i = 0; i < 4; i++) {
+          oldKey[i] = int.parse(k.substring(i * 2, i * 2 + 2), radix: 16);
+        }
+        _toast('正在尝试密钥 $k ...');
+        await _dev.cmdEm410xWriteToT55xx(idBytes, newKey, [oldKey]);
+        final r = await _dev.cmdEm410xScan();
+        if (r.id.length == 5 &&
+            r.id.map((b) => b.toRadixString(16).padLeft(2, '0')).join() ==
+                hex) {
+          _toast('写入完成');
+          return;
+        }
+      }
+      _toast('可能卡片不支持修改卡号，或请尝试用机器背面写卡');
+    } catch (e) {
+      _toast('写卡失败: $e');
     }
   }
 
@@ -146,8 +192,8 @@ class _IdTabState extends State<IdTab> {
                     subtitle: Text(c.name),
                     onTap: () {
                       setState(() {
-                        _decCtrl.text = c.id;
-                        _syncHex(c.id);
+                        _hexCtrl.text = c.id;
+                        _syncDec(c.id);
                         _app.idCard.setCard(c.id);
                       });
                       Navigator.pop(ctx);
@@ -170,15 +216,15 @@ class _IdTabState extends State<IdTab> {
   }
 
   Future<void> _addCard() async {
-    final dec = int.tryParse(_decCtrl.text.trim());
-    if (dec == null) {
-      _toast('请输入有效卡号');
+    final hex = _hexCtrl.text.trim();
+    if (hex.isEmpty || !RegExp(r'^[0-9a-fA-F]{10}$').hasMatch(hex)) {
+      _toast('请输入有效的 10 位十六进制卡号');
       return;
     }
     setState(() {
       _cards = [
         ..._cards,
-        IdCardItem(id: _decCtrl.text, name: '卡${_cards.length + 1}'),
+        IdCardItem(id: hex, name: '卡${_cards.length + 1}'),
       ];
     });
     await _app.storage.saveIdCards(_cards);
@@ -237,9 +283,10 @@ class _IdTabState extends State<IdTab> {
                     title: 'ID 卡号',
                     child: Column(
                       children: [
-                        _numRow('十进制', _decCtrl, '1122334455',
+                        _numRow('十进制', _decCtrl, '000536875977487',
                             onChanged: _syncHex),
-                        _numRow('十六进制', _hexCtrl, '00000000'),
+                        _numRow('十六进制', _hexCtrl, '0000000000',
+                            onChanged: _syncDec),
                         const SizedBox(height: 6),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
@@ -342,6 +389,13 @@ class _IdTabState extends State<IdTab> {
                       icon: Icons.radio_button_checked,
                       color: primary,
                       onTap: _readCard,
+                      enabled: _app.connected),
+                  const SizedBox(height: 8),
+                  ActionButton(
+                      label: '写卡',
+                      icon: Icons.save_alt,
+                      color: primary,
+                      onTap: _writeCard,
                       enabled: _app.connected),
                   const SizedBox(height: 8),
                   ActionButton(
