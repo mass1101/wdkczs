@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -1269,18 +1271,15 @@ class _IcTabState extends State<IcTab> {
   }
 
   Future<void> _exportKeys() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => TextInputDialog(
-        title: '导出密钥文件',
-        hint: '输入文件名',
-        initial: 'KeyFor_${_app.card.uid.toUpperCase()}.TXT',
-      ),
-    );
-    if (name == null || name.trim().isEmpty || !mounted) return;
-    await _app.storage.saveKey(name.trim(), _keyCtrl.text);
-    await Clipboard.setData(ClipboardData(text: _keyCtrl.text));
-    _toast('已保存并复制到剪贴板');
+    try {
+      final uri = await FilePicker.platform.saveFile(
+        fileName: 'KeyFor_${_app.card.uid.toUpperCase()}.TXT',
+        bytes: Uint8List.fromList(utf8.encode(_keyCtrl.text)),
+      );
+      if (mounted && uri != null) _toast('已导出：$uri');
+    } catch (e) {
+      if (mounted) _toast('导出失败: $e');
+    }
   }
 
   Future<void> _pickCardType() async {

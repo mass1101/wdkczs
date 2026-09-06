@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/storage_service.dart';
@@ -45,26 +49,44 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
     Navigator.pop(context, (name, content));
   }
 
-  Future<void> _import() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) =>
-          const TextInputDialog(title: '新建/导入密钥文件', hint: '输入文件名'),
-    );
-    if (name == null || name.trim().isEmpty) return;
+  void _toast(String msg) {
     if (!mounted) return;
-    final content = await showDialog<String>(
-      context: context,
-      builder: (ctx) => const TextInputDialog(
-        title: '密钥内容',
-        hint: '粘贴或输入，每行一个 12 位十六进制密钥',
-        multiline: true,
-      ),
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+          content: Text(msg), duration: const Duration(seconds: 2)));
+  }
+
+  /// 从本地 txt 文件导入密钥内容并保存到本地密钥库
+  Future<void> _import() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['txt'],
+      withData: true,
     );
-    if (content != null && mounted) {
-      await widget.storage.saveKey(name.trim(), content);
-      await _reload();
+    if (result == null || result.files.isEmpty) return;
+    final f = result.files.first;
+    final bytes = f.bytes;
+    if (bytes == null) return;
+    final content = utf8.decode(bytes, allowMalformed: true);
+    var name = f.name;
+    if (name.toLowerCase().endsWith('.txt')) {
+      name = name.substring(0, name.length - 4);
     }
+    if (name.trim().isEmpty) name = '导入密钥';
+    await widget.storage.saveKey(name.trim(), content);
+    if (!mounted) return;
+    await _reload();
+    _toast('已导入「${name.trim()}」');
+  }
+
+  /// 将密钥内容导出为本地 txt 文件
+  Future<void> _exportFile(String name, String content) async {
+    final uri = await FilePicker.platform.saveFile(
+      fileName: '$name.txt',
+      bytes: Uint8List.fromList(utf8.encode(content)),
+    );
+    if (mounted && uri != null) _toast('已导出：$uri');
   }
 
   Future<void> _rename(String name) async {
@@ -148,6 +170,12 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
                             children: [
                               IconButton(
                                 visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.download, size: 18),
+                                tooltip: '导出',
+                                onPressed: () => _exportFile(e.key, e.value),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.drive_file_rename_outline,
                                     size: 18),
                                 onPressed: () => _rename(e.key),
@@ -171,12 +199,9 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
               child: Row(
                 children: [
                   TextButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      Future.microtask(_import);
-                    },
-                    icon: Icon(Icons.add, size: 16, color: primary),
-                    label: const Text('新建/导入', style: TextStyle(fontSize: 12)),
+                    onPressed: _import,
+                    icon: Icon(Icons.folder_open, size: 16, color: primary),
+                    label: const Text('导入文件', style: TextStyle(fontSize: 12)),
                   ),
                   const Spacer(),
                   TextButton(
