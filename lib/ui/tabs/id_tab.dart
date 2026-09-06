@@ -130,12 +130,23 @@ class _IdTabState extends State<IdTab> {
   }
 
   // ========== 读卡槽 ==========
+  /// 把卡槽设为 LF/EM4100 类型并激活（对应小程序 slotChangeTagTypeAndActive）
+  /// 必须先将卡槽 tagType 设为 EM4100，否则 em410x 命令返回 invalid param
+  Future<void> _prepareLfSlot(int slot) async {
+    const em4100 = 4;
+    await _dev.cmdSlotChangeTagType(slot, em4100);
+    await _dev.cmdSlotResetTagType(slot, em4100);
+    await _dev.cmdSlotSetEnable(slot, 1, true);
+    await _dev.cmdSlotSaveSettings();
+    await _dev.cmdSlotSetActive(slot);
+  }
+
   Future<void> _readSlot() async {
     final slot = await _pickSlot();
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
+      await _prepareLfSlot(slot);
       final id = await _dev.cmdEm410xGetEmuId();
       if (id.length != 5) throw DeviceException(1, '该卡槽无 ID 数据');
       final hex = id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
@@ -166,8 +177,10 @@ class _IdTabState extends State<IdTab> {
       for (var i = 0; i < 5; i++) {
         idBytes[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);
       }
-      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
+      await _prepareLfSlot(slot);
       await _dev.cmdEm410xSetEmuId(idBytes);
+      // 对齐小程序：写入 ID 数据后保存卡槽设置
+      await _dev.cmdSlotSaveSettings();
       _app.currentSlot = slot;
       await _app.storage.saveIdCards([
         ..._cards.where((c) => c.id != hex),

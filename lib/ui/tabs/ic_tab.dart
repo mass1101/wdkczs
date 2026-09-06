@@ -30,7 +30,6 @@ class _IcTabState extends State<IcTab> {
   final _sakCtrl = TextEditingController();
   final _keyCtrl = TextEditingController(text: kDefaultKeys.join('\n'));
 
-  final PageController _slotPageCtrl = PageController();
   int _slotPage = 0;
 
   String _cardType = 'Mifare Classic 1K';
@@ -61,7 +60,6 @@ class _IcTabState extends State<IcTab> {
     _atqaCtrl.dispose();
     _sakCtrl.dispose();
     _keyCtrl.dispose();
-    _slotPageCtrl.dispose();
     super.dispose();
   }
 
@@ -145,8 +143,12 @@ class _IcTabState extends State<IcTab> {
       if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
       final uid = tags.first.uidHex;
       final uidBytes = _hex(uid);
+      // 对齐小程序：atqa 需字节反转
+      final atqa = _hex(_atqaCtrl.text).reversed.toList();
       await _dev.cmdHf14aSetAntiCollData(
-          uid: uidBytes, atqa: _hex(_atqaCtrl.text), sak: _hex(_sakCtrl.text));
+          uid: uidBytes,
+          atqa: Uint8List.fromList(atqa),
+          sak: _hex(_sakCtrl.text));
       // 逐扇区写入
       var written = 0;
       for (var sector = 0; sector < 16; sector++) {
@@ -183,27 +185,43 @@ class _IcTabState extends State<IcTab> {
   }
 
   // ========== 写卡槽（模拟） ==========
+  /// 把卡槽设为 HF/MIFARE_1024 类型并激活（对应小程序 slotChangeTagTypeAndActive 的 HF 分支）
+  Future<void> _prepareHfSlot(int slot) async {
+    const mifare1024 = 1001;
+    await _dev.cmdSlotChangeTagType(slot, mifare1024);
+    await _dev.cmdSlotResetTagType(slot, mifare1024);
+    await _dev.cmdSlotSetEnable(slot, 2, true); // freq=2 表示 HF
+    await _dev.cmdSlotSaveSettings();
+    await _dev.cmdSlotSetActive(slot);
+  }
+
   Future<void> _writeSlot() async {
     final slot = await _pickSlot();
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
-      // 写入反碰撞数据
+      await _prepareHfSlot(slot);
+      // 对齐小程序 btnEmuWrite 的 mf1 仿真设置
+      await _dev.cmdMf1SetAntiCollMode(false);
+      await _dev.cmdMf1SetDetectionEnable(true);
+      await _dev.cmdMf1SetGen1aMode(false);
+      await _dev.cmdMf1SetGen2Mode(false);
+      await _dev.cmdMf1SetWriteMode(0);
+      // 写入反碰撞数据（小程序对 atqa 做字节反转）
+      final atqa = _hex(_atqaCtrl.text).reversed.toList();
       await _dev.cmdHf14aSetAntiCollData(
-          uid: _hex(_uidCtrl.text), atqa: _hex(_atqaCtrl.text), sak: _hex(_sakCtrl.text));
-      // 写入扇区数据
-      final all = StringBuffer();
+          uid: _hex(_uidCtrl.text),
+          atqa: Uint8List.fromList(atqa),
+          sak: _hex(_sakCtrl.text));
+      // 逐扇区写入，对齐小程序 cmdMf1EmuWriteBlock(sector*4, body[sector])
       for (var sector = 0; sector < 16; sector++) {
+        final body = StringBuffer();
         for (var b = 0; b < 4; b++) {
-          all.write(_app.card.sectors[sector].blocks[b].data);
+          body.write(_app.card.sectors[sector].blocks[b].data);
         }
+        await _dev.cmdMf1EmuWriteBlock(sector * 4, _hex(body.toString()));
       }
-      final data = _hex(all.toString());
-      for (var off = 0; off < data.length; off += 240) {
-        final end = (off + 240 < data.length) ? off + 240 : data.length;
-        await _dev.cmdMf1EmuWriteBlock(off, data.sublist(off, end));
-      }
+      await _dev.cmdSlotSaveSettings();
       await _app.storage.setCurrentUid(_uidCtrl.text);
       _app.currentSlot = slot;
       _toast('已写入卡槽 ${slot + 1}');
@@ -910,18 +928,33 @@ class _IcTabState extends State<IcTab> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 内容区：PageView 横滑 8 槽页（对应小程序 swiper 80vh）
-            Expanded(
-              child: PageView.builder(
-                controller: _slotPageCtrl,
-                itemCount: 8,
-                onPageChanged: (i) {
-                  setState(() => _slotPage = i);
-                },
-                itemBuilder: (context, slot) {
-                  return _buildSlotPage(slot, primary);
-                },
+            // 卡槽切换指示条：点击弹窗选择卡槽
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton.icon(
+                      onPressed: _pickSlot,
+                      icon: const Icon(Icons.swap_horiz, size: 18),
+                      label: Text('当前卡槽 ${_slotPage + 1}',
+                          style: const TextStyle(fontSize: 13)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: primary,
+                        backgroundColor: primary.withValues(alpha: 0.08),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
+            ),
+            // 内容区：单页展示当前卡槽
+            Expanded(
+              child: _buildSlotPage(_slotPage, primary),
             ),
           ],
         );
@@ -1139,7 +1172,7 @@ class _IcTabState extends State<IcTab> {
   }
 
   // ========== 卡槽选择（弹框） ==========
-  /// 弹出卡槽选择对话框，返回所选卡槽索引（取消返回 null），选择后同步 PageView
+  /// 弹出卡槽选择对话框，返回所选卡槽索引（取消返回 null），选择后切到该卡槽
   Future<int?> _pickSlot() async {
     final slot = await showDialog<int>(
       context: context,
@@ -1164,9 +1197,6 @@ class _IcTabState extends State<IcTab> {
     );
     if (slot != null) {
       setState(() => _slotPage = slot);
-      if (_slotPageCtrl.hasClients) {
-        _slotPageCtrl.jumpToPage(slot);
-      }
     }
     return slot;
   }
@@ -1177,22 +1207,38 @@ class _IcTabState extends State<IcTab> {
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
       if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
+      // 对齐小程序 btnEmuRead：读反碰撞数据，空则说明卡槽无 IC 卡信息
       final antiColl = await _dev.cmdHf14aGetAntiCollData();
+      if (antiColl == null) {
+        _toast('卡槽 ${slot + 1} 无 IC 卡信息');
+        return;
+      }
+      final sectors = List.generate(16, (_) => SectorData());
+      for (var sector = 0; sector < 16; sector++) {
+        try {
+          final block = await _dev.cmdMf1EmuReadBlock(sector * 4, 4);
+          if (block.length >= 64) {
+            final blocks = List<BlockData>.generate(4, (i) => BlockData(
+                data: _hexStr(
+                    block.sublist(i * 16, (i + 1) * 16))));
+            sectors[sector] = SectorData(blocks: blocks);
+          }
+        } catch (_) {}
+      }
       setState(() {
-        if (antiColl != null) {
-          _uidCtrl.text = antiColl.uidHex;
-          _atqaCtrl.text = antiColl.atqaHex;
-          _sakCtrl.text = antiColl.sakHex;
-          _app.card.uid = antiColl.uidHex;
-          _app.card.atqa = antiColl.atqaHex;
-          _app.card.sak = antiColl.sakHex;
-          _app.slotCardIds[slot] = (
-            uid: antiColl.uidHex,
-            sak: antiColl.sakHex,
-            atqa: antiColl.atqaHex,
-          );
-          _app.currentSlot = slot;
-        }
+        _uidCtrl.text = antiColl.uidHex;
+        _atqaCtrl.text = antiColl.atqaHex;
+        _sakCtrl.text = antiColl.sakHex;
+        _app.card.uid = antiColl.uidHex;
+        _app.card.atqa = antiColl.atqaHex;
+        _app.card.sak = antiColl.sakHex;
+        _app.card.sectors = sectors;
+        _app.slotCardIds[slot] = (
+          uid: antiColl.uidHex,
+          sak: antiColl.sakHex,
+          atqa: antiColl.atqaHex,
+        );
+        _app.currentSlot = slot;
       });
       _toast('已读取卡槽 ${slot + 1} 数据');
     } catch (e) {
