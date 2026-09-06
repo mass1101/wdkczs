@@ -286,7 +286,6 @@ class _SettingsTabState extends State<SettingsTab> {
                         _infoRow('Git 版本', info.gitVersion.isEmpty ? '--' : info.gitVersion),
                         _infoRow('芯片编号', info.chipId.isEmpty ? '--' : info.chipId),
                         _infoRow('蓝牙地址', info.bleAddress.isEmpty ? '--' : info.bleAddress),
-                        _infoRow('设备型号', info.model.isEmpty ? '--' : info.model),
                         _infoRow('电量',
                             info.batteryLevel < 0 ? '--' : '${info.batteryLevel}%'),
                       ],
@@ -297,10 +296,9 @@ class _SettingsTabState extends State<SettingsTab> {
                     title: '全局设置',
                     child: Column(
                       children: [
-                        _switchRow('蓝牙配对',
-                            _app.settings.blePairing, (v) {
-                          _app.setBlePairing(v);
-                        }),
+                        _dropdownRow<bool>('蓝牙配对', _app.settings.blePairing,
+                            const [false, true], (v) => v ? '需要密码' : '无需密码',
+                            _app.setBlePairing),
                         _infoRow('蓝牙密码', _app.settings.blePairingKey,
                             onTap: _editPairingKey),
                         _animationRow(),
@@ -402,28 +400,35 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  Widget _animationRow() {
+  /// 下拉选择行：label + 下拉菜单（value 默认显示读取到的当前选项）
+  Widget _dropdownRow<T>(String label, T value, List<T> options,
+      String Function(T) itemLabel, ValueChanged<T> onChanged) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          const SizedBox(
+          SizedBox(
               width: 72,
-              child: Text('动画模式',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+              child: Text(label,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
           Expanded(
-            child: Wrap(
-              spacing: 6,
-              children: AnimationMode.values.map((m) {
-                final selected = _app.settings.animation == m;
-                return ChoiceChip(
-                  label: Text(m.label,
-                      style: const TextStyle(fontSize: 12)),
-                  selected: selected,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (_) => _app.setAnimationMode(m),
-                );
-              }).toList(),
+            child: DropdownButton<T>(
+              value: value,
+              isExpanded: true,
+              isDense: true,
+              underline: const SizedBox.shrink(),
+              style: const TextStyle(
+                  fontSize: 13, color: Color(0xFF333333)),
+              icon: const Icon(Icons.arrow_drop_down,
+                  color: Color(0xFFBBBBBB)),
+              items: options.map((o) => DropdownMenuItem(
+                    value: o,
+                    child: Text(itemLabel(o),
+                        style: const TextStyle(fontSize: 13)),
+                  )).toList(),
+              onChanged: (v) {
+                if (v != null) onChanged(v);
+              },
             ),
           ),
         ],
@@ -431,42 +436,25 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
+  /// 动画模式下拉
+  Widget _animationRow() {
+    return _dropdownRow<AnimationMode>(
+      '动画模式',
+      _app.settings.animation,
+      AnimationMode.values,
+      (m) => m.label,
+      _app.setAnimationMode,
+    );
+  }
+
+  /// 按钮动作下拉（短按/长按按钮A/B）
   Widget _actionRow(String label, ButtonAction value, ValueChanged<ButtonAction> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(
-              width: 72,
-              child: Text('',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: const TextStyle(fontSize: 13, color: Color(0xFF666666))),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: ButtonAction.values.map((a) {
-                    final selected = value == a;
-                    return ChoiceChip(
-                      label: Text(a.label,
-                          style: const TextStyle(fontSize: 12)),
-                      selected: selected,
-                      visualDensity: VisualDensity.compact,
-                      onSelected: (_) => onChanged(a),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return _dropdownRow<ButtonAction>(
+      label,
+      value,
+      ButtonAction.values,
+      (a) => a.label,
+      onChanged,
     );
   }
 
