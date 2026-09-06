@@ -105,6 +105,7 @@ class _IcTabState extends State<IcTab> {
         for (final keyStr in _keys) {
           final key = _hex(keyStr);
           for (var sector = 0; sector < 16; sector++) {
+            if (!_app.card.toggle[sector]) continue;
             final blockNum = sector * 4;
             if (blocks[blockNum].data != '00000000000000000000000000000000') {
               continue;
@@ -121,6 +122,7 @@ class _IcTabState extends State<IcTab> {
       }
       // 尝试读取扇区内其余块
       for (var sector = 0; sector < 16; sector++) {
+        if (!_app.card.toggle[sector]) continue;
         final first = blocks[sector * 4].data;
         if (first == '00000000000000000000000000000000') continue;
         final blocksArr = List<BlockData>.generate(4, (i) => blocks[sector * 4 + i]);
@@ -155,6 +157,7 @@ class _IcTabState extends State<IcTab> {
       // 逐扇区写入
       var written = 0;
       for (var sector = 0; sector < 16; sector++) {
+        if (!_app.card.toggle[sector]) continue;
         final blocks = _app.card.sectors[sector].blocks;
         if (blocks[0].data == '00000000000000000000000000000000') continue;
         for (final keyStr in _keys) {
@@ -218,6 +221,7 @@ class _IcTabState extends State<IcTab> {
           sak: _hex(_sakCtrl.text));
       // 逐扇区写入，对齐小程序 cmdMf1EmuWriteBlock(sector*4, body[sector])
       for (var sector = 0; sector < 16; sector++) {
+        if (!_app.card.toggle[sector]) continue;
         final body = StringBuffer();
         for (var b = 0; b < 4; b++) {
           body.write(_app.card.sectors[sector].blocks[b].data);
@@ -1075,6 +1079,7 @@ class _IcTabState extends State<IcTab> {
                 child: _SectorTable(
                   card: _app.card,
                   onDataChanged: _app.refreshUi,
+                  onShare: () => _shareCard(),
                 ),
               ),
             ],
@@ -1150,6 +1155,7 @@ class _IcTabState extends State<IcTab> {
       }
       final sectors = List.generate(16, (_) => SectorData());
       for (var sector = 0; sector < 16; sector++) {
+        if (!_app.card.toggle[sector]) continue;
         try {
           final block = await _dev.cmdMf1EmuReadBlock(sector * 4, 4);
           if (block.length >= 64) {
@@ -1307,105 +1313,144 @@ class _IcTabState extends State<IcTab> {
 class _SectorTable extends StatefulWidget {
   final CardState card;
   final VoidCallback onDataChanged;
-  const _SectorTable({required this.card, required this.onDataChanged});
+  final VoidCallback? onShare;
+  const _SectorTable(
+      {required this.card, required this.onDataChanged, this.onShare});
 
   @override
   State<_SectorTable> createState() => _SectorTableState();
 }
 
 class _SectorTableState extends State<_SectorTable> {
-  late final List<TextEditingController> _ctrls;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrls = List.generate(
-        16, (i) => TextEditingController(text: _sectorText(i)));
+  String _blockHex(int s, int b) {
+    final d = widget.card.sectors[s].blocks[b].data;
+    return d.length >= 32 ? d : '00000000000000000000000000000000';
   }
 
-  @override
-  void didUpdateWidget(covariant _SectorTable oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    for (var s = 0; s < 16; s++) {
-      _ctrls[s].text = _sectorText(s);
-    }
+  String _sectorLine(int s) =>
+      List.generate(4, (b) => _blockHex(s, b)).join(' ');
+
+  void _toggleSector(int s) {
+    setState(() => widget.card.toggle[s] = !widget.card.toggle[s]);
+    widget.onDataChanged();
   }
 
-  @override
-  void dispose() {
-    for (final c in _ctrls) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  String _sectorText(int s) {
-    final sb = StringBuffer();
-    for (var b = 0; b < 4; b++) {
-      if (b > 0) sb.write('\n');
-      final hex = widget.card.sectors[s].blocks[b].data;
-      sb.write(hex.length >= 32
-          ? _format(hex)
-          : '00000000000000000000000000000000');
-    }
-    return sb.toString();
-  }
-
-  void _apply(int s, String text) {
-    final lines = text.split('\n').map((e) => e.trim()).toList();
-    for (var b = 0; b < 4 && b < lines.length; b++) {
-      final clean = lines[b].replaceAll(RegExp(r'[\s-]'), '');
-      if (RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(clean)) {
-        if (widget.card.sectors[s].blocks[b].data != clean.toLowerCase()) {
-          widget.card.sectors[s].blocks[b].data = clean.toLowerCase();
+  Future<void> _editSector(int s) async {
+    final ctrls =
+        List.generate(4, (b) => TextEditingController(text: _blockHex(s, b)));
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('扇区 $s', style: const TextStyle(fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var b = 0; b < 4; b++)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: TextField(
+                  controller: ctrls[b],
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: b == 3 ? const Color(0xFF1E88E5) : const Color(0xFF333333)),
+                  maxLines: 1,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    border: const OutlineInputBorder(),
+                    hintText: '块 $b 数据(16字节hex)',
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('保存')),
+        ],
+      ),
+    );
+    var changed = false;
+    if (saved == true) {
+      for (var b = 0; b < 4; b++) {
+        final clean = ctrls[b].text.replaceAll(RegExp(r'[\s-]'), '').toLowerCase();
+        if (RegExp(r'^[0-9a-f]{32}$').hasMatch(clean)) {
+          if (widget.card.sectors[s].blocks[b].data != clean) {
+            widget.card.sectors[s].blocks[b].data = clean;
+            changed = true;
+          }
         }
       }
     }
-    widget.onDataChanged();
+    for (final c in ctrls) {
+      c.dispose();
+    }
+    if (changed) widget.onDataChanged();
   }
 
   @override
   Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
-          child: Text('每扇区 4 块，每行一块 16 字节数据',
-              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text('每扇区 4 块，点击左侧勾选选择性读写，点击数据行编辑',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              ),
+              if (widget.onShare != null)
+                TextButton.icon(
+                  onPressed: widget.onShare,
+                  icon: const Icon(Icons.share, size: 16),
+                  label: const Text('分享数据', style: TextStyle(fontSize: 12)),
+                ),
+            ],
+          ),
         ),
         for (var s = 0; s < 16; s++)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 4),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: 44,
+                InkWell(
+                  onTap: () => _toggleSector(s),
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Text('扇区 $s',
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF666666))),
+                    padding: const EdgeInsets.only(top: 2, right: 6),
+                    child: Icon(
+                      widget.card.toggle[s]
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 18,
+                      color: widget.card.toggle[s]
+                          ? primary
+                          : const Color(0xFFBBBBBB),
+                    ),
                   ),
                 ),
                 Expanded(
-                  child: TextField(
-                    controller: _ctrls[s],
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                        color: Color(0xFF333333)),
-                    maxLines: 4,
-                    minLines: 4,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          vertical: 4, horizontal: 6),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(4)),
+                  child: InkWell(
+                    onTap: () => _editSector(s),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: SizedBox(
+                        height: 18,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _sectorLine(s),
+                            maxLines: 1,
+                            style: const TextStyle(
+                                fontSize: 13, fontFamily: 'monospace'),
+                          ),
+                        ),
+                      ),
                     ),
-                    onChanged: (t) => _apply(s, t),
                   ),
                 ),
               ],
@@ -1413,16 +1458,6 @@ class _SectorTableState extends State<_SectorTable> {
           ),
       ],
     );
-  }
-
-  String _format(String hex) {
-    if (hex.length < 32) return hex;
-    final buf = StringBuffer();
-    for (var i = 0; i < 32; i += 2) {
-      buf.write(hex.substring(i, i + 2));
-      if (i < 30) buf.write(' ');
-    }
-    return buf.toString();
   }
 }
 
