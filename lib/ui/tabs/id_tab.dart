@@ -147,7 +147,8 @@ class _IdTabState extends State<IdTab> {
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      await _prepareLfSlot(slot);
+      // 对齐小程序 btnEmuReadID：仅激活卡槽后直接读，不设置 tagType
+      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
       final id = await _dev.cmdEm410xGetEmuId();
       if (id.length != 5) throw DeviceException(1, '该卡槽无 ID 数据');
       final hex = id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
@@ -158,6 +159,13 @@ class _IdTabState extends State<IdTab> {
         _app.currentSlot = slot;
       });
       _toast('已读取卡槽 ${slot + 1} 的 ID：${_app.idCard.idCardDec}');
+    } on DeviceException catch (e) {
+      // 对齐小程序：invalid param(96) 视为卡槽无 ID 数据，非失败
+      if (e.status == 96) {
+        _toast('卡槽 ${slot + 1} 无 ID 数据');
+      } else {
+        _toast('读卡槽失败: ${e.message}');
+      }
     } catch (e) {
       _toast('读卡槽失败: $e');
     }
