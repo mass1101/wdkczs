@@ -121,28 +121,35 @@ class ActionButton extends StatelessWidget {
     final c = color ?? Theme.of(context).colorScheme.primary;
     return Opacity(
       opacity: enabled ? 1 : 0.4,
-      child: GestureDetector(
-        onTap: enabled ? onTap : null,
-        child: Container(
-          height: 34,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: c, width: 1),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: c),
-                const SizedBox(width: 4),
-              ],
-              Text(
-                label,
-                style: TextStyle(fontSize: 13, color: c),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(6),
+          child: Ink(
+            decoration: BoxDecoration(
+              border: Border.all(color: c, width: 1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Container(
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 16, color: c),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    label,
+                    style: TextStyle(fontSize: 13, color: c),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
