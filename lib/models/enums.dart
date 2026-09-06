@@ -126,16 +126,16 @@ enum DeviceMode {
       values.firstWhere((e) => e.value == v, orElse: () => tag);
 }
 
-/// 卡片类型（对应逆向 setSlotTagType 值域）
+/// 卡片类型（对应固件 TagSpecificType 值域，见 chameleon_enum.py）
 enum TagType {
-  mifareClassic1k(0, 'Mifare Classic 1K'),
-  mifareClassic4k(1, 'Mifare Classic 4K'),
-  mifareUltralight(2, 'Mifare Ultralight'),
-  ntag215(3, 'NTAG215'),
-  em4100(4, 'EM4100'),
-  hidProx(5, 'HID Prox'),
-  viking(6, 'Viking'),
-  electra(7, 'Electra');
+  mifareClassic1k(1001, 'Mifare Classic 1K'),
+  mifareClassic4k(1003, 'Mifare Classic 4K'),
+  mifareUltralight(1100, 'Mifare Ultralight'),
+  ntag215(1101, 'NTAG215'),
+  em4100(100, 'EM4100'),
+  hidProx(200, 'HID Prox'),
+  viking(170, 'Viking'),
+  electra(104, 'Electra');
 
   const TagType(this.value, this.label);
   final int value;

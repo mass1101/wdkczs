@@ -136,7 +136,8 @@ class _IdTabState extends State<IdTab> {
   /// 把卡槽设为 LF/EM4100 类型并激活（对应小程序 slotChangeTagTypeAndActive）
   /// 必须先将卡槽 tagType 设为 EM4100，否则 em410x 命令返回 invalid param
   Future<void> _prepareLfSlot(int slot) async {
-    const em4100 = 4;
+    // 固件 TagSpecificType.EM410X = 100（见 chameleon_enum.py），旧值 4 是 OLD_MIFARE_2048
+    const em4100 = 100;
     await _dev.cmdSlotChangeTagType(slot, em4100);
     await _dev.cmdSlotResetTagType(slot, em4100);
     await _dev.cmdSlotSetEnable(slot, 1, true);
