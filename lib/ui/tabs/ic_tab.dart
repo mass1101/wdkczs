@@ -28,6 +28,7 @@ class _IcTabState extends State<IcTab> {
   final _uidCtrl = TextEditingController();
   final _atqaCtrl = TextEditingController();
   final _sakCtrl = TextEditingController();
+  final _atsCtrl = TextEditingController();
   final _keyCtrl = TextEditingController(text: kDefaultKeys.join('\n'));
 
   int _slotPage = 0;
@@ -60,6 +61,7 @@ class _IcTabState extends State<IcTab> {
     _uidCtrl.dispose();
     _atqaCtrl.dispose();
     _sakCtrl.dispose();
+    _atsCtrl.dispose();
     _keyCtrl.dispose();
     super.dispose();
   }
@@ -1052,14 +1054,39 @@ class _IcTabState extends State<IcTab> {
                   ],
                 ),
               ),
-              // 卡片信息
+              // 卡片信息（对齐小程序：动态 M1 前缀 + 无边框输入框 + 实时校验变色 + 条件 ATS）
               SectionCard(
                 title: '卡片信息',
                 child: Column(
                   children: [
-                    _infoRow('UID', _uidCtrl, 'deadbeef'),
-                    _infoRow('ATQA', _atqaCtrl, '0004'),
-                    _infoRow('SAK', _sakCtrl, '08'),
+                    _infoField(
+                        Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: _isStandardM1
+                                    ? Colors.green
+                                    : const Color(0xFFE53935))),
+                        _uidCtrl, '卡号应为8位16进制数',
+                        validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
+                        okColor: '#9933FF'),
+                    _infoField(
+                        const Text('SAK:',
+                            style: TextStyle(
+                                fontSize: 13, color: Color(0xFF666666))),
+                        _sakCtrl, '08',
+                        validRegex: r'^([0-9A-Fa-f]{2}\s*)+$'),
+                    _infoField(
+                        const Text('ATQA:',
+                            style: TextStyle(
+                                fontSize: 13, color: Color(0xFF666666))),
+                        _atqaCtrl, '0004',
+                        validRegex: r'^([0-9A-Fa-f]{4}\s*)+$'),
+                    if (_atsCtrl.text.isNotEmpty)
+                      _infoField(
+                          const Text('ATS:',
+                              style: TextStyle(
+                                  fontSize: 13, color: Color(0xFF666666))),
+                          _atsCtrl, ''),
                   ],
                 ),
               ),
@@ -1198,24 +1225,35 @@ class _IcTabState extends State<IcTab> {
     );
   }
 
-  Widget _infoRow(String label, TextEditingController ctrl, String hint) {
+  bool get _isStandardM1 => _sakCtrl.text.trim() == '08';
+
+  /// 对齐小程序卡片信息：前缀标签 + 无边框输入框 + 实时格式校验变色
+  Widget _infoField(Widget prefix, TextEditingController ctrl, String hint,
+      {String? validRegex, String? okColor}) {
+    final ok = validRegex == null || RegExp(validRegex).hasMatch(ctrl.text);
+    final fail = const Color(0xFFE53935);
+    final Color? textColor = !ok
+        ? fail
+        : (okColor != null
+            ? Color(int.parse(okColor.replaceFirst('#', '0xFF')))
+            : null);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          SizedBox(
-              width: 56,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+          SizedBox(width: 92, child: Align(alignment: Alignment.centerLeft, child: prefix)),
           Expanded(
             child: TextField(
               controller: ctrl,
-              style: const TextStyle(fontSize: 13),
+              onChanged: (_) => setState(() {}),
+              style: TextStyle(
+                  fontSize: 13, color: textColor ?? const Color(0xFF333333)),
               decoration: InputDecoration(
                 hintText: hint,
+                hintStyle: const TextStyle(color: Color(0xFF999999)),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                border: InputBorder.none,
               ),
             ),
           ),
