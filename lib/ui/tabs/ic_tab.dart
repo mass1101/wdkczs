@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../main.dart';
 import '../../models/enums.dart';
@@ -10,6 +10,7 @@ import '../../services/crypto1.dart';
 import '../../services/device_service.dart';
 import '../../state/app_controller.dart';
 import '../../ui/dialogs/crack_dialog.dart';
+import '../../ui/dialogs/key_file_sheet.dart';
 import '../../ui/dialogs/text_input_dialog.dart';
 import '../widgets/common.dart';
 
@@ -32,10 +33,8 @@ class _IcTabState extends State<IcTab> {
   final _keyCtrl = TextEditingController(text: kDefaultKeys.join('\n'));
 
   int _slotPage = 0;
-  bool _icKeysValid = true;
 
   String _cardType = 'Mifare Classic 1K';
-  String _selectedKeyName = '';
 
   @override
   void initState() {
@@ -69,7 +68,6 @@ class _IcTabState extends State<IcTab> {
   Future<void> _loadKeys() async {
     final names = await _app.storage.getKeyNames();
     if (names.isNotEmpty && mounted) {
-      _selectedKeyName = names.keys.first;
       _keyCtrl.text = names.values.first;
     }
   }
@@ -884,7 +882,6 @@ class _IcTabState extends State<IcTab> {
       }
       await _app.storage.saveKey(name, lines.join('\n'));
       setState(() {
-        _selectedKeyName = name;
         _keyCtrl.text = lines.join('\n');
       });
       _toast('密钥已导入：$name');
@@ -975,75 +972,55 @@ class _IcTabState extends State<IcTab> {
           child: ListView(
             padding: const EdgeInsets.only(bottom: 16),
             children: [
-              // 密钥卡片
+              // 密钥（对齐小程序：IC密钥前缀 + 无边框textarea + 右侧图标列）
               SectionCard(
                 title: '密钥',
                 child: Column(
                   children: [
-                    _cardLabel('密钥文件', _selectedKeyName.isEmpty ? '默认' : _selectedKeyName,
-                        trailing: [
-                          IconButton(
-                              icon: const Icon(Icons.list, size: 18),
-                              onPressed: _pickKeyFile),
-                          IconButton(
-                              icon: const Icon(Icons.edit, size: 18),
-                              onPressed: _editKeys),
-                        ]),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: TextField(
-                        controller: _keyCtrl,
-                        decoration: const InputDecoration(
-                          hintText: '一行一个密钥,密钥应为12位16进制数',
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                        ),
-                        style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                          color:
-                              _icKeysValid ? const Color(0xFF333333) : Colors.red,
-                        ),
-                        maxLines: 4,
-                        minLines: 4,
-                        onChanged: (text) => setState(() {
-                          final lines = text
-                              .split('\n')
-                              .map((e) => e.trim())
-                              .where((e) => e.isNotEmpty)
-                              .toList();
-                          _icKeysValid = lines.every(
-                              (e) =>
-                                  RegExp(r'^[0-9a-f]{12}$')
-                                      .hasMatch(e.toLowerCase()));
-                        }),
-                      ),
-                    ),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(horizontal: 8)),
-                          icon: Icon(Icons.list, size: 16, color: primary),
-                          label: const Text('导入', style: TextStyle(fontSize: 12)),
-                          onPressed: _pickKeyFile,
+                        const Padding(
+                          padding: EdgeInsets.only(top: 6, left: 4),
+                          child: Text('IC密钥：',
+                              style: TextStyle(
+                                  fontSize: 13, color: Color(0xFF000000))),
                         ),
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(horizontal: 8)),
-                          icon: Icon(Icons.download, size: 16, color: primary),
-                          label: const Text('导出', style: TextStyle(fontSize: 12)),
-                          onPressed: _saveKeys,
+                        Expanded(
+                          child: TextField(
+                            controller: _keyCtrl,
+                            maxLines: 6,
+                            minLines: 4,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 13,
+                                color: Color(0xFFE53935)),
+                            decoration: const InputDecoration(
+                              hintText: '一行一个密钥,密钥应为12位16进制数',
+                              hintStyle:
+                                  TextStyle(color: Color(0xFF999999), fontSize: 12),
+                              border: InputBorder.none,
+                              isDense: true,
+                            ),
+                            onChanged: (t) => _app.card.keys = t,
+                          ),
                         ),
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
+                        Column(
+                          children: [
+                            IconButton(
                               visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(horizontal: 8)),
-                          icon: Icon(Icons.close, size: 16, color: Colors.grey),
-                          label: const Text('删除', style: TextStyle(fontSize: 12)),
-                          onPressed: _deleteKeyFile,
+                              icon: const Icon(Icons.list, size: 18),
+                              tooltip: '密钥列表',
+                              onPressed: _openKeyList,
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.download, size: 18),
+                              tooltip: '导出',
+                              onPressed: _exportKeys,
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1274,93 +1251,36 @@ class _IcTabState extends State<IcTab> {
     );
   }
 
-  // ========== 密钥文件管理 ==========
-  Future<void> _pickKeyFile() async {
-    final names = await _app.storage.getKeyNames();
+  // ========== 密钥文件管理（对齐小程序：密钥列表弹窗 + 导出） ==========
+  Future<void> _openKeyList() async {
     if (!mounted) return;
-    showModalBottomSheet(
+    final sel = await showModalBottomSheet<(String, String)>(
       context: context,
       backgroundColor: Colors.white,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-                title: Text('选择密钥文件', style: TextStyle(fontWeight: FontWeight.w600))),
-            ...names.entries.map((e) => ListTile(
-                  title: Text(e.key),
-                  onTap: () {
-                    setState(() {
-                      _selectedKeyName = e.key;
-                      _keyCtrl.text = e.value;
-                    });
-                    Navigator.pop(ctx);
-                  },
-                )),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text('新建'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final name = await showDialog<String>(
-                  context: context,
-                  builder: (c) => const TextInputDialog(title: '新建密钥文件', hint: '输入文件名'),
-                );
-                if (name != null && name.isNotEmpty) {
-                  await _app.storage.saveKey(name, kDefaultKeys.join('\n'));
-                  setState(() {
-                    _selectedKeyName = name;
-                    _keyCtrl.text = kDefaultKeys.join('\n');
-                  });
-                }
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+      isScrollControlled: true,
+      builder: (ctx) => KeyFileSheet(
+          storage: _app.storage, cardUid: _app.card.uid),
     );
+    if (sel == null || !mounted) return;
+    setState(() {
+      _keyCtrl.text = sel.$2.isEmpty ? kDefaultKeys.join('\n') : sel.$2;
+      _app.card.keys = _keyCtrl.text;
+    });
   }
 
-  Future<void> _editKeys() async {
-    final text = await showDialog<String>(
-      context: context,
-      builder: (ctx) => TextInputDialog(
-        title: '编辑密钥',
-        hint: '每行一个密钥，12 位十六进制',
-        initial: _keyCtrl.text,
-        multiline: true,
-      ),
-    );
-    if (text != null) {
-      setState(() {
-        _keyCtrl.text = text.trim();
-        _app.card.keys = _keyCtrl.text;
-      });
-    }
-  }
-
-  Future<void> _saveKeys() async {
+  Future<void> _exportKeys() async {
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => const TextInputDialog(title: '保存密钥文件', hint: '输入文件名'),
+      builder: (ctx) => TextInputDialog(
+        title: '导出密钥文件',
+        hint: '输入文件名',
+        initial: 'KeyFor_${_app.card.uid.toUpperCase()}.TXT',
+      ),
     );
-    if (name != null && name.isNotEmpty) {
-      await _app.storage.saveKey(name, _keyCtrl.text);
-      setState(() => _selectedKeyName = name);
-      _toast('已保存');
-    }
-  }
-
-  Future<void> _deleteKeyFile() async {
-    if (_selectedKeyName.isEmpty) {
-      _toast('当前为默认密钥');
-      return;
-    }
-    await _app.storage.delKey(_selectedKeyName);
-    setState(() => _selectedKeyName = '');
-    _keyCtrl.text = kDefaultKeys.join('\n');
-    _toast('已删除');
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    await _app.storage.saveKey(name.trim(), _keyCtrl.text);
+    await Clipboard.setData(ClipboardData(text: _keyCtrl.text));
+    _toast('已保存并复制到剪贴板');
   }
 
   Future<void> _pickCardType() async {
