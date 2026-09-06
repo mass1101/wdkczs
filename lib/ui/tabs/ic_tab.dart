@@ -91,17 +91,48 @@ class _IcTabState extends State<IcTab> {
       final tags = await _dev.cmdHf14aScan();
       if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
       final tag = tags.first;
+      if (tag.sakHex != '08') {
+        _toast('发现非标准M1卡，该卡无法读写');
+        return;
+      }
       final uid = tag.uidHex;
-      setState(() {
-        _uidCtrl.text = uid;
-        _atqaCtrl.text = tag.atqaHex;
-        _sakCtrl.text = tag.sakHex;
-      });
-      // 读取所有可读块
+      // 优先 Gen1a 免密读全卡（UID 卡），失败则走常规密钥认证读
+      final found = <String>[];
+      var gen1aDone = false;
+      try {
+        final gen1aSectors = List.generate(16, (_) => SectorData());
+        for (var s = 0; s < 16; s++) {
+          if (!_app.card.toggle[s]) continue;
+          final data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
+          if (data.length < 64) continue;
+          final blocks = List<BlockData>.generate(
+              4, (i) => BlockData(data: _hexStr(data.sublist(i * 16, i * 16 + 16))));
+          gen1aSectors[s] = SectorData(blocks: blocks);
+          final kA = _hexStr(data.sublist(48, 54));
+          final kB = _hexStr(data.sublist(58, 64));
+          if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
+          if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
+        }
+        gen1aDone = true;
+        setState(() {
+          _app.card.uid = uid;
+          _app.card.atqa = tag.atqaHex;
+          _app.card.sak = tag.sakHex;
+          _app.card.sectors = gen1aSectors;
+        });
+        _appendKeys(found);
+        _toast('读卡完成！');
+      } catch (_) {
+        // Gen1a 不可用，走常规认证读
+      }
+      if (gen1aDone) return;
+
+      // 常规认证读
+      final keyTypes = [KeyType.keyA, KeyType.keyB];
       final sectors = List.generate(16, (_) => SectorData());
       final blocks = List.generate(64, (_) => BlockData());
       var readCount = 0;
-      for (var keyType in [KeyType.keyA, KeyType.keyB]) {
+      for (final keyType in keyTypes) {
         for (final keyStr in _keys) {
           final key = _hex(keyStr);
           for (var sector = 0; sector < 16; sector++) {
@@ -114,19 +145,29 @@ class _IcTabState extends State<IcTab> {
               final data = await _dev.cmdMf1ReadBlock(
                   block: blockNum, keyType: keyType, key: key);
               blocks[blockNum].data = _hexStr(data);
-              // 同扇区其余块用扇区尾（块3）密钥，先只标记扇区可读
               readCount++;
             } catch (_) {}
           }
         }
       }
-      // 尝试读取扇区内其余块
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
         final first = blocks[sector * 4].data;
         if (first == '00000000000000000000000000000000') continue;
-        final blocksArr = List<BlockData>.generate(4, (i) => blocks[sector * 4 + i]);
+        final blocksArr =
+            List<BlockData>.generate(4, (i) => blocks[sector * 4 + i]);
         sectors[sector] = SectorData(blocks: blocksArr);
+        // 从 trailer(块3) 提取密钥回填
+        final b3 = blocks[sector * 4 + 3].data;
+        if (b3 != '00000000000000000000000000000000') {
+          final kb = _hex(b3);
+          if (kb.length >= 16) {
+            final kA = _hexStr(kb.sublist(0, 6));
+            final kB = _hexStr(kb.sublist(10, 16));
+            if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
+            if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
+          }
+        }
       }
       setState(() {
         _app.card.uid = uid;
@@ -134,6 +175,7 @@ class _IcTabState extends State<IcTab> {
         _app.card.sak = tag.sakHex;
         _app.card.sectors = sectors;
       });
+      _appendKeys(found);
       _toast('读取完成：$readCount 个扇区');
     } catch (e) {
       _toast('读卡失败: $e');
@@ -146,15 +188,39 @@ class _IcTabState extends State<IcTab> {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
       if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
-      final uid = tags.first.uidHex;
-      final uidBytes = _hex(uid);
-      // 对齐小程序：atqa 需字节反转
+      final tag = tags.first;
+      if (tag.sakHex != '08') {
+        _toast('发现非标准M1卡，该卡无法读写');
+        return;
+      }
+      if (!_nuidXorValid()) throw Exception('数据有误，卡号XOR校验码不正确');
+      // 优先 Gen1a 免密写（UID 卡），失败则走常规认证写
+      var gen1aDone = false;
+      try {
+        for (var sector = 0; sector < 16; sector++) {
+          if (!_app.card.toggle[sector]) continue;
+          final blocks = _app.card.sectors[sector].blocks;
+          if (blocks[0].data == '00000000000000000000000000000000') continue;
+          final payload = Uint8List(64);
+          for (var b = 0; b < 4; b++) {
+            payload.setRange(b * 16, b * 16 + 16, _hex(blocks[b].data));
+          }
+          await _dev.mf1Gen1aWriteBlocks(sector * 4, payload);
+        }
+        gen1aDone = true;
+        _toast('写入完成');
+      } catch (_) {
+        // Gen1a 不可用，走常规认证写
+      }
+      if (gen1aDone) return;
+
+      // 常规认证写
+      final uidBytes = _hex(tag.uidHex);
       final atqa = _hex(_atqaCtrl.text).reversed.toList();
       await _dev.cmdHf14aSetAntiCollData(
           uid: uidBytes,
           atqa: Uint8List.fromList(atqa),
           sak: _hex(_sakCtrl.text));
-      // 逐扇区写入
       var written = 0;
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
@@ -239,78 +305,170 @@ class _IcTabState extends State<IcTab> {
 
   // ========== 解卡（破解） ==========
   Future<void> _crackCard() async {
-    if (_keys.isEmpty) {
-      _toast('请先填写密钥');
-      return;
-    }
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
       if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
-      final uid = tags.first.uid;
+      final tag = tags.first;
+      if (tag.sakHex != '08') {
+        _toast('发现非标准M1卡，该卡无法破解');
+        return;
+      }
+      if (_keys.isEmpty) {
+        _toast('请先填写密钥');
+        return;
+      }
+      final uid = tag.uid;
       final uidInt = _bytesInt(uid.sublist(0, 4));
       final key = _hex(_keys.first);
 
-      // 探测 PRNG 类型
+      // 1) Gen1a 免密读全卡密钥（UID 卡秒解）
+      try {
+        final found = <String>[];
+        var allRead = true;
+        for (var s = 0; s < 16; s++) {
+          final Uint8List data;
+          try {
+            data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
+          } catch (_) {
+            allRead = false;
+            break;
+          }
+          if (data.length < 64) {
+            allRead = false;
+            break;
+          }
+          final kA = _hexStr(data.sublist(48, 54));
+          final kB = _hexStr(data.sublist(58, 64));
+          if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
+          if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
+        }
+        if (allRead) {
+          _appendKeys(found);
+          _toast(found.isEmpty ? '未发现可破解密钥' : '破解成功');
+          return;
+        }
+      } catch (_) {}
+
+      // 2) 常规逐扇区破解（对齐小程序：按 PRNG 逐扇区恢复 keyA，已破解扇区跳过）
       final prng = await _dev.cmdMf1TestPrngType();
+      if (prng >= 2) {
+        // 强随机：云端 hardnested
+        await _submitHardnested(uid);
+        return;
+      }
       if (!mounted) return;
-      final results = <String>[];
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => CrackProgressDialog(
-          title: '正在破解 (PRNG ${prng == 0 ? '静态' : prng == 1 ? '弱随机' : '强随机'})',
+          title: '正在破解 (PRNG ${prng == 0 ? '静态' : '弱随机'})',
           onCancel: () {},
         ),
       );
       try {
-        if (prng == 0) {
-          // 静态嵌套
-          final res = await _dev.cmdMf1AcquireStaticNested(
-              block: 0, keyType: KeyType.keyA, key: key, targetBlock: 0, targetKeyType: KeyType.keyA);
-          final atks = res.atks.map((a) => {
-                'nt1': _bytesInt(a.$1),
-                'nt2': _bytesInt(a.$2),
-              }).toList();
-          final recovered = Crypto1.staticnested(uid: uidInt, keyType: 96, atks: atks);
-          for (final k in recovered) {
-            results.add(_int6Hex(k));
+        // 标记已破解扇区（验证各扇区块0 keyA 是否已被已知密钥解锁）
+        final hasKey = List<bool>.generate(16, (_) => false);
+        for (var s = 0; s < 16; s++) {
+          for (final kStr in _keys) {
+            try {
+              final ok = await _dev.cmdMf1CheckBlockKey(
+                  block: s * 4,
+                  keyType: KeyType.keyA,
+                  key: _hex(kStr));
+              if (ok) {
+                hasKey[s] = true;
+                break;
+              }
+            } catch (_) {}
           }
-        } else if (prng == 1) {
-          // 弱随机：检测 NT 距离并嵌套
-          final distRes = await _dev.cmdMf1TestNtDistance(block: 0, keyType: KeyType.keyA, key: key);
-          final dist = _bytesInt(distRes.dist.sublist(0, 4));
-          final nested = await _dev.cmdMf1AcquireNested(
-              block: 0, keyType: KeyType.keyA, key: key, targetBlock: 0, targetKeyType: KeyType.keyA);
-          final atks = nested.map((a) => {
-                'nt1': _bytesInt(a.nt1),
-                'nt2': _bytesInt(a.nt2),
-                'par': a.par,
-              }).toList();
-          final recovered = Crypto1.nested(uid: uidInt, dist: dist, atks: atks);
-          for (final k in recovered) {
-            results.add(_int6Hex(k));
-          }
-        } else {
-          // HardNested：云任务
-          await _submitHardnested(uid);
         }
+        final found = <String>[];
+        for (var s = 0; s < 16; s++) {
+          if (hasKey[s]) continue;
+          final rec = await _crackSectorKeyA(uidInt, s, prng, key);
+          if (rec != null) found.add(rec);
+        }
+        _appendKeys(found);
+        _toast(found.isEmpty ? '未找到新密钥' : '破解成功');
       } finally {
         if (mounted) Navigator.of(context).pop();
-      }
-      if (results.isNotEmpty) {
-        final keys = _keyCtrl.text.trim();
-        setState(() {
-          _keyCtrl.text = keys.isEmpty ? results.first : '$keys\n${results.first}';
-          _app.card.keys = _keyCtrl.text;
-        });
-        _toast('破解成功：${results.first}');
-      } else {
-        _toast('未找到密钥');
       }
     } catch (e) {
       _toast('破解失败: $e');
     }
+  }
+
+  /// 对单个扇区恢复 keyA（按 PRNG 类型，对齐小程序逐扇区破解）
+  Future<String?> _crackSectorKeyA(
+      int uid, int sector, int prng, Uint8List key) async {
+    try {
+      if (prng == 0) {
+        final res = await _dev.cmdMf1AcquireStaticNested(
+            block: 0,
+            keyType: KeyType.keyA,
+            key: key,
+            targetBlock: sector * 4,
+            targetKeyType: KeyType.keyA);
+        final atks = res.atks
+            .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
+            .toList();
+        final recovered =
+            Crypto1.staticnested(uid: uid, keyType: 96, atks: atks);
+        if (recovered.isNotEmpty) return _int6Hex(recovered.first);
+        return null;
+      }
+      if (prng == 1) {
+        final distRes = await _dev.cmdMf1TestNtDistance(
+            block: 0, keyType: KeyType.keyA, key: key);
+        final dist = _bytesInt(distRes.dist.sublist(0, 4));
+        final nested = await _dev.cmdMf1AcquireNested(
+            block: 0,
+            keyType: KeyType.keyA,
+            key: key,
+            targetBlock: sector * 4,
+            targetKeyType: KeyType.keyA);
+        final atks = nested
+            .map((a) => {
+                  'nt1': _bytesInt(a.nt1),
+                  'nt2': _bytesInt(a.nt2),
+                  'par': a.par,
+                })
+            .toList();
+        final recovered = Crypto1.nested(uid: uid, dist: dist, atks: atks);
+        if (recovered.isNotEmpty) return _int6Hex(recovered.first);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 卡号 XOR 校验（对齐小程序 btnWrite：卡第5字节 BCC = 前4字节异或）
+  bool _nuidXorValid() {
+    final b0 = _app.card.sectors[0].blocks[0].data;
+    if (b0.length < 10) return false;
+    final nums = [0, 2, 4, 6, 8]
+        .map((i) => int.parse(b0.substring(i, i + 2), radix: 16))
+        .toList();
+    return (nums[0] ^ nums[1] ^ nums[2] ^ nums[3]) == nums[4];
+  }
+
+  /// 将破解/抽取出的密钥去重回填到密钥输入区
+  void _appendKeys(List<String> add) {
+    if (add.isEmpty) return;
+    final lines = _keys.toList();
+    final toAdd = <String>[];
+    for (final k in add) {
+      if (k.length == 12 && !lines.contains(k)) toAdd.add(k);
+    }
+    if (toAdd.isEmpty || !mounted) return;
+    setState(() {
+      _keyCtrl.text = lines.isEmpty
+          ? toAdd.join('\n')
+          : '${lines.join('\n')}\n${toAdd.join('\n')}';
+      _app.card.keys = _keyCtrl.text;
+    });
   }
 
   Future<void> _submitHardnested(Uint8List uid) async {
