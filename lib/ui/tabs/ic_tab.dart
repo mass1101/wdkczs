@@ -31,6 +31,7 @@ class _IcTabState extends State<IcTab> {
   final _keyCtrl = TextEditingController(text: kDefaultKeys.join('\n'));
 
   int _slotPage = 0;
+  bool _icKeysValid = true;
 
   String _cardType = 'Mifare Classic 1K';
   String _selectedKeyName = '';
@@ -986,12 +987,63 @@ class _IcTabState extends State<IcTab> {
                               icon: const Icon(Icons.edit, size: 18),
                               onPressed: _editKeys),
                         ]),
-                    KeyCard(
-                      label: '密钥',
-                      value: _keyCtrl.text,
-                      onList: _pickKeyFile,
-                      onDownload: _saveKeys,
-                      onDelete: _deleteKeyFile,
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: TextField(
+                        controller: _keyCtrl,
+                        decoration: const InputDecoration(
+                          hintText: '一行一个密钥,密钥应为12位16进制数',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                          color:
+                              _icKeysValid ? const Color(0xFF333333) : Colors.red,
+                        ),
+                        maxLines: 4,
+                        minLines: 4,
+                        onChanged: (text) => setState(() {
+                          final lines = text
+                              .split('\n')
+                              .map((e) => e.trim())
+                              .where((e) => e.isNotEmpty)
+                              .toList();
+                          _icKeysValid = lines.every(
+                              (e) =>
+                                  RegExp(r'^[0-9a-f]{12}$')
+                                      .hasMatch(e.toLowerCase()));
+                        }),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          icon: Icon(Icons.list, size: 16, color: primary),
+                          label: const Text('导入', style: TextStyle(fontSize: 12)),
+                          onPressed: _pickKeyFile,
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          icon: Icon(Icons.download, size: 16, color: primary),
+                          label: const Text('导出', style: TextStyle(fontSize: 12)),
+                          onPressed: _saveKeys,
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          icon: Icon(Icons.close, size: 16, color: Colors.grey),
+                          label: const Text('删除', style: TextStyle(fontSize: 12)),
+                          onPressed: _deleteKeyFile,
+                        ),
+                      ],
                     ),
                     _cardLabel('卡类型', _cardType,
                         trailing: [IconButton(
