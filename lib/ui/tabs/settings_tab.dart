@@ -301,13 +301,21 @@ class _SettingsTabState extends State<SettingsTab> {
                             _app.settings.blePairing, (v) {
                           _app.setBlePairing(v);
                         }),
-                        _infoRow('配对密钥', _app.settings.blePairingKey,
+                        _infoRow('蓝牙密码', _app.settings.blePairingKey,
                             onTap: _editPairingKey),
-                        _switchRow('按钮配对模式',
-                            _app.settings.buttonModePairing, (v) {
-                          _app.setButtonModePairing(v);
-                        }),
                         _animationRow(),
+                        _actionRow('短按按钮A', _app.settings.pressBtnA, (v) {
+                          _app.setPressBtnA(v);
+                        }),
+                        _actionRow('短按按钮B', _app.settings.pressBtnB, (v) {
+                          _app.setPressBtnB(v);
+                        }),
+                        _actionRow('长按按钮A', _app.settings.longPressBtnA, (v) {
+                          _app.setLongPressBtnA(v);
+                        }),
+                        _actionRow('长按按钮B', _app.settings.longPressBtnB, (v) {
+                          _app.setLongPressBtnB(v);
+                        }),
                         _switchRow('恢复出厂设置', false, (v) {}),
                       ],
                     ),
@@ -416,6 +424,45 @@ class _SettingsTabState extends State<SettingsTab> {
                   onSelected: (_) => _app.setAnimationMode(m),
                 );
               }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionRow(String label, ButtonAction value, ValueChanged<ButtonAction> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(
+              width: 72,
+              child: Text('',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF666666))),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: ButtonAction.values.map((a) {
+                    final selected = value == a;
+                    return ChoiceChip(
+                      label: Text(a.label,
+                          style: const TextStyle(fontSize: 12)),
+                      selected: selected,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => onChanged(a),
+                    );
+                  }).toList(),
+                ),
+              ],
             ),
           ),
         ],

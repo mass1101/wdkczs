@@ -168,10 +168,10 @@ enum CrackType {
 
 /// 动画模式（对应逆向 gb）
 enum AnimationMode {
-  full(0, '全量'),
-  short(1, '简短'),
-  none(2, '关闭'),
-  symmetric(3, '对称');
+  full(0, '完整动画'),
+  short(1, '简单动画'),
+  none(2, '关闭动画'),
+  symmetric(3, '对称动画');
 
   const AnimationMode(this.value, this.label);
   final int value;
@@ -183,11 +183,11 @@ enum AnimationMode {
 
 /// 短按/长按按钮动作（对应逆向 vb）
 enum ButtonAction {
-  disable(0, '禁用'),
-  cycleSlotInc(1, '切换下一个卡槽'),
-  cycleSlotDec(2, '切换上一个卡槽'),
-  cloneIcUid(3, '克隆IC卡UID'),
-  battery(4, '查看电量');
+  disable(0, '无动作'),
+  cycleSlotInc(1, '激活下一个槽位'),
+  cycleSlotDec(2, '激活上一个槽位'),
+  cloneIcUid(3, '模拟IC-ID卡号'),
+  battery(4, '显示设备电量');
 
   const ButtonAction(this.value, this.label);
   final int value;

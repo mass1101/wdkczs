@@ -168,6 +168,26 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setPressBtnA(ButtonAction a) {
+    settings.pressBtnA = a;
+    notifyListeners();
+  }
+
+  void setPressBtnB(ButtonAction a) {
+    settings.pressBtnB = a;
+    notifyListeners();
+  }
+
+  void setLongPressBtnA(ButtonAction a) {
+    settings.longPressBtnA = a;
+    notifyListeners();
+  }
+
+  void setLongPressBtnB(ButtonAction a) {
+    settings.longPressBtnB = a;
+    notifyListeners();
+  }
+
   /// DFU 固件刷写（进入 DFU → 解析固件包 → 传输镜像）
   Future<void> dfuUpdateFromUrl(String url,
       {void Function(int offset, int size)? onProgress}) async {

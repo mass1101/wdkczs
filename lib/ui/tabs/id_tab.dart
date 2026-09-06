@@ -28,6 +28,7 @@ class _IdTabState extends State<IdTab> {
   int _slotPage = 0;
 
   bool _hexMode = false;
+  bool _keysValid = true;
   List<IdCardItem> _cards = [];
 
   @override
@@ -337,14 +338,6 @@ class _IdTabState extends State<IdTab> {
     return ListenableBuilder(
       listenable: _app,
       builder: (context, _) {
-        final keys = _keysCtrl.text
-            .split('\n')
-            .where((e) => e.trim().isNotEmpty)
-            .map((e) => e.trim())
-            .toList();
-        while (keys.length < 4) {
-          keys.add('--------');
-        }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -388,40 +381,32 @@ class _IdTabState extends State<IdTab> {
                       ],
                     ),
                   ),
-                  // 密钥
+                  // 密钥：对齐小程序为可编辑文本域（非法输入显示红色小写）
                   SectionCard(
                     title: '密钥',
-                    child: Column(
-                      children: [
-                        for (var i = 0; i < keys.length; i++)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: 40,
-                                  child: Text('K${i + 1}',
-                                      style: const TextStyle(
-                                          fontSize: 13, color: Color(0xFF666666))),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    keys[i],
-                                    style: const TextStyle(
-                                        fontSize: 13,
-                                        fontFamily: 'monospace',
-                                        color: Color(0xFF333333)),
-                                  ),
-                                ),
-                                if (i == keys.length - 1)
-                                  IconButton(
-                                    icon: const Icon(Icons.edit, size: 18),
-                                    onPressed: _editKeys,
-                                  ),
-                              ],
-                            ),
-                          ),
-                      ],
+                    child: TextField(
+                      controller: _keysCtrl,
+                      decoration: const InputDecoration(
+                        hintText: '一行一个密钥,密钥应为8位16进制数',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        color: _keysValid ? const Color(0xFF333333) : Colors.red,
+                      ),
+                      maxLines: 4,
+                      minLines: 4,
+                      onChanged: (text) => setState(() {
+                        final lines = text
+                            .split('\n')
+                            .map((e) => e.trim())
+                            .where((e) => e.isNotEmpty)
+                            .toList();
+                        _keysValid = lines.every(
+                            (e) => RegExp(r'^[0-9a-f]{8}$').hasMatch(e.toLowerCase()));
+                      }),
                     ),
                   ),
                   // 卡列表
