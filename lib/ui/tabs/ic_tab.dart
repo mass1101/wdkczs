@@ -272,6 +272,20 @@ class _IcTabState extends State<IcTab> {
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
+      // 输入校验（对齐小程序 btnEmuWrite）
+      if (!_nuidXorValid()) throw Exception('数据有误，卡号XOR校验码不正确');
+      if (!RegExp(r'^[0-9a-fA-F]{8}$')
+          .hasMatch(_uidCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
+        throw Exception('卡号有误，IC卡号应为8位16进制数');
+      }
+      if (!RegExp(r'^[0-9a-fA-F]{2}$')
+          .hasMatch(_sakCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
+        throw Exception('SAK有误，SAK应为2位16进制数');
+      }
+      if (!RegExp(r'^[0-9a-fA-F]{4}$')
+          .hasMatch(_atqaCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
+        throw Exception('ATQA有误，ATQA应为4位16进制数');
+      }
       await _prepareHfSlot(slot);
       // 对齐小程序 btnEmuWrite 的 mf1 仿真设置
       await _dev.cmdMf1SetAntiCollMode(false);
@@ -509,27 +523,34 @@ class _IcTabState extends State<IcTab> {
         _toast('认证数据不足，请重试');
         return;
       }
-      final a = detections[0];
-      final b = detections[1];
-      final keys = Crypto1.mfkey32v2(
-        uid: uidInt,
-        nt0: _bytesInt(a.nt),
-        nr0: _bytesInt(a.nr),
-        ar0: _bytesInt(a.ar),
-        nt1: _bytesInt(b.nt),
-        nr1: _bytesInt(b.nr),
-        ar1: _bytesInt(b.ar),
-      );
-      if (keys.isEmpty) {
+      // 对齐小程序：对全部检测日志每对(相邻两条)逐一计算，密钥插入密钥区头部
+      var foundCount = 0;
+      for (var i = 0; i + 1 < detections.length; i += 2) {
+        final a = detections[i];
+        final b = detections[i + 1];
+        final keys = Crypto1.mfkey32v2(
+          uid: uidInt,
+          nt0: _bytesInt(a.nt),
+          nr0: _bytesInt(a.nr),
+          ar0: _bytesInt(a.ar),
+          nt1: _bytesInt(b.nt),
+          nr1: _bytesInt(b.nr),
+          ar1: _bytesInt(b.ar),
+        );
+        if (keys.isEmpty) continue;
+        final found = _int6Hex(keys.first);
+        if (!mounted) return;
+        setState(() {
+          _keyCtrl.text = '$found\n${_keyCtrl.text}';
+          _app.card.keys = _keyCtrl.text;
+        });
+        foundCount++;
+      }
+      if (foundCount == 0) {
         _toast('未计算出密钥');
         return;
       }
-      final found = _int6Hex(keys.first);
-      setState(() {
-        _keyCtrl.text = '${_keyCtrl.text.trim()}\n$found';
-        _app.card.keys = _keyCtrl.text;
-      });
-      _toast('算得密钥：$found');
+      _toast('算得密钥：$foundCount 个');
     } catch (e) {
       _toast('算密钥失败: $e');
     }
@@ -1312,6 +1333,7 @@ class _IcTabState extends State<IcTab> {
         return;
       }
       final sectors = List.generate(16, (_) => SectorData());
+      final found = <String>[];
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
         try {
@@ -1321,6 +1343,11 @@ class _IcTabState extends State<IcTab> {
                 data: _hexStr(
                     block.sublist(i * 16, (i + 1) * 16))));
             sectors[sector] = SectorData(blocks: blocks);
+            // 从 trailer(块3) 提取密钥回填（对齐小程序 btnEmuRead 的 btnKeysGrab）
+            final kA = _hexStr(block.sublist(48, 54));
+            final kB = _hexStr(block.sublist(58, 64));
+            if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
+            if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
           }
         } catch (_) {}
       }
@@ -1339,6 +1366,7 @@ class _IcTabState extends State<IcTab> {
         );
         _app.currentSlot = slot;
       });
+      _appendKeys(found);
       _toast('已读取卡槽 ${slot + 1} 数据');
     } catch (e) {
       _toast('读卡槽失败: $e');
