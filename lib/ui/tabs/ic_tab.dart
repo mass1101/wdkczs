@@ -1071,7 +1071,10 @@ class _IcTabState extends State<IcTab> {
               // 扇区数据表
               SectionCard(
                 title: '扇区数据',
-                child: _SectorTable(card: _app.card),
+                child: _SectorTable(
+                  card: _app.card,
+                  onDataChanged: _app.refreshUi,
+                ),
               ),
             ],
           ),
@@ -1469,62 +1472,114 @@ class _IcTabState extends State<IcTab> {
   }
 }
 
-// ========== 扇区数据表 ==========
-class _SectorTable extends StatelessWidget {
+// ========== 扇区数据表（可编辑，对齐小程序） ==========
+class _SectorTable extends StatefulWidget {
   final CardState card;
-  const _SectorTable({required this.card});
+  final VoidCallback onDataChanged;
+  const _SectorTable({required this.card, required this.onDataChanged});
+
+  @override
+  State<_SectorTable> createState() => _SectorTableState();
+}
+
+class _SectorTableState extends State<_SectorTable> {
+  late final List<TextEditingController> _ctrls;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrls = List.generate(
+        16, (i) => TextEditingController(text: _sectorText(i)));
+  }
+
+  @override
+  void didUpdateWidget(covariant _SectorTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    for (var s = 0; s < 16; s++) {
+      _ctrls[s].text = _sectorText(s);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _ctrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  String _sectorText(int s) {
+    final sb = StringBuffer();
+    for (var b = 0; b < 4; b++) {
+      if (b > 0) sb.write('\n');
+      final hex = widget.card.sectors[s].blocks[b].data;
+      sb.write(hex.length >= 32
+          ? _format(hex)
+          : '00000000000000000000000000000000');
+    }
+    return sb.toString();
+  }
+
+  void _apply(int s, String text) {
+    final lines = text.split('\n').map((e) => e.trim()).toList();
+    for (var b = 0; b < 4 && b < lines.length; b++) {
+      final clean = lines[b].replaceAll(RegExp(r'[\s-]'), '');
+      if (RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(clean)) {
+        if (widget.card.sectors[s].blocks[b].data != clean.toLowerCase()) {
+          widget.card.sectors[s].blocks[b].data = clean.toLowerCase();
+        }
+      }
+    }
+    widget.onDataChanged();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const SizedBox(
-                width: 40,
-                child: Text('扇区', style: TextStyle(fontSize: 11, color: Colors.grey))),
-            const SizedBox(
-                width: 52,
-                child: Text('块号', style: TextStyle(fontSize: 11, color: Colors.grey))),
-            Expanded(
-                child: Text('数据 (16字节)',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500]))),
-          ],
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text('每扇区 4 块，每行一块 16 字节数据',
+              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
         ),
-        const SizedBox(height: 4),
         for (var s = 0; s < 16; s++)
-          for (var b = 0; b < 4; b++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 40,
-                    child: Text('$s',
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 44,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text('扇区 $s',
                         style: const TextStyle(
                             fontSize: 11, color: Color(0xFF666666))),
                   ),
-                  SizedBox(
-                    width: 52,
-                    child: Text('${s * 4 + b}',
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF999999))),
-                  ),
-                  Expanded(
-                    child: Text(
-                      _format(card.sectors[s].blocks[b].data),
-                      style: TextStyle(
-                        fontSize: 10,
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _ctrls[s],
+                    style: const TextStyle(
+                        fontSize: 11,
                         fontFamily: 'monospace',
-                        color: b == 3 ? const Color(0xFF1577FE) : const Color(0xFF333333),
-                        fontWeight: b == 3 ? FontWeight.w600 : FontWeight.w400,
-                      ),
+                        color: Color(0xFF333333)),
+                    maxLines: 4,
+                    minLines: 4,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 6),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(4)),
                     ),
+                    onChanged: (t) => _apply(s, t),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
       ],
     );
   }

@@ -27,7 +27,6 @@ class _IdTabState extends State<IdTab> {
 
   int _slotPage = 0;
 
-  bool _hexMode = false;
   bool _keysValid = true;
   List<IdCardItem> _cards = [];
 
@@ -147,8 +146,8 @@ class _IdTabState extends State<IdTab> {
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      // 对齐小程序 btnEmuReadID：仅激活卡槽后直接读，不设置 tagType
-      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
+      // 对齐小程序 btnEmuReadID：无条件激活卡槽后直接读，不设置 tagType
+      await _dev.cmdSlotSetActive(slot);
       final id = await _dev.cmdEm410xGetEmuId();
       if (id.length != 5) throw DeviceException(1, '该卡槽无 ID 数据');
       final hex = id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
@@ -362,30 +361,6 @@ class _IdTabState extends State<IdTab> {
                             onChanged: _syncHex),
                         _numRow('十六进制', _hexCtrl, '0000000000',
                             onChanged: _syncDec),
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Text('显示：',
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey[600])),
-                            const SizedBox(width: 6),
-                            ChoiceChip(
-                              label: const Text('十进制'),
-                              selected: !_hexMode,
-                              visualDensity: VisualDensity.compact,
-                              onSelected: (_) =>
-                                  setState(() => _hexMode = false),
-                            ),
-                            const SizedBox(width: 6),
-                            ChoiceChip(
-                              label: const Text('十六进制'),
-                              selected: _hexMode,
-                              visualDensity: VisualDensity.compact,
-                              onSelected: (_) => setState(() => _hexMode = true),
-                            ),
-                          ],
-                        ),
                       ],
                     ),
                   ),

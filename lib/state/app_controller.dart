@@ -217,6 +217,9 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 数据变更后刷新 UI
+  void refreshUi() => notifyListeners();
+
   Future<void> loadSlotEmuSettings(int slot) async {
     if (slot < enabledSlots.length &&
         enabledSlots[slot].$1 /* hf */) {
