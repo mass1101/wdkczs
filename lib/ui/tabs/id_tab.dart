@@ -72,7 +72,10 @@ class _IdTabState extends State<IdTab> {
         ],
       ),
     );
-    if (slot != null) setState(() => _slotPage = slot);
+    if (slot != null) {
+      await _app.selectSlot(slot);
+      if (mounted) setState(() => _slotPage = slot);
+    }
     return slot;
   }
 

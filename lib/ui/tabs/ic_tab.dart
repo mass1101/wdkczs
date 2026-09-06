@@ -1251,7 +1251,9 @@ class _IcTabState extends State<IcTab> {
       ),
     );
     if (slot != null) {
-      setState(() => _slotPage = slot);
+      // 先切到该卡槽并从设备加载该槽的真实模拟设置与卡片标识
+      await _app.selectSlot(slot);
+      if (mounted) setState(() => _slotPage = slot);
     }
     return slot;
   }
