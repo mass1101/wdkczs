@@ -184,9 +184,11 @@ class _IcTabState extends State<IcTab> {
 
   // ========== 写卡槽（模拟） ==========
   Future<void> _writeSlot() async {
+    final slot = await _pickSlot();
+    if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      if (_app.currentSlot != _slotPage) await _dev.cmdSlotSetActive(_slotPage);
+      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
       // 写入反碰撞数据
       await _dev.cmdHf14aSetAntiCollData(
           uid: _hex(_uidCtrl.text), atqa: _hex(_atqaCtrl.text), sak: _hex(_sakCtrl.text));
@@ -203,7 +205,8 @@ class _IcTabState extends State<IcTab> {
         await _dev.cmdMf1EmuWriteBlock(off, data.sublist(off, end));
       }
       await _app.storage.setCurrentUid(_uidCtrl.text);
-      _toast('已写入卡槽');
+      _app.currentSlot = slot;
+      _toast('已写入卡槽 ${slot + 1}');
     } catch (e) {
       _toast('写卡槽失败: $e');
     }
@@ -907,8 +910,6 @@ class _IcTabState extends State<IcTab> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 卡槽切换条（对应小程序 uv-tabs 8 槽）
-            _buildSlotBar(primary),
             // 内容区：PageView 横滑 8 槽页（对应小程序 swiper 80vh）
             Expanded(
               child: PageView.builder(
@@ -1011,53 +1012,6 @@ class _IcTabState extends State<IcTab> {
           ),
         ),
       ],
-    );
-  }
-
-  /// 卡槽横滑切换条（8 槽，点击同步到 PageView 与设备）
-  Widget _buildSlotBar(Color primary) {
-    return Container(
-      height: 40,
-      color: Colors.white,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        itemCount: 8,
-        separatorBuilder: (_, _) => const SizedBox(width: 4),
-        itemBuilder: (_, i) {
-          final active = i == _slotPage;
-          final hf = _app.enabledSlots[i].$1;
-          final lf = _app.enabledSlots[i].$2;
-          final icon = active
-              ? Icons.radio_button_checked
-              : (hf || lf ? Icons.check_circle_outline : Icons.circle_outlined);
-          return GestureDetector(
-            onTap: () => _switchSlot(i),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: active ? primary : const Color(0xFFF5F6FA),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 13, color: active ? Colors.white : const Color(0xFF999999)),
-                  const SizedBox(width: 4),
-                  Text(
-                    '卡槽 ${i + 1}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                      color: active ? Colors.white : const Color(0xFF666666),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
     );
   }
 
@@ -1168,16 +1122,6 @@ class _IcTabState extends State<IcTab> {
     );
   }
 
-  Future<void> _switchSlot(int slot) async {
-    if (slot == _slotPage) return;
-    if (!_slotPageCtrl.hasClients) {
-      setState(() => _slotPage = slot);
-      return;
-    }
-    _slotPageCtrl.animateToPage(slot,
-        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
-  }
-
   Future<void> _saveSlotConfig(int slot) async {
     try {
       if (!_app.connected) throw Exception('设备未连接');
@@ -1194,10 +1138,45 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
+  // ========== 卡槽选择（弹框） ==========
+  /// 弹出卡槽选择对话框，返回所选卡槽索引（取消返回 null），选择后同步 PageView
+  Future<int?> _pickSlot() async {
+    final slot = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择卡槽', style: TextStyle(fontSize: 16)),
+        content: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var i = 0; i < 8; i++)
+              ChoiceChip(
+                label: Text('卡槽 ${i + 1}', style: const TextStyle(fontSize: 12)),
+                selected: i == _slotPage,
+                onSelected: (_) => Navigator.pop(ctx, i),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+        ],
+      ),
+    );
+    if (slot != null) {
+      setState(() => _slotPage = slot);
+      if (_slotPageCtrl.hasClients) {
+        _slotPageCtrl.jumpToPage(slot);
+      }
+    }
+    return slot;
+  }
+
   Future<void> _readSlot() async {
+    final slot = await _pickSlot();
+    if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      if (_app.currentSlot != _slotPage) await _dev.cmdSlotSetActive(_slotPage);
+      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
       final antiColl = await _dev.cmdHf14aGetAntiCollData();
       setState(() {
         if (antiColl != null) {
@@ -1207,15 +1186,15 @@ class _IcTabState extends State<IcTab> {
           _app.card.uid = antiColl.uidHex;
           _app.card.atqa = antiColl.atqaHex;
           _app.card.sak = antiColl.sakHex;
-          _app.slotCardIds[_slotPage] = (
+          _app.slotCardIds[slot] = (
             uid: antiColl.uidHex,
             sak: antiColl.sakHex,
             atqa: antiColl.atqaHex,
           );
-          _app.currentSlot = _slotPage;
+          _app.currentSlot = slot;
         }
       });
-      _toast('已读取当前卡槽数据');
+      _toast('已读取卡槽 ${slot + 1} 数据');
     } catch (e) {
       _toast('读卡槽失败: $e');
     }

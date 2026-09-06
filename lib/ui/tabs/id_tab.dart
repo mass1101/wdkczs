@@ -25,12 +25,15 @@ class _IdTabState extends State<IdTab> {
   final _hexCtrl = TextEditingController();
   final _keysCtrl = TextEditingController();
 
+  int _slotPage = 0;
+
   bool _hexMode = false;
   List<IdCardItem> _cards = [];
 
   @override
   void initState() {
     super.initState();
+    _slotPage = _app.currentSlot;
     _decCtrl.text = _app.idCard.idCardDec;
     _hexCtrl.text = _app.idCard.idCardHex;
     _keysCtrl.text = _app.idCard.idCardKeys;
@@ -43,6 +46,34 @@ class _IdTabState extends State<IdTab> {
     _hexCtrl.dispose();
     _keysCtrl.dispose();
     super.dispose();
+  }
+
+  // ========== 卡槽选择（弹框） ==========
+  /// 弹出卡槽选择对话框，返回所选卡槽索引（取消返回 null）
+  Future<int?> _pickSlot() async {
+    final slot = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择卡槽', style: TextStyle(fontSize: 16)),
+        content: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var i = 0; i < 8; i++)
+              ChoiceChip(
+                label: Text('卡槽 ${i + 1}', style: const TextStyle(fontSize: 12)),
+                selected: i == _slotPage,
+                onSelected: (_) => Navigator.pop(ctx, i),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+        ],
+      ),
+    );
+    if (slot != null) setState(() => _slotPage = slot);
+    return slot;
   }
 
   Future<void> _load() async {
@@ -67,7 +98,7 @@ class _IdTabState extends State<IdTab> {
     final v = BigInt.tryParse(dec.trim());
     _hexCtrl.text = v == null
         ? ''
-        : v.toRadixString(16).toUpperCase().padLeft(10, '0');
+        : v.toRadixString(16).toLowerCase().padLeft(10, '0');
   }
 
   void _syncDec(String hex) {
@@ -88,7 +119,7 @@ class _IdTabState extends State<IdTab> {
       if (res.id.length != 5) throw DeviceException(1, '未发现 ID 卡');
       final hex = res.id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
       setState(() {
-        _hexCtrl.text = hex.toUpperCase();
+        _hexCtrl.text = hex.toLowerCase();
         _syncDec(hex);
         _app.idCard.setCard(hex);
       });
@@ -98,25 +129,51 @@ class _IdTabState extends State<IdTab> {
     }
   }
 
+  // ========== 读卡槽 ==========
+  Future<void> _readSlot() async {
+    final slot = await _pickSlot();
+    if (slot == null) return;
+    try {
+      await _dev.assureDeviceMode(DeviceMode.tag);
+      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
+      final id = await _dev.cmdEm410xGetEmuId();
+      if (id.length != 5) throw DeviceException(1, '该卡槽无 ID 数据');
+      final hex = id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      setState(() {
+        _hexCtrl.text = hex.toLowerCase();
+        _syncDec(hex.toLowerCase());
+        _app.idCard.setCard(hex);
+        _app.currentSlot = slot;
+      });
+      _toast('已读取卡槽 ${slot + 1} 的 ID：${_app.idCard.idCardDec}');
+    } catch (e) {
+      _toast('读卡槽失败: $e');
+    }
+  }
+
   // ========== 写卡槽 ==========
   Future<void> _writeSlot() async {
-    final hex = _hexCtrl.text.trim();
-    if (hex.isEmpty || !RegExp(r'^[0-9a-fA-F]{10}$').hasMatch(hex)) {
+    final hex = _hexCtrl.text.trim().toLowerCase();
+    if (hex.isEmpty || !RegExp(r'^[0-9a-f]{10}$').hasMatch(hex)) {
       _toast('请输入有效的 10 位十六进制卡号');
-      return;
+        return;
     }
+    final slot = await _pickSlot();
+    if (slot == null) return;
     try {
       // EM4100 5 字节卡号直接由 10 位 hex 转换
       final idBytes = Uint8List(5);
       for (var i = 0; i < 5; i++) {
         idBytes[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);
       }
+      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
       await _dev.cmdEm410xSetEmuId(idBytes);
+      _app.currentSlot = slot;
       await _app.storage.saveIdCards([
         ..._cards.where((c) => c.id != hex),
         IdCardItem(id: hex, name: _cards.isEmpty ? '未命名' : _cards.first.name),
       ]);
-      _toast('已写入 ID 卡槽');
+      _toast('已写入卡槽 ${slot + 1}');
     } catch (e) {
       _toast('写卡槽失败: $e');
     }
@@ -124,8 +181,8 @@ class _IdTabState extends State<IdTab> {
 
   // ========== 写卡（写 T55xx 实体卡） ==========
   Future<void> _writeCard() async {
-    final hex = _hexCtrl.text.trim();
-    if (hex.isEmpty || !RegExp(r'^[0-9a-fA-F]{10}$').hasMatch(hex)) {
+    final hex = _hexCtrl.text.trim().toLowerCase();
+    if (hex.isEmpty || !RegExp(r'^[0-9a-f]{10}$').hasMatch(hex)) {
       _toast('请输入有效的 10 位十六进制卡号');
       return;
     }
@@ -216,8 +273,8 @@ class _IdTabState extends State<IdTab> {
   }
 
   Future<void> _addCard() async {
-    final hex = _hexCtrl.text.trim();
-    if (hex.isEmpty || !RegExp(r'^[0-9a-fA-F]{10}$').hasMatch(hex)) {
+    final hex = _hexCtrl.text.trim().toLowerCase();
+    if (hex.isEmpty || !RegExp(r'^[0-9a-f]{10}$').hasMatch(hex)) {
       _toast('请输入有效的 10 位十六进制卡号');
       return;
     }
@@ -267,7 +324,11 @@ class _IdTabState extends State<IdTab> {
     return ListenableBuilder(
       listenable: _app,
       builder: (context, _) {
-        final keys = _keysCtrl.text.trim().split('\n').where((e) => e.isNotEmpty).toList();
+        final keys = _keysCtrl.text
+            .split('\n')
+            .where((e) => e.trim().isNotEmpty)
+            .map((e) => e.trim())
+            .toList();
         while (keys.length < 4) {
           keys.add('--------');
         }
@@ -396,6 +457,13 @@ class _IdTabState extends State<IdTab> {
                       icon: Icons.save_alt,
                       color: primary,
                       onTap: _writeCard,
+                      enabled: _app.connected),
+                  const SizedBox(height: 8),
+                  ActionButton(
+                      label: '读卡槽',
+                      icon: Icons.memory,
+                      color: primary,
+                      onTap: _readSlot,
                       enabled: _app.connected),
                   const SizedBox(height: 8),
                   ActionButton(
