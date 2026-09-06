@@ -483,7 +483,9 @@ class _SlotSettingsSheet extends StatefulWidget {
 class _SlotSettingsSheetState extends State<_SlotSettingsSheet> {
   late final PageController _controller;
   var _current = 0;
-  final _textCtrls = List.generate(8, (_) => TextEditingController());
+  // 每槽两个独立别名输入框：ID 别名(lf/freq1) 与 IC 别名(hf/freq2)
+  final _idNameCtrls = List.generate(8, (_) => TextEditingController());
+  final _icNameCtrls = List.generate(8, (_) => TextEditingController());
 
   AppController get _app => widget.app;
   DeviceService get _dev => _app.device;
@@ -493,24 +495,36 @@ class _SlotSettingsSheetState extends State<_SlotSettingsSheet> {
     super.initState();
     _controller = PageController();
     for (var i = 0; i < 8; i++) {
-      _textCtrls[i].text = _app.slotNames[i].$1 ?? '';
+      _idNameCtrls[i].text = _app.slotNames[i].$2 ?? '';
+      _icNameCtrls[i].text = _app.slotNames[i].$1 ?? '';
     }
   }
 
   @override
   void dispose() {
     _controller.dispose();
-    for (final c in _textCtrls) {
+    for (final c in _idNameCtrls) {
+      c.dispose();
+    }
+    for (final c in _icNameCtrls) {
       c.dispose();
     }
     super.dispose();
   }
 
+  void _loadNamesIntoCtrls() {
+    for (var i = 0; i < 8; i++) {
+      _idNameCtrls[i].text = _app.slotNames[i].$2 ?? '';
+      _icNameCtrls[i].text = _app.slotNames[i].$1 ?? '';
+    }
+  }
+
   void _syncNames() {
     for (var i = 0; i < 8; i++) {
+      final id = _idNameCtrls[i].text.trim();
+      final ic = _icNameCtrls[i].text.trim();
       _app.slotNames[i] =
-          (_textCtrls[i].text.trim().isEmpty ? null : _textCtrls[i].text.trim(),
-              _app.slotNames[i].$2);
+          (ic.isEmpty ? null : ic, id.isEmpty ? null : id);
     }
   }
 
@@ -522,6 +536,7 @@ class _SlotSettingsSheetState extends State<_SlotSettingsSheet> {
       await _dev.cmdSlotSetActive(slot);
       _app.currentSlot = slot;
       await _app.loadSlotEmuSettings(slot);
+      _loadNamesIntoCtrls();
       setState(() {});
     } catch (e) {
       _toast('卡槽 ${slot + 1} 读取设置失败: $e');
@@ -640,13 +655,13 @@ class _SlotSettingsSheetState extends State<_SlotSettingsSheet> {
               _freqRow('ID功能', lf, (v) {
                 setState(() => _app.enabledSlots[i] = (hf, v));
               }, primary),
-              _nameRow('ID别名', _textCtrls[i], (v) {
-                _app.slotNames[i] = (v, _app.slotNames[i].$2);
+              _nameRow('ID别名', _idNameCtrls[i], (v) {
+                _app.slotNames[i] = (_app.slotNames[i].$1, v);
               }),
               _freqRow('IC功能', hf, (v) {
                 setState(() => _app.enabledSlots[i] = (v, lf));
               }, primary),
-              _nameRow('IC别名', _textCtrls[i], (v) {
+              _nameRow('IC别名', _icNameCtrls[i], (v) {
                 _app.slotNames[i] = (v, _app.slotNames[i].$2);
               }),
               const Divider(height: 8),
