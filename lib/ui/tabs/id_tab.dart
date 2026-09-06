@@ -149,9 +149,9 @@ class _IdTabState extends State<IdTab> {
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      // 读卡槽前先把卡槽设为 EM4100 类型并激活（对齐 slotChangeTagTypeAndActive LF 分支），
-      // 否则非 EM4100 卡槽 read 会返回 invalid param(96)
-      await _prepareLfSlot(slot);
+      // 对齐小程序 btnEmuReadID：读卡槽只激活，不改变/重置卡槽数据，
+      // 否则 cmdSlotResetTagType(setSlotDataDefault) 会清空已有 ID 数据
+      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
       final id = await _dev.cmdEm410xGetEmuId();
       if (id.length != 5) throw DeviceException(1, '该卡槽无 ID 数据');
       final hex = id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
