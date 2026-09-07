@@ -150,23 +150,24 @@ class _IdTabState extends State<IdTab> {
     if (slot == null) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.tag);
-      // 对齐小程序 btnEmuReadID：读卡槽只激活，不改变/重置卡槽数据，
+      // 对齐小程序 btnEmuReadID：无条件激活卡槽，只读取不转换/重置卡槽类型，
       // 否则 cmdSlotResetTagType(setSlotDataDefault) 会清空已有 ID 数据
-      if (_app.currentSlot != slot) await _dev.cmdSlotSetActive(slot);
+      await _dev.cmdSlotSetActive(slot);
       final id = await _dev.cmdEm410xGetEmuId();
-      if (id.length != 5) throw DeviceException(1, '该卡槽无 ID 数据');
       final hex = id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-      setState(() {
-        _hexCtrl.text = hex.toLowerCase();
-        _syncDec(hex.toLowerCase());
-        _app.idCard.setCard(hex);
-        _app.currentSlot = slot;
-      });
-      _toast('已读取卡槽 ${slot + 1} 的 ID：${_app.idCard.idCardDec}');
+      if (mounted) {
+        setState(() {
+          _hexCtrl.text = hex.toLowerCase();
+          _syncDec(hex.toLowerCase());
+          _app.idCard.setCard(hex);
+          _app.currentSlot = slot;
+        });
+      }
+      _toast('读卡槽完成');
     } on DeviceException catch (e) {
-      // 对齐小程序：invalid param(96) 视为卡槽无 ID 数据，非失败
+      // 对齐小程序：invalid param(96) 视为卡槽无 ID 卡信息
       if (e.status == 96) {
-        _toast('卡槽 ${slot + 1} 无 ID 数据');
+        _toast('卡槽 ${slot + 1} 无 ID 卡信息');
       } else {
         _toast('读卡槽失败: ${e.message}');
       }
