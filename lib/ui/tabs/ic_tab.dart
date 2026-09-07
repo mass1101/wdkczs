@@ -1215,8 +1215,8 @@ class _IcTabState extends State<IcTab> {
                               isDense: true,
                             ),
                             onChanged: (t) => _app.card.keys = t,
-                          ),
-                        ),
+                 ),
+               ),
                         Column(
                           children: [
                             IconButton(
@@ -1245,38 +1245,44 @@ class _IcTabState extends State<IcTab> {
               // 卡片信息（对齐小程序：动态 M1 前缀 + 无边框输入框 + 实时校验变色 + 条件 ATS）
               SectionCard(
                 title: '卡片信息',
-                child: Column(
-                  children: [
-                    _infoField(
-                        Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
-                            style: TextStyle(
-                                fontSize: 13,
-                                color: _isStandardM1
-                                    ? Colors.green
-                                    : const Color(0xFFE53935))),
-                        _uidCtrl, '卡号应为8位16进制数',
-                        validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
-                        okColor: '#9933FF'),
-                    _infoField(
-                        const Text('SAK:',
-                            style: TextStyle(
-                                fontSize: 13, color: Color(0xFF666666))),
-                        _sakCtrl, '08',
-                        validRegex: r'^([0-9A-Fa-f]{2}\s*)+$'),
-                    _infoField(
-                        const Text('ATQA:',
-                            style: TextStyle(
-                                fontSize: 13, color: Color(0xFF666666))),
-                        _atqaCtrl, '0004',
-                        validRegex: r'^([0-9A-Fa-f]{4}\s*)+$'),
-                    if (_atsCtrl.text.isNotEmpty)
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
                       _infoField(
-                          const Text('ATS:',
+                          Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: _isStandardM1
+                                      ? Colors.green
+                                      : const Color(0xFFE53935))),
+                          _uidCtrl, '卡号应为8位16进制数',
+                          validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
+                          okColor: '#9933FF'),
+                      const SizedBox(width: 16),
+                      _infoField(
+                          const Text('SAK:',
+                              style: TextStyle(
+                                  fontSize: 13, color: Color(0xFF666666))),
+                          _sakCtrl, '08',
+                          validRegex: r'^([0-9A-Fa-f]{2}\s*)+$'),
+                      const SizedBox(width: 16),
+                      _infoField(
+                          const Text('ATQA:',
+                              style: TextStyle(
+                                  fontSize: 13, color: Color(0xFF666666))),
+                          _atqaCtrl, '0004',
+                          validRegex: r'^([0-9A-Fa-f]{4}\s*)+$'),
+                      const SizedBox(width: 16),
+                      if (_atsCtrl.text.isNotEmpty)
+                        _infoField(
+                            const Text('ATS:',
                               style: TextStyle(
                                   fontSize: 13, color: Color(0xFF666666))),
                           _atsCtrl, ''),
-                  ],
-                ),
+                    ],
+                   ),
+                 ),
               ),
               // 扇区数据表
               SectionCard(
@@ -1435,10 +1441,10 @@ class _IcTabState extends State<IcTab> {
             ? Color(int.parse(okColor.replaceFirst('#', '0xFF')))
             : null);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 1),
       child: Row(
         children: [
-          SizedBox(width: 92, child: Align(alignment: Alignment.centerLeft, child: prefix)),
+          SizedBox(width: 80, child: Align(alignment: Alignment.centerLeft, child: prefix)),
           Expanded(
             child: TextField(
               controller: ctrl,
@@ -1449,7 +1455,7 @@ class _IcTabState extends State<IcTab> {
                 hintText: hint,
                 hintStyle: const TextStyle(color: Color(0xFF999999)),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                contentPadding: const EdgeInsets.symmetric(vertical: 4),
                 border: InputBorder.none,
               ),
             ),
