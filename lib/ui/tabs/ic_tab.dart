@@ -135,11 +135,15 @@ class _IcTabState extends State<IcTab> {
           progress.value = '读卡片：正在读扇区$s...';
           final data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
           if (data.length < 64) continue;
+          final block3 = Uint8List.fromList(data.sublist(48, 64));
+          await _overlayBlock3Keys(s, block3);
           final blocks = List<BlockData>.generate(
-              4, (i) => BlockData(data: _hexStr(data.sublist(i * 16, i * 16 + 16))));
+              4, (i) => BlockData(data: i == 3
+                  ? _hexStr(block3)
+                  : _hexStr(data.sublist(i * 16, i * 16 + 16))));
           gen1aSectors[s] = SectorData(blocks: blocks);
-          final kA = _hexStr(data.sublist(48, 54));
-          final kB = _hexStr(data.sublist(58, 64));
+          final kA = _hexStr(block3.sublist(0, 6));
+          final kB = _hexStr(block3.sublist(10, 16));
           if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
           if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
         }
@@ -203,6 +207,12 @@ class _IcTabState extends State<IcTab> {
             if (keyRead) break;
           }
         }
+        final b3Hex = blocks[baseBlock + 3].data;
+        if (b3Hex != 'ffffffffffffffffffffffffffffffff') {
+          final block3 = _hex(b3Hex);
+          await _overlayBlock3Keys(sector, block3);
+          blocks[baseBlock + 3].data = _hexStr(block3);
+        }
       }
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
@@ -235,6 +245,18 @@ class _IcTabState extends State<IcTab> {
       if (mounted) Navigator.of(context).pop();
       _toast('读卡失败: $e');
     }
+  }
+
+  /// 检测扇区密钥并覆盖块3密钥区（对齐小程序 mf1CheckSectorKeys + sectors_Key 回填）
+  /// 读块3时访问位可能遮蔽密钥A（返回0），通过 mf1CheckSectorKeys 检测有效密钥并回填。
+  Future<void> _overlayBlock3Keys(int sector, Uint8List block3) async {
+    try {
+      final validKeys = await _dev.mf1CheckSectorKeys(sector, _keys.map(_hex).toList());
+      final va = validKeys[KeyType.keyA.value];
+      final vb = validKeys[KeyType.keyB.value];
+      if (va != null) block3.setRange(0, 6, va);
+      if (vb != null) block3.setRange(10, 16, vb);
+    } catch (_) {}
   }
 
   // ========== 写卡（对齐小程序：确认弹窗 + 步骤指示器 + 阶段前缀进度） ==========
