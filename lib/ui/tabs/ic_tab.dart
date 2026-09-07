@@ -36,8 +36,6 @@ class _IcTabState extends State<IcTab> {
 
   int _slotPage = 0;
 
-  String _cardType = 'Mifare Classic 1K';
-
   @override
   void initState() {
     super.initState();
@@ -1136,39 +1134,7 @@ class _IcTabState extends State<IcTab> {
     return ListenableBuilder(
       listenable: _app,
       builder: (context, _) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 卡槽切换指示条：点击弹窗选择卡槽
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: _pickSlot,
-                      icon: const Icon(Icons.swap_horiz, size: 18),
-                      label: Text('当前卡槽 ${_slotPage + 1}',
-                          style: const TextStyle(fontSize: 13)),
-                      style: TextButton.styleFrom(
-                        foregroundColor: primary,
-                        backgroundColor: primary.withValues(alpha: 0.08),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 内容区：单页展示当前卡槽
-            Expanded(
-              child: _buildSlotPage(_slotPage, primary),
-            ),
-          ],
-        );
+        return _buildSlotPage(_slotPage, primary);
       },
     );
   }
@@ -1235,10 +1201,6 @@ onChanged: (t) => _app.card.keys = t,
                         ),
                       ],
                     ),
-                    _cardLabel('卡类型', _cardType,
-                        trailing: [IconButton(
-                            icon: const Icon(Icons.expand_more, size: 18),
-                            onPressed: _pickCardType)]),
                   ],
                 ),
               ),
@@ -1259,21 +1221,21 @@ onChanged: (t) => _app.card.keys = t,
                           _uidCtrl, '卡号应为8位16进制数',
                           validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
                           okColor: '#9933FF'),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 12),
                       _infoField(
                           const Text('SAK:',
                               style: TextStyle(
                                   fontSize: 13, color: Color(0xFF666666))),
                           _sakCtrl, '08',
                           validRegex: r'^([0-9A-Fa-f]{2}\s*)+$'),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 12),
                       _infoField(
                           const Text('ATQA:',
                               style: TextStyle(
                                   fontSize: 13, color: Color(0xFF666666))),
                           _atqaCtrl, '0004',
                           validRegex: r'^([0-9A-Fa-f]{4}\s*)+$'),
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 12),
                       if (_atsCtrl.text.isNotEmpty)
                         _infoField(
                             const Text('ATS:',
@@ -1312,6 +1274,11 @@ onChanged: (t) => _app.card.keys = t,
               _sideBtn('导出', Icons.upload, _exportCard, primary),
               _sideBtn('管理数据', Icons.folder, _manageData, primary),
               _sideBtn('更多功能', Icons.more_horiz, _moreFeatures, primary),
+              const SizedBox(height: 8),
+              ConnectionBanner(
+                connected: _app.connected,
+                deviceName: _app.ble.device?.platformName,
+              ),
               const SizedBox(height: 16),
             ],
           ),
@@ -1405,29 +1372,6 @@ onChanged: (t) => _app.card.keys = t,
     }
   }
 
-  Widget _cardLabel(String label, String value, {List<Widget> trailing = const []}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 56,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          Expanded(
-            child: Text(value,
-                style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF333333),
-                    fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis),
-          ),
-          ...trailing,
-        ],
-      ),
-    );
-  }
-
   bool get _isStandardM1 => _sakCtrl.text.trim() == '08';
 
   /// 对齐小程序卡片信息：前缀标签 + 无边框输入框 + 实时格式校验变色
@@ -1443,9 +1387,11 @@ onChanged: (t) => _app.card.keys = t,
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(width: 80, child: Align(alignment: Alignment.centerLeft, child: prefix)),
-          Expanded(
+          prefix,
+          const SizedBox(width: 4),
+          Flexible(
             child: TextField(
               controller: ctrl,
               onChanged: (_) => setState(() {}),
@@ -1457,6 +1403,7 @@ onChanged: (t) => _app.card.keys = t,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 4),
                 border: InputBorder.none,
+                isCollapsed: true,
               ),
             ),
           ),
@@ -1507,26 +1454,6 @@ onChanged: (t) => _app.card.keys = t,
     } catch (e) {
       if (mounted) _toast('导出失败: $e');
     }
-  }
-
-  Future<void> _pickCardType() async {
-    if (!mounted) return;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.white,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: TagType.values
-              .map((t) => ListTile(
-                    title: Text(t.label),
-                    onTap: () => Navigator.pop(ctx, t.label),
-                  ))
-              .toList(),
-        ),
-      ),
-    );
-    if (choice != null) setState(() => _cardType = choice);
   }
 }
 

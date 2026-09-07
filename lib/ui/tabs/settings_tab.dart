@@ -262,6 +262,51 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
+  // ========== 云端设置 ==========
+  Future<void> _showCloudSettings() async {
+    final controller = TextEditingController(text: '');
+    final ep = await _app.cloud.getCloudEndpoint();
+    controller.text = ep;
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('云端服务地址', style: TextStyle(fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: 'https://...',
+                labelText: '云端 API 地址',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '默认使用作者提供的云端服务。可修改为自建后端。',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () async {
+              final val = controller.text.trim();
+              if (val.isNotEmpty) {
+                await _app.storage.setCloudEndpoint(val);
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ========== UI ==========
   @override
   Widget build(BuildContext context) {
@@ -333,6 +378,22 @@ class _SettingsTabState extends State<SettingsTab> {
                           icon: Icons.tune,
                           color: primary,
                           onTap: _showSlotSettings,
+                        ),
+                      ],
+                    ),
+                  ),
+                  // 关于
+                  SectionCard(
+                    title: '关于',
+                    child: Column(
+                      children: [
+                        _infoRow('应用名称', 'NFC Tool'),
+                        _infoRow('适用设备', 'Chameleon Ultra / CU- 系列'),
+                        _infoRow('云端服务', '点击设置', onTap: _showCloudSettings),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '仅用于学习与研究目的，请遵守当地法律法规。',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
                         ),
                       ],
                     ),

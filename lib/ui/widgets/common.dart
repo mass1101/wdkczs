@@ -197,13 +197,13 @@ class ConnectionBanner extends StatelessWidget {
               ),
             ),
           ),
-          if (connected)
+          if (connected && onDisconnect != null)
             GestureDetector(
               onTap: onDisconnect,
               child: const Text('断开',
                   style: TextStyle(fontSize: 13, color: Colors.grey)),
             )
-          else
+          else if (!connected && onConnect != null)
             GestureDetector(
               onTap: onConnect,
               child: Text('去连接',

@@ -66,116 +66,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
   }
 
-  void _showAbout() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('关于 NFC Tool'),
-        content: const Text(
-          'NFC Tool\n\n'
-          '适用于 Chameleon Ultra / CU- 系列读卡器\n'
-          '支持 IC 卡（MIFARE Classic）读写破解与 ID 卡（EM4100/HID）模拟。\n\n'
-          '仅用于学习与研究目的，请遵守当地法律法规。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showMenu() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('关于'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showAbout();
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('云端设置'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showCloudSettings();
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.close),
-              title: const Text('退出应用'),
-              onTap: () => Navigator.pop(ctx),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showCloudSettings() {
-    final controller = TextEditingController(text: '');
-    AppScope.instance.controller.cloud.getCloudEndpoint().then((ep) {
-      controller.text = ep;
-    });
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('云端服务地址'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                hintText: 'https://...',
-                labelText: '云端 API 地址',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '默认使用作者提供的云端服务。可修改为自建后端。',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final ep = controller.text.trim();
-              if (ep.isNotEmpty) {
-                await AppScope.instance.controller.storage.setCloudEndpoint(ep);
-              }
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
@@ -183,51 +73,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       backgroundColor: AppTheme.bg,
       body: Column(
         children: [
-          // 蓝底标题栏 + 胶囊按钮
-          Container(
-            decoration: BoxDecoration(
-              color: primary,
-              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(0)),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 4),
-                    const Expanded(
-                      child: Text(
-                        'NFC Tool',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    // 胶囊按钮（…/×）
-                    _CapsuleButton(
-                      icon: Icons.more_horiz,
-                      onTap: _showMenu,
-                    ),
-                    const SizedBox(width: 6),
-                    _CapsuleButton(
-                      icon: Icons.close,
-                      onTap: _showAbout,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // 连接横幅
-          ConnectionBanner(
-            connected: _app.connected,
-            deviceName: _app.ble.device?.platformName,
-            onConnect: _connect,
-            onDisconnect: _connect,
-          ),
           // TabBar
           Container(
             color: Colors.white,
@@ -274,30 +119,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 _app.connected ? Icons.link : Icons.bluetooth,
                 size: 26,
               ),
-      ),
-    );
-  }
-}
-
-/// 标题栏胶囊按钮
-class _CapsuleButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback? onTap;
-
-  const _CapsuleButton({required this.icon, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 24,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Icon(icon, size: 18, color: Colors.white),
       ),
     );
   }
