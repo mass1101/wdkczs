@@ -1231,9 +1231,8 @@ class _IcTabState extends State<IcTab> {
                 title: '卡片信息',
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  child: IntrinsicWidth(
-                    child: Row(
-                      children: [
+                  child: Row(
+                    children: [
                       _infoField(
                           Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
                               style: TextStyle(
@@ -1243,33 +1242,36 @@ class _IcTabState extends State<IcTab> {
                                       : const Color(0xFFE53935))),
                           _uidCtrl, '卡号应为8位16进制数',
                           validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
-                          okColor: '#9933FF'),
+                          okColor: '#9933FF',
+                          fieldWidth: 90),
                       const SizedBox(width: 12),
                       _infoField(
                           const Text('SAK:',
                               style: TextStyle(
                                   fontSize: 13, color: Color(0xFF666666))),
                           _sakCtrl, '08',
-                          validRegex: r'^([0-9A-Fa-f]{2}\s*)+$'),
+                          validRegex: r'^([0-9A-Fa-f]{2}\s*)+$',
+                          fieldWidth: 30),
                       const SizedBox(width: 12),
                       _infoField(
                           const Text('ATQA:',
                               style: TextStyle(
                                   fontSize: 13, color: Color(0xFF666666))),
                           _atqaCtrl, '0004',
-                          validRegex: r'^([0-9A-Fa-f]{4}\s*)+$'),
+                          validRegex: r'^([0-9A-Fa-f]{4}\s*)+$',
+                          fieldWidth: 50),
                       const SizedBox(width: 12),
                       if (_atsCtrl.text.isNotEmpty)
                         _infoField(
                             const Text('ATS:',
-                              style: TextStyle(
-                                  fontSize: 13, color: Color(0xFF666666))),
-                           _atsCtrl, ''),
-                       ],
-                     ),
-                   ),
-                 ),
-               ),
+                                style: TextStyle(
+                                    fontSize: 13, color: Color(0xFF666666))),
+                            _atsCtrl, '',
+                            fieldWidth: 120),
+                    ],
+                  ),
+                ),
+              ),
               // 扇区数据表
               SectionCard(
                 title: '扇区数据',
@@ -1400,7 +1402,7 @@ class _IcTabState extends State<IcTab> {
 
   /// 对齐小程序卡片信息：前缀标签 + 无边框输入框 + 实时格式校验变色
   Widget _infoField(Widget prefix, TextEditingController ctrl, String hint,
-      {String? validRegex, String? okColor}) {
+      {String? validRegex, String? okColor, double fieldWidth = 60}) {
     final ok = validRegex == null || RegExp(validRegex).hasMatch(ctrl.text);
     final fail = const Color(0xFFE53935);
     final Color? textColor = !ok
@@ -1415,18 +1417,21 @@ class _IcTabState extends State<IcTab> {
         children: [
           prefix,
           const SizedBox(width: 4),
-          TextField(
-            controller: ctrl,
-            onChanged: (_) => setState(() {}),
-            style: TextStyle(
-                fontSize: 13, color: textColor ?? const Color(0xFF333333)),
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: const TextStyle(color: Color(0xFF999999)),
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(vertical: 4),
-              border: InputBorder.none,
-              isCollapsed: true,
+          SizedBox(
+            width: fieldWidth,
+            child: TextField(
+              controller: ctrl,
+              onChanged: (_) => setState(() {}),
+              style: TextStyle(
+                  fontSize: 13, color: textColor ?? const Color(0xFF333333)),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: const TextStyle(color: Color(0xFF999999)),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                border: InputBorder.none,
+                isCollapsed: true,
+              ),
             ),
           ),
         ],
