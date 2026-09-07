@@ -110,6 +110,14 @@ class _IcTabState extends State<IcTab> {
       // 优先 Gen1a 免密读全卡（UID 卡），失败则走常规密钥认证读
       final found = <String>[];
       var gen1aDone = false;
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const CrackProgressDialog(
+            title: '正在读取卡片...', onCancel: null),
+      );
       try {
         final gen1aSectors = List.generate(16, (_) => SectorData());
         for (var s = 0; s < 16; s++) {
@@ -132,45 +140,55 @@ class _IcTabState extends State<IcTab> {
           _app.card.sectors = gen1aSectors;
         });
         _appendKeys(found);
-        _toast('读卡完成！');
       } catch (_) {
         // Gen1a 不可用，走常规认证读
       }
-      if (gen1aDone) return;
+      if (gen1aDone) {
+        if (mounted) Navigator.of(context).pop();
+        _toast('读卡完成！');
+        return;
+      }
 
-      // 常规认证读
+      // 常规认证读（对齐小程序：逐扇区逐块用已知密钥认证读取全部4块）
       final keyTypes = [KeyType.keyA, KeyType.keyB];
       final sectors = List.generate(16, (_) => SectorData());
       final blocks = List.generate(64, (_) => BlockData());
       var readCount = 0;
-      for (final keyType in keyTypes) {
-        for (final keyStr in _keys) {
-          final key = _hex(keyStr);
-          for (var sector = 0; sector < 16; sector++) {
-            if (!_app.card.toggle[sector]) continue;
-            final blockNum = sector * 4;
-            if (blocks[blockNum].data != '00000000000000000000000000000000') {
-              continue;
+      for (var sector = 0; sector < 16; sector++) {
+        if (!_app.card.toggle[sector]) continue;
+        final baseBlock = sector * 4;
+        var sectorRead = false;
+        for (final keyType in keyTypes) {
+          for (final keyStr in _keys) {
+            final key = _hex(keyStr);
+            for (var b = 0; b < 4; b++) {
+              final blockNum = baseBlock + b;
+              if (blocks[blockNum].data != 'ffffffffffffffffffffffffffffffff') {
+                continue;
+              }
+              try {
+                final data = await _dev.cmdMf1ReadBlock(
+                    block: blockNum, keyType: keyType, key: key);
+                blocks[blockNum].data = _hexStr(data);
+                readCount++;
+                sectorRead = true;
+              } catch (_) {}
             }
-            try {
-              final data = await _dev.cmdMf1ReadBlock(
-                  block: blockNum, keyType: keyType, key: key);
-              blocks[blockNum].data = _hexStr(data);
-              readCount++;
-            } catch (_) {}
+            if (sectorRead) break;
           }
+          if (sectorRead) break;
         }
       }
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
         final first = blocks[sector * 4].data;
-        if (first == '00000000000000000000000000000000') continue;
+        if (first == 'ffffffffffffffffffffffffffffffff') continue;
         final blocksArr =
             List<BlockData>.generate(4, (i) => blocks[sector * 4 + i]);
         sectors[sector] = SectorData(blocks: blocksArr);
         // 从 trailer(块3) 提取密钥回填
         final b3 = blocks[sector * 4 + 3].data;
-        if (b3 != '00000000000000000000000000000000') {
+        if (b3 != 'ffffffffffffffffffffffffffffffff') {
           final kb = _hex(b3);
           if (kb.length >= 16) {
             final kA = _hexStr(kb.sublist(0, 6));
@@ -187,8 +205,10 @@ class _IcTabState extends State<IcTab> {
         _app.card.sectors = sectors;
       });
       _appendKeys(found);
-      _toast('读取完成：$readCount 个扇区');
+      if (mounted) Navigator.of(context).pop();
+      _toast('读取完成：$readCount 个块');
     } catch (e) {
+      if (mounted) Navigator.of(context).pop();
       _toast('读卡失败: $e');
     }
   }
@@ -348,6 +368,13 @@ class _IcTabState extends State<IcTab> {
       final key = _hex(_keys.first);
 
       // 1) Gen1a 免密读全卡密钥（UID 卡秒解）
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const CrackProgressDialog(
+            title: '正在破解卡片...', onCancel: null),
+      );
       try {
         final found = <String>[];
         var allRead = true;
@@ -370,16 +397,26 @@ class _IcTabState extends State<IcTab> {
         }
         if (allRead) {
           _appendKeys(found);
+          if (mounted) Navigator.of(context).pop();
           _toast(found.isEmpty ? '未发现可破解密钥' : '破解成功');
           return;
         }
       } catch (_) {}
+      if (mounted) Navigator.of(context).pop();
 
       // 2) 常规逐扇区破解（对齐小程序：按 PRNG 逐扇区恢复 keyA，已破解扇区跳过）
       final prng = await _dev.cmdMf1TestPrngType();
       if (prng >= 2) {
         // 强随机：云端 hardnested
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const CrackProgressDialog(
+              title: '正在云端破解(强随机)...', onCancel: null),
+        );
         await _submitHardnested(uid);
+        if (mounted) Navigator.of(context).pop();
         return;
       }
       if (!mounted) return;
