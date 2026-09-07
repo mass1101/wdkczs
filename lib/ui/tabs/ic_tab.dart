@@ -1531,6 +1531,37 @@ class _SectorTableState extends State<_SectorTable> {
     if (changed) widget.onDataChanged();
   }
 
+  Widget _buildBlockText(int s, int b, String hex) {
+    // 块3：密钥A(12字符,绿色) + 访问位(8字符,橙色) + 密钥B(12字符,绿色)
+    if (b == 3) {
+      return Text.rich(
+        TextSpan(
+          style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          children: [
+            TextSpan(text: hex.substring(0, 12), style: const TextStyle(color: Color(0xFF4CAF50))),
+            TextSpan(text: hex.substring(12, 20), style: const TextStyle(color: Color(0xFFFF9800))),
+            TextSpan(text: hex.substring(20), style: const TextStyle(color: Color(0xFF4CAF50))),
+          ],
+        ),
+        maxLines: 1,
+      );
+    }
+    // 扇区0块0：卡号(前8字符,紫色) + 厂商码(后16字符,淡黄色)
+    if (s == 0 && b == 0) {
+      return Text.rich(
+        TextSpan(
+          style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          children: [
+            TextSpan(text: hex.substring(0, 8), style: const TextStyle(color: Color(0xFF9C27B0))),
+            TextSpan(text: hex.substring(8), style: const TextStyle(color: Color(0xFFFFF59D))),
+          ],
+        ),
+        maxLines: 1,
+      );
+    }
+    return Text(hex, maxLines: 1, style: const TextStyle(fontSize: 12, fontFamily: 'monospace'));
+  }
+
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
@@ -1591,13 +1622,7 @@ class _SectorTableState extends State<_SectorTable> {
                               child: FittedBox(
                                 fit: BoxFit.scaleDown,
                                 alignment: Alignment.centerLeft,
-                                child: Text(
-                                  _blockHex(s, b),
-                                  maxLines: 1,
-                                  style: const TextStyle(
-                                      fontSize: 12,
-                                      fontFamily: 'monospace'),
-                                ),
+                                child: _buildBlockText(s, b, _blockHex(s, b)),
                               ),
                             ),
                           ),
