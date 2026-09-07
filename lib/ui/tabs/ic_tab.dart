@@ -1393,20 +1393,18 @@ onChanged: (t) => _app.card.keys = t,
         children: [
           prefix,
           const SizedBox(width: 4),
-          Flexible(
-            child: TextField(
-              controller: ctrl,
-              onChanged: (_) => setState(() {}),
-              style: TextStyle(
-                  fontSize: 13, color: textColor ?? const Color(0xFF333333)),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: const TextStyle(color: Color(0xFF999999)),
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                border: InputBorder.none,
-                isCollapsed: true,
-              ),
+          TextField(
+            controller: ctrl,
+            onChanged: (_) => setState(() {}),
+            style: TextStyle(
+                fontSize: 13, color: textColor ?? const Color(0xFF333333)),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: const TextStyle(color: Color(0xFF999999)),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+              border: InputBorder.none,
+              isCollapsed: true,
             ),
           ),
         ],
