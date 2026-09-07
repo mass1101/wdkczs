@@ -1284,7 +1284,6 @@ class _IcTabState extends State<IcTab> {
                 child: _SectorTable(
                   card: _app.card,
                   onDataChanged: _app.refreshUi,
-                  onShare: () => _shareCard(),
                 ),
               ),
             ],
@@ -1529,9 +1528,7 @@ class _IcTabState extends State<IcTab> {
 class _SectorTable extends StatefulWidget {
   final CardState card;
   final VoidCallback onDataChanged;
-  final VoidCallback? onShare;
-  const _SectorTable(
-      {required this.card, required this.onDataChanged, this.onShare});
+  const _SectorTable({required this.card, required this.onDataChanged});
 
   @override
   State<_SectorTable> createState() => _SectorTableState();
@@ -1542,9 +1539,6 @@ class _SectorTableState extends State<_SectorTable> {
     final d = widget.card.sectors[s].blocks[b].data;
     return d.length >= 32 ? d : '00000000000000000000000000000000';
   }
-
-  String _sectorLine(int s) =>
-      List.generate(4, (b) => _blockHex(s, b)).join(' ');
 
   void _toggleSector(int s) {
     setState(() => widget.card.toggle[s] = !widget.card.toggle[s]);
@@ -1610,65 +1604,74 @@ class _SectorTableState extends State<_SectorTable> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text('每扇区 4 块，点击左侧勾选选择性读写，点击数据行编辑',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-              ),
-              if (widget.onShare != null)
-                TextButton.icon(
-                  onPressed: widget.onShare,
-                  icon: const Icon(Icons.share, size: 16),
-                  label: const Text('分享数据', style: TextStyle(fontSize: 12)),
-                ),
-            ],
-          ),
-        ),
         for (var s = 0; s < 16; s++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Row(
+          Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFFEDEDED)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 扇区行（toggle + 扇区号）
                 InkWell(
                   onTap: () => _toggleSector(s),
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 2, right: 6),
-                    child: Icon(
-                      widget.card.toggle[s]
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      size: 18,
-                      color: widget.card.toggle[s]
-                          ? primary
-                          : const Color(0xFFBBBBBB),
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Row(
+                      children: [
+                        Icon(
+                          widget.card.toggle[s]
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 16,
+                          color: widget.card.toggle[s]
+                              ? primary
+                              : const Color(0xFFBBBBBB),
+                        ),
+                        const SizedBox(width: 6),
+                        Text('扇区 ${s + 1}',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
                     ),
                   ),
                 ),
-                Expanded(
-                  child: InkWell(
+                for (var b = 0; b < 4; b++)
+                  InkWell(
                     onTap: () => _editSector(s),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: SizedBox(
-                        height: 18,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            _sectorLine(s),
-                            maxLines: 1,
-                            style: const TextStyle(
-                                fontSize: 13, fontFamily: 'monospace'),
+                      padding: const EdgeInsets.symmetric(vertical: 1),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 30,
+                            child: Text('块$b',
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.grey[500])),
                           ),
-                        ),
+                          Expanded(
+                            child: SizedBox(
+                              height: 17,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  _blockHex(s, b),
+                                  maxLines: 1,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontFamily: 'monospace'),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
