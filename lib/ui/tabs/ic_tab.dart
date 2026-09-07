@@ -786,19 +786,59 @@ class _IcTabState extends State<IcTab> {
             const ListTile(title: Text('已保存的 Dump', style: TextStyle(fontWeight: FontWeight.w600))),
             ...names.entries.map((e) => ListTile(
                   title: Text(e.key),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.grey),
-                    onPressed: () async {
-                      await _app.storage.delCard(e.key);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      _toast('已删除 ${e.key}');
-                    },
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _loadDump(e.key);
+                  },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.upload, size: 18),
+                        tooltip: '加载到扇区数据',
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          await _loadDump(e.key);
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.grey, size: 18),
+                        tooltip: '删除',
+                        onPressed: () async {
+                          await _app.storage.delCard(e.key);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          _toast('已删除 ${e.key}');
+                        },
+                      ),
+                    ],
                   ),
                 )),
           ],
         ),
       ),
     );
+  }
+
+  /// 从已保存的 Dump 加载到扇区数据（对齐小程序 load_dump）
+  Future<void> _loadDump(String name) async {
+    try {
+      final text = await _app.storage.getCard(name);
+      final lines = text.trim().split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      if (lines.length < 64) {
+        _toast('数据行数不足 64');
+        return;
+      }
+      final state = CardState.fromDumpText(lines);
+      setState(() {
+        _app.card = state;
+        _uidCtrl.text = state.uid;
+        _atqaCtrl.text = state.atqa;
+        _sakCtrl.text = state.sak;
+      });
+      _toast('加载完成：$name');
+    } catch (e) {
+      _toast('加载失败: $e');
+    }
   }
 
   // ========== 更多功能（格式化/改卡号/锁卡/双卡破解/云） ==========
