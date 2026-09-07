@@ -95,8 +95,10 @@ class _IcTabState extends State<IcTab> {
   List<String> get _keys =>
       _keyCtrl.text.split('\n').map((e) => e.trim()).where((e) => e.length == 12).toList();
 
-  // ========== 读卡 ==========
+  // ========== 读卡（对齐小程序：步骤指示器 + 阶段前缀进度） ==========
   Future<void> _readCard() async {
+    final progress = ValueNotifier<String>('验证密钥：寻卡中...');
+    final step = ValueNotifier<int>(0);
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -107,23 +109,30 @@ class _IcTabState extends State<IcTab> {
         return;
       }
       final uid = tag.uidHex;
-      // 优先 Gen1a 免密读全卡（UID 卡），失败则走常规密钥认证读
       final found = <String>[];
       var gen1aDone = false;
-      final progress = ValueNotifier<String>('正在读取卡片...');
 
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => CrackProgressDialog(
-            title: '正在读取卡片...', progress: progress, onCancel: null),
+          title: '正在读取卡片...',
+          steps: const ['验证密钥', '读卡片'],
+          step: step,
+          progress: progress,
+          onCancel: null,
+        ),
       );
+
+      // 验证密钥：尝试 Gen1a 免密读卡
       try {
+        step.value = 1;
+        progress.value = '验证密钥：发现UID卡，可免密读卡...';
         final gen1aSectors = List.generate(16, (_) => SectorData());
         for (var s = 0; s < 16; s++) {
           if (!_app.card.toggle[s]) continue;
-          progress.value = 'Gen1a 免密读取扇区 ${s + 1}/16...';
+          progress.value = '读卡片：正在读扇区$s...';
           final data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
           if (data.length < 64) continue;
           final blocks = List<BlockData>.generate(
@@ -151,14 +160,20 @@ class _IcTabState extends State<IcTab> {
         return;
       }
 
-      // 常规认证读（对齐小程序：逐扇区逐块用已知密钥认证读取全部4块）
+      // 验证密钥：验证中...
+      step.value = 0;
+      progress.value = '验证密钥：验证中...';
+      await _loadKeys();
+
+      // 读卡片：逐扇区逐块用已知密钥认证读取
+      step.value = 1;
       final keyTypes = [KeyType.keyA, KeyType.keyB];
       final sectors = List.generate(16, (_) => SectorData());
       final blocks = List.generate(64, (_) => BlockData());
       var readCount = 0;
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
-        progress.value = '常规认证读取扇区 ${sector + 1}/16...';
+        progress.value = '读卡片：正在读扇区$sector...';
         final baseBlock = sector * 4;
         var sectorRead = false;
         for (final keyType in keyTypes) {
@@ -189,7 +204,6 @@ class _IcTabState extends State<IcTab> {
         final blocksArr =
             List<BlockData>.generate(4, (i) => blocks[sector * 4 + i]);
         sectors[sector] = SectorData(blocks: blocksArr);
-        // 从 trailer(块3) 提取密钥回填
         final b3 = blocks[sector * 4 + 3].data;
         if (b3 != 'ffffffffffffffffffffffffffffffff') {
           final kb = _hex(b3);
@@ -351,8 +365,10 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 解卡（破解） ==========
+  // ========== 解卡（对齐小程序：步骤指示器 + 阶段前缀进度） ==========
   Future<void> _crackCard() async {
+    final progress = ValueNotifier<String>('验证密钥：寻卡中...');
+    final step = ValueNotifier<int>(0);
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -370,20 +386,26 @@ class _IcTabState extends State<IcTab> {
       final uidInt = _bytesInt(uid.sublist(0, 4));
       final key = _hex(_keys.first);
 
-      // 1) Gen1a 免密读全卡密钥（UID 卡秒解）
-      final progress = ValueNotifier<String>('正在破解卡片...');
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => CrackProgressDialog(
-            title: '正在破解卡片...', progress: progress, onCancel: null),
+          title: '正在破解卡片...',
+          steps: const ['验证密钥', '解卡片'],
+          step: step,
+          progress: progress,
+          onCancel: null,
+        ),
       );
+
+      // 验证密钥：尝试 Gen1a 免密读卡
       try {
+        progress.value = '验证密钥：发现UID卡，可免密读卡...';
         final found = <String>[];
         var allRead = true;
         for (var s = 0; s < 16; s++) {
-          progress.value = 'Gen1a 读取扇区 ${s + 1}/16...';
+          progress.value = '破解密钥：正在解密扇区$s...';
           final Uint8List data;
           try {
             data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
@@ -402,69 +424,71 @@ class _IcTabState extends State<IcTab> {
         }
         if (allRead) {
           _appendKeys(found);
+          progress.value = '破解密钥：破解成功';
           if (mounted) Navigator.of(context).pop();
           _toast(found.isEmpty ? '未发现可破解密钥' : '破解成功');
           return;
         }
       } catch (_) {}
-      if (mounted) Navigator.of(context).pop();
 
-      // 2) 常规逐扇区破解（对齐小程序：按 PRNG 逐扇区恢复 keyA，已破解扇区跳过）
+      // 验证密钥：验证中...
+      step.value = 0;
+      progress.value = '验证密钥：验证中...';
+      await _loadKeys();
+
+      // 验证密钥：已标记扇区密钥信息
+      final hasKey = List<bool>.generate(16, (_) => false);
+      for (var s = 0; s < 16; s++) {
+        for (final kStr in _keys) {
+          try {
+            final ok = await _dev.cmdMf1CheckBlockKey(
+                block: s * 4, keyType: KeyType.keyA, key: _hex(kStr));
+            if (ok) {
+              hasKey[s] = true;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+      progress.value = '验证密钥：已标记扇区密钥信息.';
+
+      // 检查是否全部已破解
+      if (hasKey.every((h) => h)) {
+        step.value = 1;
+        progress.value = '解卡片：破解成功，已重新标记密钥信息.';
+        if (mounted) Navigator.of(context).pop();
+        _toast('破解成功！');
+        return;
+      }
+
+      // 解卡片：逐扇区破解（对齐小程序 Crack()）
+      step.value = 1;
       final prng = await _dev.cmdMf1TestPrngType();
       if (prng >= 2) {
-        // 强随机：云端 hardnested
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => const CrackProgressDialog(
-              title: '正在云端破解(强随机)...', onCancel: null),
-        );
+        progress.value = '解卡片：该卡片为强随机卡，正在云端破解...';
         await _submitHardnested(uid);
         if (mounted) Navigator.of(context).pop();
         return;
       }
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => CrackProgressDialog(
-          title: '正在破解 (PRNG ${prng == 0 ? '静态' : '弱随机'})',
-          progress: progress,
-          onCancel: () {},
-        ),
-      );
-      try {
-        // 标记已破解扇区（验证各扇区块0 keyA 是否已被已知密钥解锁）
-        final hasKey = List<bool>.generate(16, (_) => false);
-        for (var s = 0; s < 16; s++) {
-          progress.value = '检测密钥扇区 ${s + 1}/16...';
-          for (final kStr in _keys) {
-            try {
-              final ok = await _dev.cmdMf1CheckBlockKey(
-                  block: s * 4,
-                  keyType: KeyType.keyA,
-                  key: _hex(kStr));
-              if (ok) {
-                hasKey[s] = true;
-                break;
-              }
-            } catch (_) {}
-          }
+      final found = <String>[];
+      for (var s = 0; s < 16; s++) {
+        if (hasKey[s]) continue;
+        if (prng == 0) {
+          progress.value = '破解密钥：该卡片为静态无漏洞卡，正在破解加密扇区：$s keyA...';
+        } else {
+          progress.value = '破解密钥：该卡片为弱随机卡，正在破解加密扇区：$s keyA...';
         }
-        final found = <String>[];
-        for (var s = 0; s < 16; s++) {
-          if (hasKey[s]) continue;
-          progress.value = '破解扇区 ${s + 1}/16...';
-          final rec = await _crackSectorKeyA(uidInt, s, prng, key);
-          if (rec != null) found.add(rec);
-        }
-        _appendKeys(found);
-        _toast(found.isEmpty ? '未找到新密钥' : '破解成功');
-      } finally {
-        if (mounted) Navigator.of(context).pop();
+        final rec = await _crackSectorKeyA(uidInt, s, prng, key);
+        if (rec != null) found.add(rec);
       }
+      _appendKeys(found);
+      progress.value = found.isEmpty
+          ? '解卡片：未找到新密钥'
+          : '解卡片：破解成功，已重新标记密钥信息.';
+      if (mounted) Navigator.of(context).pop();
+      _toast(found.isEmpty ? '未找到新密钥' : '破解成功');
     } catch (e) {
+      if (mounted) Navigator.of(context).pop();
       _toast('破解失败: $e');
     }
   }
