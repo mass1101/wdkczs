@@ -1569,14 +1569,15 @@ class _SectorTableState extends State<_SectorTable> {
         maxLines: 1,
       );
     }
-    // 扇区0块0：卡号(前8字符,紫色) + 厂商码(后16字符,淡黄色)
+    // 扇区0块0：卡号(前4字节,紫色) + 中间4字节(默认) + 厂商码(后8字节,黄色)
     if (s == 0 && b == 0) {
       return Text.rich(
         TextSpan(
           style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
           children: [
             TextSpan(text: hex.substring(0, 8), style: const TextStyle(color: Color(0xFF9C27B0))),
-            TextSpan(text: hex.substring(8), style: const TextStyle(color: Color(0xFFFFF59D))),
+            TextSpan(text: hex.substring(8, 16), style: const TextStyle(color: Color(0xFF333333))),
+            TextSpan(text: hex.substring(16), style: const TextStyle(color: Color(0xFFFFEB3B))),
           ],
         ),
         maxLines: 1,
