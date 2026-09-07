@@ -43,21 +43,23 @@ class AppTheme {
 
 /// 分组卡片（左侧蓝色竖条 + 标题，对应逆向 uni-section）
 class SectionCard extends StatelessWidget {
-  final String title;
+  final String? title;
   final Widget child;
   final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry margin;
 
   const SectionCard({
     super.key,
-    required this.title,
+    this.title,
     required this.child,
     this.padding = const EdgeInsets.fromLTRB(12, 10, 12, 12),
+    this.margin = const EdgeInsets.fromLTRB(10, 8, 10, 0),
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+      margin: margin,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -68,30 +70,31 @@ class SectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
-            child: Row(
-              children: [
-                Container(
-                  width: 4,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
-                    borderRadius: BorderRadius.circular(2),
+          if (title != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+              child: Row(
+                children: [
+                  Container(
+                    width: 4,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
+                  const SizedBox(width: 6),
+                  Text(
+                    title!,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           Padding(padding: padding, child: child),
         ],
       ),

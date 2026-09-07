@@ -175,10 +175,18 @@ class _IcTabState extends State<IcTab> {
         if (!_app.card.toggle[sector]) continue;
         progress.value = '读卡片：正在读扇区$sector...';
         final baseBlock = sector * 4;
-        var sectorRead = false;
         for (final keyType in keyTypes) {
+          var allRead = true;
+          for (var b = 0; b < 4; b++) {
+            if (blocks[baseBlock + b].data == 'ffffffffffffffffffffffffffffffff') {
+              allRead = false;
+              break;
+            }
+          }
+          if (allRead) break;
           for (final keyStr in _keys) {
             final key = _hex(keyStr);
+            var keyRead = false;
             for (var b = 0; b < 4; b++) {
               final blockNum = baseBlock + b;
               if (blocks[blockNum].data != 'ffffffffffffffffffffffffffffffff') {
@@ -189,12 +197,11 @@ class _IcTabState extends State<IcTab> {
                     block: blockNum, keyType: keyType, key: key);
                 blocks[blockNum].data = _hexStr(data);
                 readCount++;
-                sectorRead = true;
+                keyRead = true;
               } catch (_) {}
             }
-            if (sectorRead) break;
+            if (keyRead) break;
           }
-          if (sectorRead) break;
         }
       }
       for (var sector = 0; sector < 16; sector++) {
@@ -545,8 +552,12 @@ class _IcTabState extends State<IcTab> {
         } else {
           progress.value = '破解密钥：该卡片为弱随机卡，正在破解加密扇区：$s keyA...';
         }
-        final rec = await _crackSectorKeyA(uidInt, s, prng, key);
-        if (rec != null) found.add(rec);
+        try {
+          final rec = await _crackSectorKeyA(uidInt, s, prng, key);
+          if (rec != null) found.add(rec);
+        } catch (e) {
+          progress.value = '破解密钥：扇区$s 破解失败：$e';
+        }
       }
       _appendKeys(found);
       progress.value = found.isEmpty
@@ -563,46 +574,42 @@ class _IcTabState extends State<IcTab> {
   /// 对单个扇区恢复 keyA（按 PRNG 类型，对齐小程序逐扇区破解）
   Future<String?> _crackSectorKeyA(
       int uid, int sector, int prng, Uint8List key) async {
-    try {
-      if (prng == 0) {
-        final res = await _dev.cmdMf1AcquireStaticNested(
-            block: 0,
-            keyType: KeyType.keyA,
-            key: key,
-            targetBlock: sector * 4,
-            targetKeyType: KeyType.keyA);
-        final atks = res.atks
-            .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
-            .toList();
-        final recovered =
-            Crypto1.staticnested(uid: uid, keyType: 96, atks: atks);
-        if (recovered.isNotEmpty) return _int6Hex(recovered.first);
-        return null;
-      }
-      if (prng == 1) {
-        final distRes = await _dev.cmdMf1TestNtDistance(
-            block: 0, keyType: KeyType.keyA, key: key);
-        final dist = _bytesInt(distRes.dist.sublist(0, 4));
-        final nested = await _dev.cmdMf1AcquireNested(
-            block: 0,
-            keyType: KeyType.keyA,
-            key: key,
-            targetBlock: sector * 4,
-            targetKeyType: KeyType.keyA);
-        final atks = nested
-            .map((a) => {
-                  'nt1': _bytesInt(a.nt1),
-                  'nt2': _bytesInt(a.nt2),
-                  'par': a.par,
-                })
-            .toList();
-        final recovered = Crypto1.nested(uid: uid, dist: dist, atks: atks);
-        if (recovered.isNotEmpty) return _int6Hex(recovered.first);
-      }
-      return null;
-    } catch (_) {
+    if (prng == 0) {
+      final res = await _dev.cmdMf1AcquireStaticNested(
+          block: 0,
+          keyType: KeyType.keyA,
+          key: key,
+          targetBlock: sector * 4,
+          targetKeyType: KeyType.keyA);
+      final atks = res.atks
+          .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
+          .toList();
+      final recovered =
+          Crypto1.staticnested(uid: uid, keyType: 96, atks: atks);
+      if (recovered.isNotEmpty) return _int6Hex(recovered.first);
       return null;
     }
+    if (prng == 1) {
+      final distRes = await _dev.cmdMf1TestNtDistance(
+          block: 0, keyType: KeyType.keyA, key: key);
+      final dist = _bytesInt(distRes.dist.sublist(0, 4));
+      final nested = await _dev.cmdMf1AcquireNested(
+          block: 0,
+          keyType: KeyType.keyA,
+          key: key,
+          targetBlock: sector * 4,
+          targetKeyType: KeyType.keyA);
+      final atks = nested
+          .map((a) => {
+                'nt1': _bytesInt(a.nt1),
+                'nt2': _bytesInt(a.nt2),
+                'par': a.par,
+              })
+          .toList();
+      final recovered = Crypto1.nested(uid: uid, dist: dist, atks: atks);
+      if (recovered.isNotEmpty) return _int6Hex(recovered.first);
+    }
+    return null;
   }
 
   /// 卡号 XOR 校验（对齐小程序 btnWrite：卡第5字节 BCC = 前4字节异或）
@@ -1404,44 +1411,45 @@ class _IcTabState extends State<IcTab> {
               ),
               // 卡片信息（对齐小程序：动态 M1 前缀 + 无边框输入框 + 实时校验变色 + 条件 ATS）
               SectionCard(
-                title: '卡片信息',
+                margin: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+                padding: const EdgeInsets.fromLTRB(12, 5, 12, 6),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
                       _infoField(
                           Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color: _isStandardM1
-                                      ? Colors.green
-                                      : const Color(0xFFE53935))),
+                               style: TextStyle(
+                                   fontSize: 8,
+                                   color: _isStandardM1
+                                       ? Colors.green
+                                       : const Color(0xFFE53935))),
                           _uidCtrl, '卡号应为8位16进制数',
                           validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
                           okColor: '#9933FF',
                           fieldWidth: 90),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 4),
                       _infoField(
-                          const Text('SAK:',
-                              style: TextStyle(
-                                  fontSize: 13, color: Color(0xFF666666))),
+const Text('SAK:',
+                               style: TextStyle(
+                                   fontSize: 8, color: Color(0xFF666666))),
                           _sakCtrl, '08',
                           validRegex: r'^([0-9A-Fa-f]{2}\s*)+$',
                           fieldWidth: 30),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 4),
                       _infoField(
-                          const Text('ATQA:',
-                              style: TextStyle(
-                                  fontSize: 13, color: Color(0xFF666666))),
+const Text('ATQA:',
+                               style: TextStyle(
+                                   fontSize: 8, color: Color(0xFF666666))),
                           _atqaCtrl, '0004',
                           validRegex: r'^([0-9A-Fa-f]{4}\s*)+$',
                           fieldWidth: 50),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 4),
                       if (_atsCtrl.text.isNotEmpty)
                         _infoField(
-                            const Text('ATS:',
-                                style: TextStyle(
-                                    fontSize: 13, color: Color(0xFF666666))),
+const Text('ATS:',
+                                 style: TextStyle(
+                                     fontSize: 8, color: Color(0xFF666666))),
                             _atsCtrl, '',
                             fieldWidth: 120),
                     ],
@@ -1599,10 +1607,10 @@ class _IcTabState extends State<IcTab> {
               controller: ctrl,
               onChanged: (_) => setState(() {}),
               style: TextStyle(
-                  fontSize: 13, color: textColor ?? const Color(0xFF333333)),
+                   fontSize: 8, color: textColor ?? const Color(0xFF333333)),
               decoration: InputDecoration(
                 hintText: hint,
-                hintStyle: const TextStyle(color: Color(0xFF999999)),
+                hintStyle: const TextStyle(color: Color(0xFF999999), fontSize: 8),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 4),
                 border: InputBorder.none,
@@ -1695,18 +1703,26 @@ class _SectorTableState extends State<_SectorTable> {
             for (var b = 0; b < 4; b++)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
-                child: TextField(
-                  controller: ctrls[b],
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: b == 3 ? const Color(0xFF1E88E5) : const Color(0xFF333333)),
-                  maxLines: 1,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    border: const OutlineInputBorder(),
-                    hintText: '块 $b 数据(16字节hex)',
-                  ),
+                child: Row(
+                  children: [
+                    Text('块$b', style: const TextStyle(fontSize: 12, color: Color(0xFF666666))),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: ctrls[b],
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontFamily: 'monospace',
+                            color: b == 3 ? const Color(0xFF1E88E5) : const Color(0xFF333333)),
+                        maxLines: 1,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: const OutlineInputBorder(),
+                          hintText: '16字节hex',
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],
