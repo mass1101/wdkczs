@@ -1290,15 +1290,16 @@ class _IcTabState extends State<IcTab> {
             ],
           ),
         ),
-        // 右侧按钮列
+        // 右侧按钮列（按钮等宽并向右对齐）
         Container(
           width: 96,
           margin: const EdgeInsets.fromLTRB(0, 8, 6, 0),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _sideBtn('读卡', Icons.radio_button_checked, _readCard, primary),
-              _sideBtn('写卡', Icons.save_alt, _writeCard, primary),
-              _sideBtn('解卡', Icons.lock_open, _crackCard, primary),
+              _sideBtn('读卡片', Icons.radio_button_checked, _readCard, primary),
+              _sideBtn('写卡片', Icons.save_alt, _writeCard, primary),
+              _sideBtn('解卡片', Icons.lock_open, _crackCard, primary),
               _sideBtn('读卡槽', Icons.memory, _readSlot, primary),
               _sideBtn('写卡槽', Icons.memory, _writeSlot, primary),
               _sideBtn('算密钥', Icons.calculate, _mfkey, primary),
@@ -1462,12 +1463,15 @@ class _IcTabState extends State<IcTab> {
   Widget _sideBtn(String label, IconData icon, VoidCallback? onTap, Color color) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: ActionButton(
-          label: label,
-          icon: icon,
-          color: color,
-          onTap: onTap,
-          enabled: _app.connected || label == '导入' || label == '管理数据'),
+      child: SizedBox(
+        width: 96,
+        child: ActionButton(
+            label: label,
+            icon: icon,
+            color: color,
+            onTap: onTap,
+            enabled: _app.connected || label == '导入' || label == '管理数据'),
+      ),
     );
   }
 
