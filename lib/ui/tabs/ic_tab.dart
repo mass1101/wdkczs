@@ -110,18 +110,20 @@ class _IcTabState extends State<IcTab> {
       // 优先 Gen1a 免密读全卡（UID 卡），失败则走常规密钥认证读
       final found = <String>[];
       var gen1aDone = false;
+      final progress = ValueNotifier<String>('正在读取卡片...');
 
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const CrackProgressDialog(
-            title: '正在读取卡片...', onCancel: null),
+        builder: (ctx) => CrackProgressDialog(
+            title: '正在读取卡片...', progress: progress, onCancel: null),
       );
       try {
         final gen1aSectors = List.generate(16, (_) => SectorData());
         for (var s = 0; s < 16; s++) {
           if (!_app.card.toggle[s]) continue;
+          progress.value = 'Gen1a 免密读取扇区 ${s + 1}/16...';
           final data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
           if (data.length < 64) continue;
           final blocks = List<BlockData>.generate(
@@ -156,6 +158,7 @@ class _IcTabState extends State<IcTab> {
       var readCount = 0;
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
+        progress.value = '常规认证读取扇区 ${sector + 1}/16...';
         final baseBlock = sector * 4;
         var sectorRead = false;
         for (final keyType in keyTypes) {
@@ -368,17 +371,19 @@ class _IcTabState extends State<IcTab> {
       final key = _hex(_keys.first);
 
       // 1) Gen1a 免密读全卡密钥（UID 卡秒解）
+      final progress = ValueNotifier<String>('正在破解卡片...');
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const CrackProgressDialog(
-            title: '正在破解卡片...', onCancel: null),
+        builder: (ctx) => CrackProgressDialog(
+            title: '正在破解卡片...', progress: progress, onCancel: null),
       );
       try {
         final found = <String>[];
         var allRead = true;
         for (var s = 0; s < 16; s++) {
+          progress.value = 'Gen1a 读取扇区 ${s + 1}/16...';
           final Uint8List data;
           try {
             data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
@@ -425,6 +430,7 @@ class _IcTabState extends State<IcTab> {
         barrierDismissible: false,
         builder: (ctx) => CrackProgressDialog(
           title: '正在破解 (PRNG ${prng == 0 ? '静态' : '弱随机'})',
+          progress: progress,
           onCancel: () {},
         ),
       );
@@ -432,6 +438,7 @@ class _IcTabState extends State<IcTab> {
         // 标记已破解扇区（验证各扇区块0 keyA 是否已被已知密钥解锁）
         final hasKey = List<bool>.generate(16, (_) => false);
         for (var s = 0; s < 16; s++) {
+          progress.value = '检测密钥扇区 ${s + 1}/16...';
           for (final kStr in _keys) {
             try {
               final ok = await _dev.cmdMf1CheckBlockKey(
@@ -448,6 +455,7 @@ class _IcTabState extends State<IcTab> {
         final found = <String>[];
         for (var s = 0; s < 16; s++) {
           if (hasKey[s]) continue;
+          progress.value = '破解扇区 ${s + 1}/16...';
           final rec = await _crackSectorKeyA(uidInt, s, prng, key);
           if (rec != null) found.add(rec);
         }
