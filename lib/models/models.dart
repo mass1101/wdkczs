@@ -183,7 +183,7 @@ class BlockData {
   String data; // 32 hex chars
   bool marked; // 高亮标记
 
-  BlockData({this.data = '00000000000000000000000000000000', this.marked = false});
+  BlockData({this.data = 'ffffffffffffffffffffffffffffffff', this.marked = false});
 }
 
 /// 扇区数据（4 块）
