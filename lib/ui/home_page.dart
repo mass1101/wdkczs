@@ -77,12 +77,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Container(
             color: primary,
             padding: const EdgeInsets.symmetric(vertical: 20),
-            child: const Center(
-              child: Text('NFCAPP',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white)),
+            child: Center(
+              child: Transform.translate(
+                offset: const Offset(0, 5),
+                child: Text('NFCAPP',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
+              ),
             ),
           ),
           // TabBar
