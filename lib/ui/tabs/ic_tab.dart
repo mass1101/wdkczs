@@ -1209,8 +1209,9 @@ onChanged: (t) => _app.card.keys = t,
                 title: '卡片信息',
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
+                  child: IntrinsicWidth(
+                    child: Row(
+                      children: [
                       _infoField(
                           Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
                               style: TextStyle(
@@ -1241,11 +1242,12 @@ onChanged: (t) => _app.card.keys = t,
                             const Text('ATS:',
                               style: TextStyle(
                                   fontSize: 13, color: Color(0xFF666666))),
-                          _atsCtrl, ''),
-                    ],
+                           _atsCtrl, ''),
+                       ],
+                     ),
                    ),
                  ),
-              ),
+               ),
               // 扇区数据表
               SectionCard(
                 title: '扇区数据',
