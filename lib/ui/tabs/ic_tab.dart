@@ -1565,7 +1565,7 @@ class _SectorTableState extends State<_SectorTable> {
                               : const Color(0xFFBBBBBB),
                         ),
                         const SizedBox(width: 6),
-                        Text('扇区 ${s + 1}',
+                        Text('扇区 $s',
                             style: const TextStyle(
                                 fontSize: 12, fontWeight: FontWeight.w600)),
                       ],
