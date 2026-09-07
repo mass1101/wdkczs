@@ -35,6 +35,7 @@ class _IcTabState extends State<IcTab> {
   final _keyCtrl = TextEditingController(text: kDefaultKeys.join('\n'));
 
   int _slotPage = 0;
+  bool _keysValid = true;
 
   @override
   void initState() {
@@ -1169,10 +1170,12 @@ class _IcTabState extends State<IcTab> {
                             maxLines: 6,
                             minLines: 4,
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 13,
-                                color: Color(0xFFE53935)),
+                             style: TextStyle(
+                                 fontFamily: 'monospace',
+                                 fontSize: 13,
+                                 color: _keysValid
+                                     ? const Color(0xFF333333)
+                                     : Colors.red),
                             decoration: const InputDecoration(
                               hintText: '一行一个密钥,密钥应为12位16进制数',
                               hintStyle:
@@ -1180,7 +1183,18 @@ class _IcTabState extends State<IcTab> {
                               border: InputBorder.none,
                               isDense: true,
                             ),
-onChanged: (t) => _app.card.keys = t,
+                             onChanged: (t) {
+                               _app.card.keys = t;
+                               setState(() {
+                                 final lines = t
+                                     .split('\n')
+                                     .map((e) => e.trim())
+                                     .where((e) => e.isNotEmpty)
+                                     .toList();
+                                 _keysValid = lines.every(
+                                     (e) => RegExp(r'^[0-9a-f]{12}$').hasMatch(e.toLowerCase()));
+                               });
+                             },
                             ),
                           ),
                         Column(
