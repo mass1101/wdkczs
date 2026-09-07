@@ -29,6 +29,8 @@ class _IdTabState extends State<IdTab> {
 
   bool _keysValid = true;
   List<IdCardItem> _cards = [];
+  String _cardType = '';
+  String _cardTypeDetail = '';
 
   @override
   void initState() {
@@ -114,22 +116,66 @@ class _IdTabState extends State<IdTab> {
     _decCtrl.text = v.toString().padLeft(13, '0');
   }
 
-  // ========== 读卡 ==========
+  // ========== 读卡（自动识别卡类型） ==========
   Future<void> _readCard() async {
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
-      final res = await _dev.cmdEm410xScan();
-      if (res.id.length != 5) throw DeviceException(1, '未发现 ID 卡');
-      final hex = res.id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      
+      // 1. 尝试读取 EM4100
+      try {
+        final res = await _dev.cmdEm410xScan();
+        if (res.id.length != 5) throw DeviceException(1, '未发现卡片');
+        final hex = res.id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        setState(() {
+          _hexCtrl.text = hex.toLowerCase();
+          _syncDec(hex);
+          _app.idCard.setCard(hex);
+          _cardType = 'EM4100';
+          _cardTypeDetail = 'tagType: ${res.tagType}';
+        });
+        _toast('读到 EM4100 ID：${_app.idCard.idCardDec}');
+        return;
+      } on DeviceException catch (e) {
+        if (e.status != 96) rethrow; // 96 = invalid param, 继续尝试其他类型
+      }
+      
+      // 2. 尝试读取 HID Prox
+      try {
+        final res = await _dev.cmdHidProxScan();
+        if (res.fc == 0 && res.cn == 0) throw DeviceException(1, '未发现卡片');
+        final hex = _hidProxToHex(res);
+        setState(() {
+          _hexCtrl.text = hex.toLowerCase();
+          _syncDec(hex);
+          _app.idCard.setCard(hex);
+          _cardType = 'HID Prox';
+          _cardTypeDetail = 'format: ${res.format}, FC: ${res.fc}, CN: ${res.cn}, OEM: ${res.oem}';
+        });
+        _toast('读到 HID Prox ID：${_app.idCard.idCardDec}');
+        return;
+      } on DeviceException catch (e) {
+        if (e.status != 96) rethrow;
+      }
+      
+      // 3. 都未识别
       setState(() {
-        _hexCtrl.text = hex.toLowerCase();
-        _syncDec(hex);
-        _app.idCard.setCard(hex);
+        _cardType = '';
+        _cardTypeDetail = '';
       });
-      _toast('读到 ID：${_app.idCard.idCardDec}');
+      _toast('未发现支持的 ID 卡');
     } catch (e) {
       _toast('读卡失败: $e');
     }
+  }
+  
+  /// 将 HID Prox 数据转换为 hex 字符串
+  String _hidProxToHex(HidProxScanRes res) {
+    // HID Prox 16-bit format: OEM(2) + FC(4) + CN(2)
+    // 转换为 hex 字符串
+    final oem = res.oem.toRadixString(16).padLeft(4, '0');
+    final fc = res.fc.toRadixString(16).padLeft(8, '0');
+    final cn = res.cn.toRadixString(16).padLeft(4, '0');
+    return '$oem$fc$cn';
   }
 
   // ========== 读卡槽 ==========
@@ -365,6 +411,44 @@ class _IdTabState extends State<IdTab> {
                     title: 'ID 卡号',
                     child: Column(
                       children: [
+                        if (_cardType.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE3F2FD),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    _cardType,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF1976D2),
+                                    ),
+                                  ),
+                                ),
+                                if (_cardTypeDetail.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _cardTypeDetail,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey,
+                                        fontFamily: 'monospace',
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                         _numRow('十进制', _decCtrl, '000536875977487',
                             onChanged: _syncHex),
                         _numRow('十六进制', _hexCtrl, '0000000000',
