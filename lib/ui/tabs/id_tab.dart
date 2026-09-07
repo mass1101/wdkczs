@@ -196,10 +196,11 @@ class _IdTabState extends State<IdTab> {
       // 对齐小程序：写入 ID 数据后保存卡槽设置
       await _dev.cmdSlotSaveSettings();
       _app.currentSlot = slot;
-      await _app.storage.saveIdCards([
-        ..._cards.where((c) => c.id != hex),
-        IdCardItem(id: hex, name: _cards.isEmpty ? '未命名' : _cards.first.name),
-      ]);
+      // 对齐小程序 btnEmuWriteID：写卡槽后刷新启用卡槽列表（cmdSlotGetIsEnable）
+      try {
+        await _app.loadEnabledSlots();
+        if (mounted) setState(() {});
+      } catch (_) {}
       _toast('已写入卡槽 ${slot + 1}');
     } catch (e) {
       _toast('写卡槽失败: $e');
