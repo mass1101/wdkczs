@@ -230,8 +230,29 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 写卡 ==========
+  // ========== 写卡（对齐小程序：确认弹窗 + 步骤指示器 + 阶段前缀进度） ==========
   Future<void> _writeCard() async {
+    // 确认弹窗
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确定要写卡片吗？'),
+        content: const Text('即将写入数据至卡片，继续吗?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('继续')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    final progress = ValueNotifier<String>('验证密钥：寻卡中...');
+    final step = ValueNotifier<int>(0);
+    var stopFlag = false;
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -242,13 +263,33 @@ class _IcTabState extends State<IcTab> {
         return;
       }
       if (!_nuidXorValid()) throw Exception('数据有误，卡号XOR校验码不正确');
-      // 优先 Gen1a 免密写（UID 卡），失败则走常规认证写
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => CrackProgressDialog(
+          title: '写卡片',
+          steps: const ['验证密钥', '写卡片'],
+          step: step,
+          progress: progress,
+          onCancel: () {
+            stopFlag = true;
+          },
+        ),
+      );
+
+      // 验证密钥：尝试 Gen1a 免密写
       var gen1aDone = false;
       try {
+        step.value = 1;
+        progress.value = '验证密钥：发现UID卡，可免密读写...';
         for (var sector = 0; sector < 16; sector++) {
+          if (stopFlag) throw Exception('已停止');
           if (!_app.card.toggle[sector]) continue;
           final blocks = _app.card.sectors[sector].blocks;
           if (blocks[0].data == '00000000000000000000000000000000') continue;
+          progress.value = '写卡片：正在写扇区$sector...';
           final payload = Uint8List(64);
           for (var b = 0; b < 4; b++) {
             payload.setRange(b * 16, b * 16 + 16, _hex(blocks[b].data));
@@ -256,50 +297,76 @@ class _IcTabState extends State<IcTab> {
           await _dev.mf1Gen1aWriteBlocks(sector * 4, payload);
         }
         gen1aDone = true;
+        progress.value = '写卡片：写入完成';
         _toast('写入完成');
-      } catch (_) {
-        // Gen1a 不可用，走常规认证写
+      } catch (e) {
+        if (stopFlag) {
+          _toast('已停止');
+        } else {
+          // Gen1a 不可用，走常规认证写
+        }
       }
-      if (gen1aDone) return;
+      if (gen1aDone) {
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
 
-      // 常规认证写
-      final uidBytes = _hex(tag.uidHex);
-      final atqa = _hex(_atqaCtrl.text).reversed.toList();
-      await _dev.cmdHf14aSetAntiCollData(
-          uid: uidBytes,
-          atqa: Uint8List.fromList(atqa),
-          sak: _hex(_sakCtrl.text));
-      var written = 0;
+      // 验证密钥：验证中...
+      step.value = 0;
+      progress.value = '验证密钥：验证中...';
+      await _loadKeys();
+
+      // 写卡片：逐扇区写入（对齐小程序 btnGen2Write）
+      step.value = 1;
+      final failedBlocks = <int>[];
       for (var sector = 0; sector < 16; sector++) {
+        if (stopFlag) break;
         if (!_app.card.toggle[sector]) continue;
+        progress.value = '写卡片：正在写入扇区：$sector...';
         final blocks = _app.card.sectors[sector].blocks;
         if (blocks[0].data == '00000000000000000000000000000000') continue;
-        for (final keyStr in _keys) {
-          final key = _hex(keyStr);
-          for (var b = 0; b < 4; b++) {
-            final blockNum = sector * 4 + b;
-            try {
-              await _dev.cmdMf1WriteBlock(
-                  block: blockNum,
-                  keyType: KeyType.keyA,
-                  key: key,
-                  data: _hex(blocks[b].data));
-              written++;
-            } catch (_) {
+        for (var b = 0; b < 4; b++) {
+          if (stopFlag) break;
+          final blockNum = sector * 4 + b;
+          var written = false;
+          for (final keyStr in _keys) {
+            final key = _hex(keyStr);
+            if (!written) {
+              try {
+                await _dev.cmdMf1WriteBlock(
+                    block: blockNum,
+                    keyType: KeyType.keyA,
+                    key: key,
+                    data: _hex(blocks[b].data));
+                written = true;
+              } catch (_) {}
+            }
+            if (!written) {
               try {
                 await _dev.cmdMf1WriteBlock(
                     block: blockNum,
                     keyType: KeyType.keyB,
                     key: key,
                     data: _hex(blocks[b].data));
-                written++;
+                written = true;
               } catch (_) {}
             }
+            if (written) break;
           }
+          if (!written) failedBlocks.add(blockNum);
         }
       }
-      _toast('写入完成：$written 块');
+      if (failedBlocks.isEmpty) {
+        progress.value = '写卡片：写入完成';
+        _toast('写入完成');
+      } else {
+        progress.value =
+            '写卡片：块${failedBlocks.join('，')} 写入失败';
+        _toast('写入完成：${failedBlocks.length} 块失败');
+      }
+      if (mounted) Navigator.of(context).pop();
     } catch (e) {
+      if (mounted) Navigator.of(context).pop();
       _toast('写卡失败: $e');
     }
   }
