@@ -44,6 +44,7 @@ class _IcTabState extends State<IcTab> {
     _atqaCtrl.text = _app.card.atqa;
     _sakCtrl.text = _app.card.sak;
     _keyCtrl.text = _app.card.keys;
+    _validateKeys(_app.card.keys);
     _loadKeys();
     _loadSlots();
   }
@@ -70,7 +71,18 @@ class _IcTabState extends State<IcTab> {
     final names = await _app.storage.getKeyNames();
     if (names.isNotEmpty && mounted) {
       _keyCtrl.text = names.values.first;
+      _validateKeys(names.values.first);
     }
+  }
+
+  void _validateKeys(String text) {
+    final lines = text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    _keysValid = lines.every(
+        (e) => RegExp(r'^[0-9a-f]{12}$').hasMatch(e.toLowerCase()));
   }
 
   void _toast(String msg) {
@@ -481,6 +493,7 @@ class _IcTabState extends State<IcTab> {
           ? toAdd.join('\n')
           : '${lines.join('\n')}\n${toAdd.join('\n')}';
       _app.card.keys = _keyCtrl.text;
+      _validateKeys(_keyCtrl.text);
     });
   }
 
@@ -542,6 +555,7 @@ class _IcTabState extends State<IcTab> {
         setState(() {
           _keyCtrl.text = '$found\n${_keyCtrl.text}';
           _app.card.keys = _keyCtrl.text;
+          _validateKeys(_keyCtrl.text);
         });
         foundCount++;
       }
@@ -880,6 +894,7 @@ class _IcTabState extends State<IcTab> {
         setState(() {
           _keyCtrl.text = '${_keyCtrl.text.trim()}\n${results.join('\n')}';
           _app.card.keys = _keyCtrl.text;
+          _validateKeys(_keyCtrl.text);
         });
         _toast('双卡破解成功，已添加 ${results.length} 个密钥');
       } else {
@@ -1093,6 +1108,7 @@ class _IcTabState extends State<IcTab> {
       await _app.storage.saveKey(name, lines.join('\n'));
       setState(() {
         _keyCtrl.text = lines.join('\n');
+        _validateKeys(_keyCtrl.text);
       });
       _toast('密钥已导入：$name');
     } catch (e) {
@@ -1185,15 +1201,7 @@ class _IcTabState extends State<IcTab> {
                             ),
                              onChanged: (t) {
                                _app.card.keys = t;
-                               setState(() {
-                                 final lines = t
-                                     .split('\n')
-                                     .map((e) => e.trim())
-                                     .where((e) => e.isNotEmpty)
-                                     .toList();
-                                 _keysValid = lines.every(
-                                     (e) => RegExp(r'^[0-9a-f]{12}$').hasMatch(e.toLowerCase()));
-                               });
+                               setState(() => _validateKeys(t));
                              },
                             ),
                           ),
@@ -1455,6 +1463,7 @@ class _IcTabState extends State<IcTab> {
     setState(() {
       _keyCtrl.text = sel.$2.isEmpty ? kDefaultKeys.join('\n') : sel.$2;
       _app.card.keys = _keyCtrl.text;
+      _validateKeys(_keyCtrl.text);
     });
   }
 
