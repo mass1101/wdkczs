@@ -1166,9 +1166,10 @@ class DeviceService {
   }
 
   /// 读取 EM4100 模拟 ID
+  /// 设备返回数据前 2 字节为状态/长度前缀，实际卡号在之后的 5 字节中
   Future<Uint8List> cmdEm410xGetEmuId() async {
     final r = await _request(Cmd.em410xGetEmuId.value, null);
-    return r;
+    return r.length > 2 ? r.sublist(2) : r;
   }
 
   Future<void> cmdMf1EmuWriteBlock(int offset, Uint8List data) async {
