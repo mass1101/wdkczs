@@ -31,7 +31,7 @@ class AppController extends ChangeNotifier {
   bool get connected => ble.isConnected;
 
   // IC 卡状态
-  CardState card = CardState();
+  CardState card = CardState.withDefaultData();
 
   // ID 卡状态
   IdCardState idCard = IdCardState();
