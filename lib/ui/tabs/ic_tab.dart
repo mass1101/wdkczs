@@ -1214,9 +1214,9 @@ class _IcTabState extends State<IcTab> {
                               border: InputBorder.none,
                               isDense: true,
                             ),
-                            onChanged: (t) => _app.card.keys = t,
-                 ),
-               ),
+onChanged: (t) => _app.card.keys = t,
+                            ),
+                          ),
                         Column(
                           children: [
                             IconButton(
