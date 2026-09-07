@@ -131,7 +131,7 @@ class _IdTabState extends State<IdTab> {
           _syncDec(hex);
           _app.idCard.setCard(hex);
           _cardType = 'EM4100';
-          _cardTypeDetail = 'tagType: ${res.tagType}';
+          _cardTypeDetail = '';
         });
         _toast('读到 EM4100 ID：${_app.idCard.idCardDec}');
         return;
