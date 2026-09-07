@@ -221,59 +221,72 @@ class _IcTabState extends State<IcTab> {
       progress.value = '验证密钥：验证中...';
       await _loadKeys();
 
-      // 读卡片：逐扇区逐块用已知密钥认证读取
+      // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey）
+      final sectorKeys = List.generate(16, (s) => _SectorKey(s));
+      final allKeys = _keys.map(_hex).toList();
+      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
+      progress.value = '验证密钥：已标记扇区密钥信息.';
+
+      if (anyMissing) {
+        _appendKeysFromSectors(sectorKeys);
+        progress.value = '读卡片：卡片有加密，请先使用解卡片功能获取密钥';
+        if (mounted) Navigator.of(context).pop();
+        _toast('卡片有加密，请先使用解卡片功能获取密钥');
+        return;
+      }
+
+      // 读卡片：逐扇区逐块用已确定密钥读取（对齐小程序 btnGen2Read）
       step.value = 1;
-      final keyTypes = [KeyType.keyA, KeyType.keyB];
       final sectors = List.generate(16, (_) => SectorData());
-      final blocks = List.generate(64, (_) => BlockData());
-      var readCount = 0;
-      for (var sector = 0; sector < 16; sector++) {
-        if (!_app.card.toggle[sector]) continue;
-        progress.value = '读卡片：正在读扇区$sector...';
-        final baseBlock = sector * 4;
-        for (final keyType in keyTypes) {
-          var allRead = true;
-          for (var b = 0; b < 4; b++) {
-            if (blocks[baseBlock + b].data == 'ffffffffffffffffffffffffffffffff') {
-              allRead = false;
-              break;
-            }
+      final allBlocks = List<BlockData>.generate(64, (_) => BlockData());
+      final failedBlocks = <int>[];
+      for (var s = 0; s < 16; s++) {
+        if (!_app.card.toggle[s]) continue;
+        progress.value = '读卡片：正在读扇区$s...';
+        final baseBlock = s * 4;
+        for (var b = 0; b < 4; b++) {
+          final blockNum = baseBlock + b;
+          // 先试 keyA，失败再试 keyB（对齐小程序 btnGen2Read）
+          var read = false;
+          if (sectorKeys[s].hasKeyA && sectorKeys[s].keyA.isNotEmpty) {
+            try {
+              final data = await _dev.cmdMf1ReadBlock(
+                  block: blockNum,
+                  keyType: KeyType.keyA,
+                  key: _hex(sectorKeys[s].keyA));
+              allBlocks[blockNum].data = _hexStr(data);
+              read = true;
+            } catch (_) {}
           }
-          if (allRead) break;
-          for (final keyStr in _keys) {
-            final key = _hex(keyStr);
-            var keyRead = false;
-            for (var b = 0; b < 4; b++) {
-              final blockNum = baseBlock + b;
-              if (blocks[blockNum].data != 'ffffffffffffffffffffffffffffffff') {
-                continue;
-              }
-              try {
-                final data = await _dev.cmdMf1ReadBlock(
-                    block: blockNum, keyType: keyType, key: key);
-                blocks[blockNum].data = _hexStr(data);
-                readCount++;
-                keyRead = true;
-              } catch (_) {}
-            }
-            if (keyRead) break;
+          if (!read &&
+              sectorKeys[s].hasKeyB &&
+              sectorKeys[s].keyB.isNotEmpty) {
+            try {
+              final data = await _dev.cmdMf1ReadBlock(
+                  block: blockNum,
+                  keyType: KeyType.keyB,
+                  key: _hex(sectorKeys[s].keyB));
+              allBlocks[blockNum].data = _hexStr(data);
+              read = true;
+            } catch (_) {}
           }
+          if (!read) failedBlocks.add(blockNum);
         }
-        final b3Hex = blocks[baseBlock + 3].data;
-        if (b3Hex != 'ffffffffffffffffffffffffffffffff') {
-          final block3 = _hex(b3Hex);
-          await _overlayBlock3Keys(sector, block3);
-          blocks[baseBlock + 3].data = _hexStr(block3);
+        // 块3密钥区覆盖（对齐小程序：用已知密钥回填 block3 bytes 0-5, 10-15）
+        final b3Idx = baseBlock + 3;
+        if (allBlocks[b3Idx].data != 'ffffffffffffffffffffffffffffffff') {
+          final block3 = _hex(allBlocks[b3Idx].data);
+          if (sectorKeys[s].hasKeyA) block3.setRange(0, 6, _hex(sectorKeys[s].keyA));
+          if (sectorKeys[s].hasKeyB) block3.setRange(10, 16, _hex(sectorKeys[s].keyB));
+          allBlocks[b3Idx].data = _hexStr(block3);
         }
       }
-      for (var sector = 0; sector < 16; sector++) {
-        if (!_app.card.toggle[sector]) continue;
-        final first = blocks[sector * 4].data;
-        if (first == 'ffffffffffffffffffffffffffffffff') continue;
-        final blocksArr =
-            List<BlockData>.generate(4, (i) => blocks[sector * 4 + i]);
-        sectors[sector] = SectorData(blocks: blocksArr);
-        final b3 = blocks[sector * 4 + 3].data;
+      for (var s = 0; s < 16; s++) {
+        if (!_app.card.toggle[s]) continue;
+        final blocksArr = List<BlockData>.generate(4, (i) => allBlocks[s * 4 + i]);
+        sectors[s] = SectorData(blocks: blocksArr);
+        // 提取块3密钥到密钥区
+        final b3 = allBlocks[s * 4 + 3].data;
         if (b3 != 'ffffffffffffffffffffffffffffffff') {
           final kb = _hex(b3);
           if (kb.length >= 16) {
@@ -292,7 +305,11 @@ class _IcTabState extends State<IcTab> {
       });
       _appendKeys(found);
       if (mounted) Navigator.of(context).pop();
-      _toast('读取完成：$readCount 个块');
+      if (failedBlocks.isEmpty) {
+        _toast('读卡完成！');
+      } else {
+        _toast('读卡片：块${failedBlocks.join('，')} 读取失败');
+      }
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _toast('读卡失败: $e');
