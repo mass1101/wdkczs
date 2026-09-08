@@ -121,7 +121,9 @@ class _IcTabState extends State<IcTab> {
       if (!sectorKeys[s].hasKeyA) mask[s >> 2] ^= 2 << (6 - s % 4 * 2);
       if (!sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
     }
+    debugPrint('[DEBUG] _checkCrackedKeys: keys=${keys.length}, mask=${_hexStr(mask)}');
     final res = await _dev.cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
+    debugPrint('[DEBUG] _checkCrackedKeys: found=${_hexStr(res.found)}, sectorKeys=${res.sectorKeys.map((k) => k == null ? 'null' : _hexStr(k)).join(',')}');
     var anyMissing = false;
     for (var s = 0; s < 16; s++) {
       if (!sectorKeys[s].hasKeyA) {
@@ -143,6 +145,7 @@ class _IcTabState extends State<IcTab> {
         }
       }
     }
+    debugPrint('[DEBUG] _checkCrackedKeys: anyMissing=$anyMissing');
     return anyMissing;
   }
 
