@@ -872,7 +872,7 @@ class _IcTabState extends State<IcTab> {
         final recovered =
             Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
         if (recovered.isNotEmpty) {
-          return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
+          return _verifyCandidates(sector, keyTypeBit, recovered);
         }
       }
     }
