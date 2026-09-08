@@ -744,91 +744,36 @@ class _IcTabState extends State<IcTab> {
         return;
       }
 
-      // STATIC (prng==0)：逐扇区破解 keyA 和 keyB
-      if (prng == 0) {
-        for (var s = 0; s < 16; s++) {
-          if (!sectorKeys[s].hasKeyA) {
-            progress.value = '破解密钥：静态卡，正在破解扇区$s keyA...';
-            try {
-              final rec = await _crackSectorKey(
-                  uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex);
-              if (rec != null) {
-                sectorKeys[s].hasKeyA = true;
-                sectorKeys[s].keyA = rec;
-              }
-            } catch (e) {
-              progress.value = '破解密钥：扇区$s keyA 破解失败：$e';
+      // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
+      for (var s = 0; s < 16; s++) {
+        if (!sectorKeys[s].hasKeyA) {
+          progress.value = prng == 0
+              ? '破解密钥：静态卡，正在破解扇区$s keyA...'
+              : '破解密钥：弱随机卡，正在破解扇区$s keyA...';
+          try {
+            final rec = await _crackSectorKey(
+                uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex);
+            if (rec != null) {
+              sectorKeys[s].hasKeyA = true;
+              sectorKeys[s].keyA = rec;
             }
-          }
-          if (!sectorKeys[s].hasKeyB) {
-            progress.value = '破解密钥：静态卡，正在破解扇区$s keyB...';
-            try {
-              final rec = await _crackSectorKey(
-                  uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex);
-              if (rec != null) {
-                sectorKeys[s].hasKeyB = true;
-                sectorKeys[s].keyB = rec;
-              }
-            } catch (e) {
-              progress.value = '破解密钥：扇区$s keyB 破解失败：$e';
-            }
+          } catch (e) {
+            progress.value = '破解密钥：扇区$s keyA 破解失败：$e';
           }
         }
-      }
-
-      // WEAK (prng==1)：共享 dist/uid，重试5次（对齐小程序）
-      if (prng == 1) {
-        for (var s = 0; s < 16; s++) {
-          for (var retry = 0; retry < 5; retry++) {
-            progress.value = '破解密钥：弱随机卡，扇区$s 第${retry + 1}次尝试...';
-            try {
-              final distRes = await _dev.cmdMf1TestNtDistance(
-                  block: eSector * 4, keyType: eKeyType, key: _hex(eKeyHex));
-              final dist = _bytesInt(distRes.dist.sublist(0, 4));
-              final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
-
-              if (!sectorKeys[s].hasKeyA) {
-                final nested = await _dev.cmdMf1AcquireNested(
-                    block: eSector * 4,
-                    keyType: eKeyType,
-                    key: _hex(eKeyHex),
-                    targetBlock: s * 4,
-                    targetKeyType: KeyType.keyA);
-                final atks = nested
-                    .map((a) => {'nt1': _bytesInt(a.nt1), 'nt2': _bytesInt(a.nt2), 'par': a.par})
-                    .toList();
-                final recovered = Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
-                if (recovered.isNotEmpty) {
-                  final rec = await _verifyCandidates(s, 2, recovered, chunkSize: 40);
-                  if (rec != null) {
-                    sectorKeys[s].hasKeyA = true;
-                    sectorKeys[s].keyA = rec;
-                  }
-                }
-              }
-              if (!sectorKeys[s].hasKeyB) {
-                final nested = await _dev.cmdMf1AcquireNested(
-                    block: eSector * 4,
-                    keyType: eKeyType,
-                    key: _hex(eKeyHex),
-                    targetBlock: s * 4,
-                    targetKeyType: KeyType.keyB);
-                final atks = nested
-                    .map((a) => {'nt1': _bytesInt(a.nt1), 'nt2': _bytesInt(a.nt2), 'par': a.par})
-                    .toList();
-                final recovered = Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
-                if (recovered.isNotEmpty) {
-                  final rec = await _verifyCandidates(s, 1, recovered, chunkSize: 40);
-                  if (rec != null) {
-                    sectorKeys[s].hasKeyB = true;
-                    sectorKeys[s].keyB = rec;
-                  }
-                }
-              }
-              if (sectorKeys[s].hasKeyA && sectorKeys[s].hasKeyB) break;
-            } catch (e) {
-              progress.value = '破解密钥：扇区$s 第${retry + 1}次失败：$e';
+        if (!sectorKeys[s].hasKeyB) {
+          progress.value = prng == 0
+              ? '破解密钥：静态卡，正在破解扇区$s keyB...'
+              : '破解密钥：弱随机卡，正在破解扇区$s keyB...';
+          try {
+            final rec = await _crackSectorKey(
+                uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex);
+            if (rec != null) {
+              sectorKeys[s].hasKeyB = true;
+              sectorKeys[s].keyB = rec;
             }
+          } catch (e) {
+            progress.value = '破解密钥：扇区$s keyB 破解失败：$e';
           }
         }
       }
@@ -927,7 +872,7 @@ class _IcTabState extends State<IcTab> {
         final recovered =
             Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
         if (recovered.isNotEmpty) {
-          return _verifyCandidates(sector, keyTypeBit, recovered);
+          return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
         }
       }
     }
