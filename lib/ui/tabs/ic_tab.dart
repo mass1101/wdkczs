@@ -721,6 +721,8 @@ class _IcTabState extends State<IcTab> {
           eSector = 0;
           eKeyType = KeyType.keyA;
           eKeyHex = darkHex;
+          _appendKeysFromSectors(sectorKeys);
+          await _checkCrackedKeys(_keys.map(_hex).toList(), sectorKeys);
           progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
         } catch (_) {
           _appendKeysFromSectors(sectorKeys);
@@ -742,36 +744,91 @@ class _IcTabState extends State<IcTab> {
         return;
       }
 
-      // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
-      for (var s = 0; s < 16; s++) {
-        if (!sectorKeys[s].hasKeyA) {
-          progress.value = prng == 0
-              ? '破解密钥：该卡片为静态无漏洞卡，正在破解加密扇区：$s keyA...'
-              : '破解密钥：该卡片为弱随机卡，正在破解加密扇区：$s keyA...';
-          try {
-            final rec = await _crackSectorKey(
-                uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex);
-            if (rec != null) {
-              sectorKeys[s].hasKeyA = true;
-              sectorKeys[s].keyA = rec;
+      // STATIC (prng==0)：逐扇区破解 keyA 和 keyB
+      if (prng == 0) {
+        for (var s = 0; s < 16; s++) {
+          if (!sectorKeys[s].hasKeyA) {
+            progress.value = '破解密钥：静态卡，正在破解扇区$s keyA...';
+            try {
+              final rec = await _crackSectorKey(
+                  uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex);
+              if (rec != null) {
+                sectorKeys[s].hasKeyA = true;
+                sectorKeys[s].keyA = rec;
+              }
+            } catch (e) {
+              progress.value = '破解密钥：扇区$s keyA 破解失败：$e';
             }
-          } catch (e) {
-            progress.value = '破解密钥：扇区$s keyA 破解失败：$e';
+          }
+          if (!sectorKeys[s].hasKeyB) {
+            progress.value = '破解密钥：静态卡，正在破解扇区$s keyB...';
+            try {
+              final rec = await _crackSectorKey(
+                  uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex);
+              if (rec != null) {
+                sectorKeys[s].hasKeyB = true;
+                sectorKeys[s].keyB = rec;
+              }
+            } catch (e) {
+              progress.value = '破解密钥：扇区$s keyB 破解失败：$e';
+            }
           }
         }
-        if (!sectorKeys[s].hasKeyB) {
-          progress.value = prng == 0
-              ? '破解密钥：该卡片为静态无漏洞卡，正在破解加密扇区：$s keyB...'
-              : '破解密钥：该卡片为弱随机卡，正在破解加密扇区：$s keyB...';
-          try {
-            final rec = await _crackSectorKey(
-                uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex);
-            if (rec != null) {
-              sectorKeys[s].hasKeyB = true;
-              sectorKeys[s].keyB = rec;
+      }
+
+      // WEAK (prng==1)：共享 dist/uid，重试5次（对齐小程序）
+      if (prng == 1) {
+        for (var s = 0; s < 16; s++) {
+          for (var retry = 0; retry < 5; retry++) {
+            progress.value = '破解密钥：弱随机卡，扇区$s 第${retry + 1}次尝试...';
+            try {
+              final distRes = await _dev.cmdMf1TestNtDistance(
+                  block: eSector * 4, keyType: eKeyType, key: _hex(eKeyHex));
+              final dist = _bytesInt(distRes.dist.sublist(0, 4));
+              final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
+
+              if (!sectorKeys[s].hasKeyA) {
+                final nested = await _dev.cmdMf1AcquireNested(
+                    block: eSector * 4,
+                    keyType: eKeyType,
+                    key: _hex(eKeyHex),
+                    targetBlock: s * 4,
+                    targetKeyType: KeyType.keyA);
+                final atks = nested
+                    .map((a) => {'nt1': _bytesInt(a.nt1), 'nt2': _bytesInt(a.nt2), 'par': a.par})
+                    .toList();
+                final recovered = Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
+                if (recovered.isNotEmpty) {
+                  final rec = await _verifyCandidates(s, 2, recovered, chunkSize: 40);
+                  if (rec != null) {
+                    sectorKeys[s].hasKeyA = true;
+                    sectorKeys[s].keyA = rec;
+                  }
+                }
+              }
+              if (!sectorKeys[s].hasKeyB) {
+                final nested = await _dev.cmdMf1AcquireNested(
+                    block: eSector * 4,
+                    keyType: eKeyType,
+                    key: _hex(eKeyHex),
+                    targetBlock: s * 4,
+                    targetKeyType: KeyType.keyB);
+                final atks = nested
+                    .map((a) => {'nt1': _bytesInt(a.nt1), 'nt2': _bytesInt(a.nt2), 'par': a.par})
+                    .toList();
+                final recovered = Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
+                if (recovered.isNotEmpty) {
+                  final rec = await _verifyCandidates(s, 1, recovered, chunkSize: 40);
+                  if (rec != null) {
+                    sectorKeys[s].hasKeyB = true;
+                    sectorKeys[s].keyB = rec;
+                  }
+                }
+              }
+              if (sectorKeys[s].hasKeyA && sectorKeys[s].hasKeyB) break;
+            } catch (e) {
+              progress.value = '破解密钥：扇区$s 第${retry + 1}次失败：$e';
             }
-          } catch (e) {
-            progress.value = '破解密钥：扇区$s keyB 破解失败：$e';
           }
         }
       }
@@ -836,7 +893,7 @@ class _IcTabState extends State<IcTab> {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
         final recovered = Crypto1.staticnested(
             uid: uidInt, keyType: targetKeyType.value, atks: atks);
-        return _verifyCandidates(sector, keyTypeBit, recovered);
+        return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
       }
       // 1代卡：nt2 一致，HardNested + 暴力验证
       final hardRes = await _dev.cmdMf1AcquireHardNested(
@@ -845,7 +902,7 @@ class _IcTabState extends State<IcTab> {
       if (hardRes.isEmpty) return null;
       final par = hardRes.first.par;
       final candidates = _generateKeysFromHardNested(uidInt, nt1, nt2, par);
-      return _verifyCandidates(sector, keyTypeBit, candidates);
+      return _verifyCandidates(sector, keyTypeBit, candidates, chunkSize: 40);
     }
     if (prng == 1) {
       // WEAK 嵌套：重试5次 + 暴力验证
@@ -879,7 +936,8 @@ class _IcTabState extends State<IcTab> {
 
   /// 暴力验证候选密钥（对齐小程序 bruteforce_Crack + mf1CheckKeysOfSectors）
   Future<String?> _verifyCandidates(
-      int sector, int keyTypeBit, List<int> candidates) async {
+      int sector, int keyTypeBit, List<int> candidates,
+      {int chunkSize = 20}) async {
     if (candidates.isEmpty) return null;
     final mask = Uint8List(10);
     mask.fillRange(0, 10, 0xFF);
@@ -893,7 +951,8 @@ class _IcTabState extends State<IcTab> {
           return buf;
         })
         .toList();
-    final res = await _dev.cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
+    final res = await _dev.cmdMf1CheckKeysOfSectors(
+        keys: keys, mask: mask, chunkSize: chunkSize);
     final idx = keyTypeBit == 2 ? sector * 2 : sector * 2 + 1;
     final found = res.sectorKeys[idx];
     return found != null ? _hexStr(found) : null;
