@@ -174,45 +174,54 @@ class Crypto1 {
   }
 
   static int updateContribution(int e, int t, int r) {
+    e &= 0xFFFFFFFF;
     var o = e >> 25;
     o = o << 2 | (evenParity32(e & t) > 0 ? 2 : 0) | evenParity32(e & r);
     return ((o << 24) | (0xFFFFFF & e)) & 0xFFFFFFFF;
   }
 
-  static int extendTable(Uint32List e, int t, int r, int i, int n, int o) {
+  static int _extendTable(_ListRef e, int r, int i, int n, int o) {
     o = (o << 24) & 0xFFFFFFFF;
-    for (var c = 0; c < t; c++) {
-      final a = filter((e[c] *= 2) & 0xFFFFFFFF);
-      if ((a ^ filter((1 | e[c]) & 0xFFFFFFFF)) != 0) {
-        e[c] = updateContribution(e[c] + (a ^ r), i, n) ^ o;
+    for (var c = 0; c < e.s; c++) {
+      final a = filter(e.d[e.off + c] *= 2);
+      if ((a ^ filter(1 | e.d[e.off + c])) != 0) {
+        e.d[e.off + c] = updateContribution(e.d[e.off + c] + (a ^ r), i, n) ^ o;
       } else if (a == r) {
-        e[t++] = e[++c];
-        e[c] = updateContribution(e[c - 1] + 1, i, n) ^ o;
-        e[c - 1] = updateContribution(e[c - 1], i, n) ^ o;
+        c++;
+        final tmp = e.d[e.off + c];
+        e.d[e.off + e.s] = tmp;
+        e.s++;
+        e.d[e.off + c] = updateContribution(e.d[e.off + c - 1] + 1, i, n) ^ o;
+        e.d[e.off + c - 1] = updateContribution(e.d[e.off + c - 1], i, n) ^ o;
       } else {
-        e[c--] = e[--t];
+        e.s--;
+        e.d[e.off + c] = e.d[e.off + e.s];
+        c--;
       }
     }
-    return t;
+    return e.s;
   }
 
-  static int extendTableSimple(Uint32List e, int t, int r) {
-    for (var n = 0; n < t; n++) {
-      final o = filter((e[n] *= 2) & 0xFFFFFFFF);
-      if ((o ^ filter((1 | e[n]) & 0xFFFFFFFF)) != 0) {
-        e[n] += o ^ r;
+  static int _extendTableSimple(_ListRef e, int r) {
+    for (var n = 0; n < e.s; n++) {
+      final o = filter(e.d[e.off + n] *= 2);
+      if ((o ^ filter(1 | e.d[e.off + n])) != 0) {
+        e.d[e.off + n] += o ^ r;
       } else if (o == r) {
-        e[t++] = e[++n];
-        e[n] = e[n - 1] + 1;
+        e.d[e.off + e.s] = e.d[e.off + n + 1];
+        e.s++;
+        n++;
+        e.d[e.off + n] = e.d[e.off + n - 1] + 1;
       } else {
-        e[n--] = e[--t];
+        e.s--;
+        e.d[e.off + n] = e.d[e.off + e.s];
+        n--;
       }
     }
-    return t;
+    return e.s;
   }
 
   /// mfkeyRecoverState：候选状态表恢复（递归）
-  // ignore: library_private_types_in_public_api
   static void _mfkeyRecoverState(
       _RecoverState st, void Function(Crypto1) onState) {
     final a = st.evens;
@@ -220,47 +229,63 @@ class Crypto1 {
     final c = st.states;
     if (st.rem < 0) {
       for (var u = 0; u < a.s; u++) {
-        a.d[u] = ((a.d[u] << 1) ^ evenParity32(a.d[u] & _nS) ^ (st.input & 4 != 0 ? 1 : 0)) & 0xFFFFFFFF;
+        a.d[a.off + u] = ((a.d[a.off + u] << 1) ^
+                evenParity32(a.d[a.off + u] & _nS) ^
+                ((st.input & 4) != 0 ? 1 : 0)) &
+            0xFFFFFFFF;
         for (var e = 0; e < l.s; e++) {
-          c.add(Crypto1(even: l.d[e], odd: (a.d[u] ^ evenParity32(l.d[e] & _iS)) & 0xFFFFFFFF));
+          c.add(Crypto1(
+              even: l.d[l.off + e],
+              odd: (a.d[a.off + u] ^ evenParity32(l.d[l.off + e] & _iS)) &
+                  0xFFFFFFFF));
         }
       }
       for (final s in c) {
         onState(s);
       }
     } else {
-      for (var t = 0; t < 4 && st.rem != 0; t++) {
-        st.rem--;
+      // 对齐 JS `t<4 && 0!=e.rem--`：最后一次失败比较也会执行 rem--，
+      // 因此 rem 会从 0 减到 -1，触发递归子级的 rem<0 终止分支
+      for (var t = 0; t < 4;) {
+        final old = st.rem;
+        st.rem = old - 1;
+        if (old == 0) break;
         st.oks = (st.oks >> 1) & 0xFFFFFFFF;
         st.eks = (st.eks >> 1) & 0xFFFFFFFF;
         st.input = (st.input >> 2) & 0xFFFFFFFF;
-        l.s = extendTable(l.d, l.s, bit(st.oks, 0), 17698825, 5479608, 0);
+        l.s = _extendTable(l, bit(st.oks, 0), 17698825, 5479608, 0);
         if (l.s == 0) return;
-        a.s = extendTable(a.d, a.s, bit(st.eks, 0), _iS, 17698825, 3 & st.input);
+        a.s = _extendTable(a, bit(st.eks, 0), _iS, 17698825, 3 & st.input);
         if (a.s == 0) return;
+        t++;
       }
-      final aSlice = a.d.sublist(0, a.s);
-      final lSlice = l.d.sublist(0, l.s);
-      aSlice.sort();
-      lSlice.sort();
+      // 对齐小程序 subarray(0, s).sort()：在父缓冲区内原地排序，
+      // 供递归子视图共享（sublist 复制会导致子级 extendTable 增长越界）
+      final aTmp = a.d.sublist(a.off, a.off + a.s);
+      aTmp.sort();
+      a.d.setRange(a.off, a.off + a.s, aTmp);
+      final lTmp = l.d.sublist(l.off, l.off + l.s);
+      lTmp.sort();
+      l.d.setRange(l.off, l.off + l.s, lTmp);
       while (l.s + a.s != 0) {
-        final topL = toUint32(0xFF000000 & lSlice[l.s - 1]);
-        final topA = toUint32(0xFF000000 & aSlice[a.s - 1]);
+        // 对齐 JS：空表读 view[-1] 得 undefined，&0xFF000000 后为 0
+        final topL = l.s > 0 ? toUint32(0xFF000000 & l.d[l.off + l.s - 1]) : 0;
+        final topA = a.s > 0 ? toUint32(0xFF000000 & a.d[a.off + a.s - 1]) : 0;
         if (topL != topA) {
           if (topL > topA) {
-            l.s = _sortedIndex(lSlice.sublist(0, l.s), topL);
+            l.s = _sortedIndex(l, topL);
           } else {
-            a.s = _sortedIndex(aSlice.sublist(0, a.s), topA);
+            a.s = _sortedIndex(a, topA);
           }
           continue;
         }
-        final n = _sortedIndex(aSlice.sublist(0, a.s), topA);
-        final o = _sortedIndex(lSlice.sublist(0, l.s), topL);
+        final n = _sortedIndex(a, topA);
+        final o = _sortedIndex(l, topL);
         _mfkeyRecoverState(
           _RecoverState(
             eks: st.eks,
-            evens: _ListRef(aSlice.sublist(n), a.s - n),
-            odds: _ListRef(lSlice.sublist(o), l.s - o),
+            evens: _ListRef(a.d, a.off + n, a.s - n),
+            odds: _ListRef(l.d, l.off + o, l.s - o),
             oks: st.oks,
             states: st.states,
             rem: st.rem,
@@ -274,11 +299,11 @@ class Crypto1 {
     }
   }
 
-  static int _sortedIndex(Uint32List list, int value) {
-    var lo = 0, hi = list.length;
+  static int _sortedIndex(_ListRef b, int value) {
+    var lo = 0, hi = b.s;
     while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      if (list[mid] < value) {
+      if (b.d[b.off + mid] < value) {
         lo = mid + 1;
       } else {
         hi = mid;
@@ -289,8 +314,8 @@ class Crypto1 {
 
   /// lfsrRecovery32：从 32 位 keystream 恢复状态候选
   static List<Crypto1> lfsrRecovery32(int e, int t) {
-    final l = _ListRef(Uint32List(1 << 21), 0);
-    final c = _ListRef(Uint32List(1 << 21), 0);
+    final l = _ListRef(Uint32List(1 << 21), 0, 0);
+    final c = _ListRef(Uint32List(1 << 21), 0, 0);
     final states = <Crypto1>[];
     var d = 0, h = 0;
     for (var f = 31; f > 0; f -= 2) {
@@ -300,14 +325,14 @@ class Crypto1 {
     final p = toUint32(h) & 1;
     final m = toUint32(d) & 1;
     for (var f = 1 << 20; f >= 0; f--) {
-      if (filter(f) == m) c.d[c.s++] = f;
-      if (filter(f) == p) l.d[l.s++] = f;
+      if (filter(f) == m) c.d[c.off + c.s++] = f;
+      if (filter(f) == p) l.d[l.off + l.s++] = f;
     }
     for (var f = 0; f < 4; f++) {
       h = (h >> 1) & 0xFFFFFFFF;
       d = (d >> 1) & 0xFFFFFFFF;
-      l.s = extendTableSimple(l.d, l.s, h & 1);
-      c.s = extendTableSimple(c.d, c.s, d & 1);
+      l.s = _extendTableSimple(l, h & 1);
+      c.s = _extendTableSimple(c, d & 1);
     }
     final input = ((t << 16) | ((t >> 16) & 255) | (65280 & t)) << 1;
     final st = _RecoverState(
@@ -435,7 +460,7 @@ class Crypto1 {
     final a = List<int>.filled(32, 0);
     final l = List<int>.filled(32, 0);
     var c = 0, u = 0;
-    final d = _ListRef(Uint32List(65536), 0);
+    final d = _ListRef(Uint32List(65536), 0, 0);
     for (var f = 30; f >= 0; f -= 2) {
       s[f >> 1] = beBit(e, f);
       s[16 + (f >> 1)] = beBit(t, f);
@@ -447,9 +472,9 @@ class Crypto1 {
     for (var f = 1048575; f >= 0; f--) {
       if (filter(f) == s[0]) {
         d.s = 0;
-        d.d[d.s++] = f;
+        d.d[d.off + d.s++] = f;
         for (var e2 = 1; d.s != 0 && e2 < 29; e2++) {
-          d.s = extendTableSimple(d.d, d.s, s[e2]);
+          d.s = _extendTableSimple(d, s[e2]);
         }
         if (d.s != 0) {
           for (var e2 = 0; e2 < 19; e2++) {
@@ -461,9 +486,9 @@ class Crypto1 {
           for (var e2 = d.s - 1; e2 >= 0; e2--) {
             var failed = false;
             for (var t2 = 0; t2 < 3; t2++) {
-              d.d[e2] = (d.d[e2] << 1) & 0xFFFFFFFF;
-              d.d[e2] = (d.d[e2] | evenParity32(f & _cS[t2] ^ d.d[e2] & _uS[t2])) & 0xFFFFFFFF;
-              if (filter(d.d[e2]) != s[29 + t2]) {
+              d.d[d.off + e2] = (d.d[d.off + e2] << 1) & 0xFFFFFFFF;
+              d.d[d.off + e2] = (d.d[d.off + e2] | evenParity32(f & _cS[t2] ^ d.d[d.off + e2] & _uS[t2])) & 0xFFFFFFFF;
+              if (filter(d.d[d.off + e2]) != s[29 + t2]) {
                 failed = true;
                 break;
               }
@@ -471,21 +496,21 @@ class Crypto1 {
             if (failed) continue;
             u = 0;
             for (var t2 = 0; t2 < 19; t2++) {
-              u = (u << 1) & 0xFFFFFFFF | evenParity32(d.d[e2] & _sS[t2]);
+              u = (u << 1) & 0xFFFFFFFF | evenParity32(d.d[d.off + e2] & _sS[t2]);
             }
             u ^= c;
             failed = false;
             for (var t2 = 0; t2 < 32; t2++) {
-              u = ((u << 1) ^ l[t2] ^ evenParity32(d.d[e2] & _lS[t2])) & 0xFFFFFFFF;
+              u = ((u << 1) ^ l[t2] ^ evenParity32(d.d[d.off + e2] & _lS[t2])) & 0xFFFFFFFF;
               if (filter(u) != a[t2]) {
                 failed = true;
                 break;
               }
             }
             if (failed) continue;
-            d.d[e2] = ((d.d[e2] << 1) | evenParity32(_nS & d.d[e2])) & 0xFFFFFFFF;
+            d.d[d.off + e2] = ((d.d[d.off + e2] << 1) | evenParity32(_nS & d.d[d.off + e2])) & 0xFFFFFFFF;
             return Crypto1(
-                even: u, odd: (d.d[e2] ^ evenParity32(_iS & u)) & 0xFFFFFFFF);
+                even: u, odd: (d.d[d.off + e2] ^ evenParity32(_iS & u)) & 0xFFFFFFFF);
           }
         }
       }
@@ -724,10 +749,13 @@ class Crypto1 {
   }
 }
 
+/// 基于大缓冲区的偏移视图（对齐 JS subarray / C 指针语义）：
+/// 元素 i 位于 d[off + i]，extendTable 增长时可写入 off+s 之后的空闲空间
 class _ListRef {
   final Uint32List d;
+  final int off;
   int s;
-  _ListRef(this.d, this.s);
+  _ListRef(this.d, this.off, this.s);
 }
 
 class _RecoverState {
