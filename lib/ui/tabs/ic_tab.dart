@@ -635,6 +635,15 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
+      // 全加密卡（无已知密钥），无法进行嵌套攻击
+      if (eSector == -1) {
+        _appendKeysFromSectors(sectorKeys);
+        progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
+        if (mounted) Navigator.of(context).pop();
+        _toast('全加密卡，密钥区为空，请先通过其他方式获取至少一个密钥');
+        return;
+      }
+
       // 解卡片：逐扇区破解（对齐小程序 Crack()）
       step.value = 1;
       final prng = await _dev.cmdMf1TestPrngType();
@@ -682,9 +691,24 @@ class _IcTabState extends State<IcTab> {
 
       // 追加发现的密钥
       _appendKeysFromSectors(sectorKeys);
-      progress.value = '解卡片：破解成功，已重新标记密钥信息.';
-      if (mounted) Navigator.of(context).pop();
-      _toast('破解成功');
+
+      // 检查是否全部破解成功（对齐小程序 Check_Crack_isfaild）
+      var allFound = true;
+      for (var s = 0; s < 16; s++) {
+        if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
+          allFound = false;
+          break;
+        }
+      }
+      if (allFound) {
+        progress.value = '解卡片：破解成功，已重新标记密钥信息.';
+        if (mounted) Navigator.of(context).pop();
+        _toast('破解成功');
+      } else {
+        progress.value = '解卡片：破解失败，部分扇区密钥未找到';
+        if (mounted) Navigator.of(context).pop();
+        _toast('破解失败，部分扇区密钥未找到（已写入找到的密钥）');
+      }
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _toast('破解失败: $e');
