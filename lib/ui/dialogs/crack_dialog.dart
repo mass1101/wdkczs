@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
-/// 破解/读卡进度对话框（对齐小程序：步骤指示器 + 阶段前缀进度文字）
+/// 破解/读卡进度对话框（对齐小程序：步骤指示器 + 阶段前缀进度文字 + 确认按钮）
 class CrackProgressDialog extends StatelessWidget {
   final String title;
   final ValueNotifier<String>? progress;
   final ValueNotifier<int>? step;
   final List<String>? steps;
   final VoidCallback? onCancel;
+  final VoidCallback? onConfirm;
+  final String confirmText;
+  final bool showConfirm;
 
   const CrackProgressDialog({
     super.key,
@@ -15,6 +18,9 @@ class CrackProgressDialog extends StatelessWidget {
     this.step,
     this.steps,
     this.onCancel,
+    this.onConfirm,
+    this.confirmText = '确认',
+    this.showConfirm = false,
   });
 
   @override
@@ -61,6 +67,11 @@ class CrackProgressDialog extends StatelessWidget {
       actions: [
         if (onCancel != null)
           TextButton(onPressed: onCancel, child: const Text('取消')),
+        if (showConfirm)
+          TextButton(
+            onPressed: onConfirm,
+            child: Text(confirmText),
+          ),
       ],
     );
   }
