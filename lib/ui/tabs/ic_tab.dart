@@ -44,6 +44,7 @@ class _IcTabState extends State<IcTab> {
     _uidCtrl.text = _app.card.uid;
     _atqaCtrl.text = _app.card.atqa;
     _sakCtrl.text = _app.card.sak;
+    _atsCtrl.text = _app.card.ats;
     _keyCtrl.text = _app.card.keys;
     _validateKeys(_app.card.keys);
     _loadKeys();
@@ -66,6 +67,13 @@ class _IcTabState extends State<IcTab> {
     _atsCtrl.dispose();
     _keyCtrl.dispose();
     super.dispose();
+  }
+
+  void _syncCardInfo() {
+    _uidCtrl.text = _app.card.uid;
+    _atqaCtrl.text = _app.card.atqa;
+    _sakCtrl.text = _app.card.sak;
+    _atsCtrl.text = _app.card.ats;
   }
 
   Future<void> _loadKeys() async {
@@ -211,6 +219,7 @@ class _IcTabState extends State<IcTab> {
           _app.card.ats = tag.atsHex;
           _app.card.sectors = gen1aSectors;
         });
+        _syncCardInfo();
         _appendKeys(found);
       } catch (_) {
         // Gen1a 不可用，走常规认证读
@@ -294,6 +303,7 @@ class _IcTabState extends State<IcTab> {
       _app.card.sak = tag.sakHex;
       _app.card.ats = tag.atsHex;
       _appendKeys(found);
+      _syncCardInfo();
       setState(() {});
       if (failedBlocks.isEmpty) {
         progress.value = '读卡片：读卡完成';
@@ -541,6 +551,7 @@ class _IcTabState extends State<IcTab> {
         _app.card.sak = tag.sakHex;
         _app.card.ats = tag.atsHex;
       });
+      _syncCardInfo();
 
       if (_keys.isEmpty) {
         _toast('请先填写密钥');
@@ -1278,6 +1289,7 @@ class _IcTabState extends State<IcTab> {
         _uidCtrl.text = state.uid;
         _atqaCtrl.text = state.atqa;
         _sakCtrl.text = state.sak;
+        _atsCtrl.text = state.ats;
       });
       _toast('导入完成');
     } catch (e) {
@@ -2092,9 +2104,11 @@ const Text('ATS:',
         _uidCtrl.text = antiColl.uidHex;
         _atqaCtrl.text = antiColl.atqaHex;
         _sakCtrl.text = antiColl.sakHex;
+        _atsCtrl.text = antiColl.atsHex;
         _app.card.uid = antiColl.uidHex;
         _app.card.atqa = antiColl.atqaHex;
         _app.card.sak = antiColl.sakHex;
+        _app.card.ats = antiColl.atsHex;
         _app.card.sectors = sectors;
         _app.slotCardIds[slot] = (
           uid: antiColl.uidHex,
