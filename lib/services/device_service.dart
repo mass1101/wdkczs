@@ -1064,23 +1064,34 @@ class DeviceService {
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
+    int chunkSize = 20,
   }) async {
     await assureDeviceMode(DeviceMode.reader);
-    final n = Uint8List(10 + keys.length * 6);
-    n.setRange(0, 10, mask);
-    for (var i = 0; i < keys.length; i++) {
-      n.setRange(10 + i * 6, 10 + i * 6 + 6, keys[i]);
+    final foundAll = Uint8List(10);
+    final sectorKeysAll = List<Uint8List?>.filled(80, null);
+    for (var off = 0; off < keys.length; off += chunkSize) {
+      final end = (off + chunkSize > keys.length) ? keys.length : off + chunkSize;
+      final chunk = keys.sublist(off, end);
+      final n = Uint8List(10 + chunk.length * 6);
+      n.setRange(0, 10, mask);
+      for (var i = 0; i < chunk.length; i++) {
+        n.setRange(10 + i * 6, 10 + i * 6 + 6, chunk[i]);
+      }
+      final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n,
+          timeout: 30000);
+      final found = Uint8List(10);
+      found.setRange(0, 10, r.sublist(0, 10));
+      for (var i = 0; i < 10; i++) {
+        foundAll[i] |= found[i];
+      }
+      for (var i = 0; i < 80; i++) {
+        final bit = (found[i >> 3] >> (7 - (i & 7))) & 1;
+        if (bit == 1 && sectorKeysAll[i] == null) {
+          sectorKeysAll[i] = r.sublist(10 + i * 6, 10 + i * 6 + 6);
+        }
+      }
     }
-    final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n,
-        timeout: 30000);
-    final found = Uint8List(10);
-    found.setRange(0, 10, r.sublist(0, 10));
-    final sectorKeys = <Uint8List?>[];
-    for (var i = 0; i < 80; i++) {
-      final bit = (found[i >> 3] >> (7 - (i & 7))) & 1;
-      sectorKeys.add(bit == 1 ? r.sublist(10 + i * 6, 10 + i * 6 + 6) : null);
-    }
-    return Mf1CheckKeysOfSectorsRes(found: found, sectorKeys: sectorKeys);
+    return Mf1CheckKeysOfSectorsRes(found: foundAll, sectorKeys: sectorKeysAll);
   }
 
   /// HardNested 采集

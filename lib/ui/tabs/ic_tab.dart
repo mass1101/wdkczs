@@ -206,8 +206,9 @@ class _IcTabState extends State<IcTab> {
         gen1aDone = true;
         setState(() {
           _app.card.uid = uid;
-          _app.card.atqa = tag.atqaHex;
+          _app.card.atqa = _hexStrRev(tag.atqa);
           _app.card.sak = tag.sakHex;
+          _app.card.ats = tag.atsHex;
           _app.card.sectors = gen1aSectors;
         });
         _appendKeys(found);
@@ -289,8 +290,9 @@ class _IcTabState extends State<IcTab> {
         if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
       }
       _app.card.uid = uid;
-      _app.card.atqa = tag.atqaHex;
+      _app.card.atqa = _hexStrRev(tag.atqa);
       _app.card.sak = tag.sakHex;
+      _app.card.ats = tag.atsHex;
       _appendKeys(found);
       setState(() {});
       if (failedBlocks.isEmpty) {
@@ -530,12 +532,20 @@ class _IcTabState extends State<IcTab> {
         _toast('发现非标准M1卡，该卡无法破解');
         return;
       }
+      final uid = tag.uid;
+      final uidInt = _bytesInt(uid.sublist(0, 4));
+
+      setState(() {
+        _app.card.uid = tag.uidHex;
+        _app.card.atqa = _hexStrRev(tag.atqa);
+        _app.card.sak = tag.sakHex;
+        _app.card.ats = tag.atsHex;
+      });
+
       if (_keys.isEmpty) {
         _toast('请先填写密钥');
         return;
       }
-      final uid = tag.uid;
-      final uidInt = _bytesInt(uid.sublist(0, 4));
 
       if (!mounted) return;
       showDialog(
@@ -2389,6 +2399,9 @@ Uint8List _hex(String hex) {
 
 String _hexStr(Uint8List b) =>
     b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+
+String _hexStrRev(Uint8List b) =>
+    b.reversed.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 
 int _bytesInt(Uint8List b) {
   final padded = Uint8List(4);
