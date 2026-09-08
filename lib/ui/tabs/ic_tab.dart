@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -757,7 +758,8 @@ class _IcTabState extends State<IcTab> {
               : '破解密钥：弱随机卡，正在破解扇区$s keyA...';
           try {
             final rec = await _crackSectorKey(
-                uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex);
+                uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex,
+                progress: progress);
             if (rec != null) {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
@@ -776,7 +778,8 @@ class _IcTabState extends State<IcTab> {
               : '破解密钥：弱随机卡，正在破解扇区$s keyB...';
           try {
             final rec = await _crackSectorKey(
-                uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex);
+                uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex,
+                progress: progress);
             if (rec != null) {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
@@ -829,7 +832,8 @@ class _IcTabState extends State<IcTab> {
   /// 对单个扇区恢复密钥（支持 keyA/keyB，对齐小程序 Crack() 逐扇区破解）
   Future<String?> _crackSectorKey(
       int uidInt, int sector, KeyType targetKeyType, int prng,
-      int eSector, KeyType eKeyType, String eKeyHex) async {
+      int eSector, KeyType eKeyType, String eKeyHex,
+      {ValueNotifier<String>? progress}) async {
     final eKey = _hex(eKeyHex);
     final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
     final keyTypeStr = targetKeyType == KeyType.keyA ? 'keyA' : 'keyB';
@@ -858,8 +862,9 @@ class _IcTabState extends State<IcTab> {
               Crypto1.toUint32(atks[1]['nt2']!).toRadixString(16);
       if (!is1Gen) {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
-        final recovered = Crypto1.staticnested(
-            uid: uidInt, keyType: targetKeyType.value, atks: atks);
+        progress?.value = '破解密钥：静态卡，正在恢复扇区$sector $keyTypeStr候选状态（约1分钟，请耐心等待）...';
+        final recovered = await Isolate.run(() => Crypto1.staticnested(
+            uid: uidInt, keyType: targetKeyType.value, atks: atks));
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}');
         return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
       }
@@ -901,9 +906,11 @@ class _IcTabState extends State<IcTab> {
                     'par': a.par,
                   })
               .toList();
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
-          final recovered =
-              Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
+              LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
+          progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态（约1-2分钟，请耐心等待）...';
+          // 恢复计算耗时数十秒到数分钟，放入后台 isolate 避免 UI 卡死
+          final recovered = await Isolate.run(() =>
+              Crypto1.nested(uid: nestedUid, dist: dist, atks: atks));
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
           if (recovered.isNotEmpty) {
             return _verifyCandidates(sector, keyTypeBit, recovered);
@@ -1656,7 +1663,8 @@ class _IcTabState extends State<IcTab> {
             }
           }
           if (atks.isEmpty) continue;
-          final recovered = Crypto1.staticnested(uid: uid1, keyType: 96, atks: atks);
+          final recovered = await Isolate.run(
+              () => Crypto1.staticnested(uid: uid1, keyType: 96, atks: atks));
           if (recovered.isNotEmpty) {
             results.add(_int6Hex(recovered.first));
           }
