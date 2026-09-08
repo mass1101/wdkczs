@@ -148,10 +148,11 @@ class _IcTabState extends State<IcTab> {
     _appendKeys(all);
   }
 
-  // ========== 读卡（对齐小程序：步骤指示器 + 阶段前缀进度） ==========
+  // ========== 读卡（对齐小程序 btnRead + btnGen2Read 完整流程） ==========
   Future<void> _readCard() async {
     final progress = ValueNotifier<String>('验证密钥：寻卡中...');
     final step = ValueNotifier<int>(0);
+    final sectorKeys = List.generate(16, (s) => _SectorKey(s));
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -178,7 +179,7 @@ class _IcTabState extends State<IcTab> {
         ),
       );
 
-      // 验证密钥：尝试 Gen1a 免密读卡
+      // 验证密钥：尝试 Gen1a 免密读卡（对齐小程序 _mf1Gen1aAuth）
       try {
         step.value = 1;
         progress.value = '验证密钥：发现UID卡，可免密读卡...';
@@ -188,15 +189,17 @@ class _IcTabState extends State<IcTab> {
           progress.value = '读卡片：正在读扇区$s...';
           final data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
           if (data.length < 64) continue;
-          final block3 = Uint8List.fromList(data.sublist(48, 64));
-          await _overlayBlock3Keys(s, block3);
+          // 标记 haskeyA/haskeyB 为 true（对齐小程序）
+          sectorKeys[s].hasKeyA = true;
+          sectorKeys[s].hasKeyB = true;
           final blocks = List<BlockData>.generate(
-              4, (i) => BlockData(data: i == 3
-                  ? _hexStr(block3)
-                  : _hexStr(data.sublist(i * 16, i * 16 + 16))));
+              4, (i) => BlockData(data: _hexStr(data.sublist(i * 16, i * 16 + 16))));
           gen1aSectors[s] = SectorData(blocks: blocks);
-          final kA = _hexStr(block3.sublist(0, 6));
-          final kB = _hexStr(block3.sublist(10, 16));
+          // 从块3提取密钥（对齐小程序：bytes 48-54, 58-64）
+          final kA = _hexStr(data.sublist(48, 54));
+          final kB = _hexStr(data.sublist(58, 64));
+          sectorKeys[s].keyA = kA;
+          sectorKeys[s].keyB = kB;
           if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
           if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
         }
@@ -212,22 +215,19 @@ class _IcTabState extends State<IcTab> {
         // Gen1a 不可用，走常规认证读
       }
       if (gen1aDone) {
+        progress.value = '读卡片：读卡完成';
         if (mounted) Navigator.of(context).pop();
         _toast('读卡完成！');
         return;
       }
 
-      // 验证密钥：验证中...
-      step.value = 0;
+      // Gen1a 失败：autoloadKeys + checkCrackedKey + btnGen2Read（对齐小程序）
       progress.value = '验证密钥：验证中...';
       await _loadKeys();
 
-      // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey）
-      final sectorKeys = List.generate(16, (s) => _SectorKey(s));
+      // 批量检测扇区密钥（对齐小程序 checkCrackedKey）
       final allKeys = _keys.map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
-      progress.value = '验证密钥：已标记扇区密钥信息.';
-
       if (anyMissing) {
         _appendKeysFromSectors(sectorKeys);
         progress.value = '读卡片：卡片有加密，请先使用解卡片功能获取密钥';
@@ -236,97 +236,77 @@ class _IcTabState extends State<IcTab> {
         return;
       }
 
-      // 读卡片：逐扇区逐块用已确定密钥读取（对齐小程序 btnGen2Read）
+      // btnGen2Read：逐扇区逐块用已确定密钥读取
       step.value = 1;
-      final sectors = List.generate(16, (_) => SectorData());
-      final allBlocks = List<BlockData>.generate(64, (_) => BlockData());
       final failedBlocks = <int>[];
       for (var s = 0; s < 16; s++) {
         if (!_app.card.toggle[s]) continue;
-        progress.value = '读卡片：正在读扇区$s...';
+        progress.value = '读卡片：正在读取扇区：$s...';
         final baseBlock = s * 4;
+        final sectorData = Uint8List(64);
         for (var b = 0; b < 4; b++) {
           final blockNum = baseBlock + b;
-          // 先试 keyA，失败再试 keyB（对齐小程序 btnGen2Read）
           var read = false;
+          // 先试 keyA（对齐小程序）
           if (sectorKeys[s].hasKeyA && sectorKeys[s].keyA.isNotEmpty) {
             try {
               final data = await _dev.cmdMf1ReadBlock(
                   block: blockNum,
                   keyType: KeyType.keyA,
                   key: _hex(sectorKeys[s].keyA));
-              allBlocks[blockNum].data = _hexStr(data);
+              sectorData.setRange(b * 16, b * 16 + 16, data);
               read = true;
             } catch (_) {}
           }
-          if (!read &&
-              sectorKeys[s].hasKeyB &&
-              sectorKeys[s].keyB.isNotEmpty) {
+          // keyA 失败试 keyB（对齐小程序）
+          if (!read && sectorKeys[s].hasKeyB && sectorKeys[s].keyB.isNotEmpty) {
             try {
               final data = await _dev.cmdMf1ReadBlock(
                   block: blockNum,
                   keyType: KeyType.keyB,
                   key: _hex(sectorKeys[s].keyB));
-              allBlocks[blockNum].data = _hexStr(data);
+              sectorData.setRange(b * 16, b * 16 + 16, data);
               read = true;
             } catch (_) {}
           }
           if (!read) failedBlocks.add(blockNum);
         }
-        // 块3密钥区覆盖（对齐小程序：用已知密钥回填 block3 bytes 0-5, 10-15）
-        final b3Idx = baseBlock + 3;
-        if (allBlocks[b3Idx].data != 'ffffffffffffffffffffffffffffffff') {
-          final block3 = _hex(allBlocks[b3Idx].data);
-          if (sectorKeys[s].hasKeyA) block3.setRange(0, 6, _hex(sectorKeys[s].keyA));
-          if (sectorKeys[s].hasKeyB) block3.setRange(10, 16, _hex(sectorKeys[s].keyB));
-          allBlocks[b3Idx].data = _hexStr(block3);
+        // 将 keyA/keyB 写入块3（对齐小程序：bytes 48-54, 58-64）
+        if (sectorKeys[s].hasKeyA) {
+          sectorData.setRange(48, 54, _hex(sectorKeys[s].keyA));
         }
-      }
-      for (var s = 0; s < 16; s++) {
-        if (!_app.card.toggle[s]) continue;
-        final blocksArr = List<BlockData>.generate(4, (i) => allBlocks[s * 4 + i]);
-        sectors[s] = SectorData(blocks: blocksArr);
+        if (sectorKeys[s].hasKeyB) {
+          sectorData.setRange(58, 64, _hex(sectorKeys[s].keyB));
+        }
+        // 设置扇区数据
+        final blocks = List<BlockData>.generate(
+            4, (i) => BlockData(data: _hexStr(sectorData.sublist(i * 16, i * 16 + 16))));
+        _app.card.sectors[s] = SectorData(blocks: blocks);
         // 提取块3密钥到密钥区
-        final b3 = allBlocks[s * 4 + 3].data;
-        if (b3 != 'ffffffffffffffffffffffffffffffff') {
-          final kb = _hex(b3);
-          if (kb.length >= 16) {
-            final kA = _hexStr(kb.sublist(0, 6));
-            final kB = _hexStr(kb.sublist(10, 16));
-            if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
-            if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
-          }
-        }
+        final kA = _hexStr(sectorData.sublist(48, 54));
+        final kB = _hexStr(sectorData.sublist(58, 64));
+        if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
+        if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
       }
-      setState(() {
-        _app.card.uid = uid;
-        _app.card.atqa = tag.atqaHex;
-        _app.card.sak = tag.sakHex;
-        _app.card.sectors = sectors;
-      });
+      _app.card.uid = uid;
+      _app.card.atqa = tag.atqaHex;
+      _app.card.sak = tag.sakHex;
       _appendKeys(found);
-      if (mounted) Navigator.of(context).pop();
+      setState(() {});
       if (failedBlocks.isEmpty) {
+        progress.value = '读卡片：读卡完成';
+        if (mounted) Navigator.of(context).pop();
         _toast('读卡完成！');
       } else {
+        progress.value = ' 读卡片：块${failedBlocks.join('，')} 读取失败';
+        if (mounted) Navigator.of(context).pop();
         _toast('读卡片：块${failedBlocks.join('，')} 读取失败');
       }
     } catch (e) {
+      progress.value = '读卡片：失败，$e';
       if (mounted) Navigator.of(context).pop();
       _toast('读卡失败: $e');
     }
-  }
-
-  /// 检测扇区密钥并覆盖块3密钥区（对齐小程序 mf1CheckSectorKeys + sectors_Key 回填）
-  /// 读块3时访问位可能遮蔽密钥A（返回0），通过 mf1CheckSectorKeys 检测有效密钥并回填。
-  Future<void> _overlayBlock3Keys(int sector, Uint8List block3) async {
-    try {
-      final validKeys = await _dev.mf1CheckSectorKeys(sector, _keys.map(_hex).toList());
-      final va = validKeys[KeyType.keyA.value];
-      final vb = validKeys[KeyType.keyB.value];
-      if (va != null) block3.setRange(0, 6, va);
-      if (vb != null) block3.setRange(10, 16, vb);
-    } catch (_) {}
   }
 
   // ========== 写卡（对齐小程序：确认弹窗 + 步骤指示器 + 阶段前缀进度） ==========
