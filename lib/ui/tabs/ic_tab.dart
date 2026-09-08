@@ -806,8 +806,12 @@ class _IcTabState extends State<IcTab> {
           .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
           .toList();
       if (atks.isEmpty) return null;
-      final nt2s = atks.map((a) => a['nt2']!).toSet();
-      if (nt2s.length > 1) {
+      final nt1 = atks[0]['nt1']!;
+      final nt2 = atks[0]['nt2']!;
+      final is1Gen = atks.length > 1 &&
+          Crypto1.toUint32(nt2).toRadixString(16) ==
+              Crypto1.toUint32(atks[1]['nt2']!).toRadixString(16);
+      if (!is1Gen) {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
         final recovered = Crypto1.staticnested(
             uid: uidInt, keyType: targetKeyType.value, atks: atks);
@@ -818,9 +822,8 @@ class _IcTabState extends State<IcTab> {
           block: eSector * 4, keyType: eKeyType, key: eKey,
           targetBlock: sector * 4, targetKeyType: targetKeyType);
       if (hardRes.isEmpty) return null;
-      final nt1 = _bytesInt(res.atks.first.$1);
-      final nt2 = _bytesInt(res.atks.first.$2);
-      final candidates = _generateKeysFromHardNested(nt1, nt2);
+      final par = hardRes.first.par;
+      final candidates = _generateKeysFromHardNested(uidInt, nt1, nt2, par);
       return _verifyCandidates(sector, keyTypeBit, candidates);
     }
     if (prng == 1) {
@@ -873,13 +876,24 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 1代卡 HardNested 密钥生成（对齐小程序 generate_keys：从 nt1^nt2 恢复候选密钥）
-  List<int> _generateKeysFromHardNested(int nt1, int nt2) {
-    final ks = nt1 ^ nt2;
-    final states = Crypto1.lfsrRecovery32(nt1, ks);
-    return states.map((s) {
-      s.lfsrRollbackWord(0, 0);
-      return s.getLfsr();
-    }).toList();
+  /// 从 HardNested 数据生成候选密钥（对齐小程序 generate_keys）
+  List<int> _generateKeysFromHardNested(
+      int uidInt, int nt1, int nt2, int par) {
+    final ks = nt1 ^ uidInt;
+    final diff = nt1 ^ nt2;
+    final states = Crypto1.lfsrRecovery32(diff, ks);
+    final result = <int>[];
+    for (final s in states) {
+      s.lfsrRollbackWord(ks, 0);
+      final key = s.getLfsr();
+      s.setLfsr(key);
+      s.lfsrWord(ks, 0);
+      final word = s.lfsrWord(0, 0);
+      final parBit = Crypto1.oddParity8(255 & nt1);
+      final calcBit = ((par >> 4) & 1) ^ ((word >> 24) & 1);
+      if (parBit == calcBit) result.add(key);
+    }
+    return result;
   }
 
   /// 从加密嵌套数据生成候选密钥（对齐小程序 generate_keys：lfsrRecovery64 + rollback）
