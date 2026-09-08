@@ -1581,25 +1581,25 @@ class _IcTabState extends State<IcTab> {
                                        ? Colors.green
                                        : const Color(0xFFE53935))),
                           _uidCtrl, '卡号应为8位16进制数',
-                          validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
-                          okColor: '#9933FF',
-                          fieldWidth: 90),
-                      const SizedBox(width: 4),
-                      _infoField(
-const Text('SAK:',
-                               style: TextStyle(
-                                   fontSize: 8, color: Color(0xFF666666))),
-                          _sakCtrl, '08',
-                          validRegex: r'^([0-9A-Fa-f]{2}\s*)+$',
-                          fieldWidth: 30),
-                      const SizedBox(width: 4),
-                      _infoField(
-const Text('ATQA:',
-                               style: TextStyle(
-                                   fontSize: 8, color: Color(0xFF666666))),
-                          _atqaCtrl, '0004',
-                          validRegex: r'^([0-9A-Fa-f]{4}\s*)+$',
-                          fieldWidth: 50),
+                           validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
+                           okColor: '#9933FF',
+                           fieldWidth: 70),
+                       const SizedBox(width: 4),
+                       _infoField(
+ const Text('SAK:',
+                                style: TextStyle(
+                                    fontSize: 8, color: Color(0xFF666666))),
+                           _sakCtrl, '08',
+                           validRegex: r'^([0-9A-Fa-f]{2}\s*)+$',
+                           fieldWidth: 20),
+                       const SizedBox(width: 4),
+                       _infoField(
+ const Text('ATQA:',
+                                style: TextStyle(
+                                    fontSize: 8, color: Color(0xFF666666))),
+                           _atqaCtrl, '0004',
+                           validRegex: r'^([0-9A-Fa-f]{4}\s*)+$',
+                           fieldWidth: 40),
                       const SizedBox(width: 4),
                       if (_atsCtrl.text.isNotEmpty)
                         _infoField(
