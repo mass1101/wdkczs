@@ -749,6 +749,7 @@ class _IcTabState extends State<IcTab> {
       }
 
       // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
+      LogService.instance.log('[_crackCard] prng=$prng eSector=$eSector eKey=$eKeyHex');
       for (var s = 0; s < 16; s++) {
         if (!sectorKeys[s].hasKeyA) {
           progress.value = prng == 0
@@ -760,9 +761,13 @@ class _IcTabState extends State<IcTab> {
             if (rec != null) {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
+              LogService.instance.log('[_crackCard] sector=$s keyA FOUND=$rec');
+            } else {
+              LogService.instance.log('[_crackCard] sector=$s keyA NOT FOUND');
             }
           } catch (e) {
             progress.value = '破解密钥：扇区$s keyA 破解失败：$e';
+            LogService.instance.log('[_crackCard] sector=$s keyA ERROR=$e');
           }
         }
         if (!sectorKeys[s].hasKeyB) {
@@ -775,9 +780,13 @@ class _IcTabState extends State<IcTab> {
             if (rec != null) {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
+              LogService.instance.log('[_crackCard] sector=$s keyB FOUND=$rec');
+            } else {
+              LogService.instance.log('[_crackCard] sector=$s keyB NOT FOUND');
             }
           } catch (e) {
             progress.value = '破解密钥：扇区$s keyB 破解失败：$e';
+            LogService.instance.log('[_crackCard] sector=$s keyB ERROR=$e');
           }
         }
       }
@@ -790,14 +799,17 @@ class _IcTabState extends State<IcTab> {
       for (var s = 0; s < 16; s++) {
         if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
           allFound = false;
+          LogService.instance.log('[_crackCard] sector=$s MISSING keyA=${sectorKeys[s].hasKeyA} keyB=${sectorKeys[s].hasKeyB}');
           break;
         }
       }
       if (allFound) {
+        LogService.instance.log('[_crackCard] ALL sectors cracked successfully');
         progress.value = '解卡片：破解成功，已重新标记密钥信息.';
         if (mounted) Navigator.of(context).pop();
         _toast('破解成功');
       } else {
+        LogService.instance.log('[_crackCard] CRACK FAILED - some sectors not found');
         progress.value = '解卡片：破解失败，部分扇区密钥未找到';
         if (mounted) Navigator.of(context).pop();
         _toast('破解失败，部分扇区密钥未找到（已写入找到的密钥）');
@@ -820,6 +832,8 @@ class _IcTabState extends State<IcTab> {
       int eSector, KeyType eKeyType, String eKeyHex) async {
     final eKey = _hex(eKeyHex);
     final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
+    final keyTypeStr = targetKeyType == KeyType.keyA ? 'keyA' : 'keyB';
+    LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr prng=$prng eSector=$eSector eKey=$eKeyHex');
 
     if (prng == 0) {
       // STATIC 嵌套：检查 nt2 区分1代/2代卡
@@ -832,9 +846,13 @@ class _IcTabState extends State<IcTab> {
       final atks = res.atks
           .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
           .toList();
-      if (atks.isEmpty) return null;
+      if (atks.isEmpty) {
+        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr STATIC atks empty');
+        return null;
+      }
       final nt1 = atks[0]['nt1']!;
       final nt2 = atks[0]['nt2']!;
+      LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr STATIC nt1=$nt1 nt2=$nt2');
       final is1Gen = atks.length > 1 &&
           Crypto1.toUint32(nt2).toRadixString(16) ==
               Crypto1.toUint32(atks[1]['nt2']!).toRadixString(16);
@@ -842,15 +860,20 @@ class _IcTabState extends State<IcTab> {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
         final recovered = Crypto1.staticnested(
             uid: uidInt, keyType: targetKeyType.value, atks: atks);
+        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}');
         return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
       }
       // 1代卡：nt2 一致，HardNested + 暴力验证
       final hardRes = await _dev.cmdMf1AcquireHardNested(
           block: eSector * 4, keyType: eKeyType, key: eKey,
           targetBlock: sector * 4, targetKeyType: targetKeyType);
-      if (hardRes.isEmpty) return null;
+      if (hardRes.isEmpty) {
+        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 1gen hardRes empty');
+        return null;
+      }
       final par = hardRes.first.par;
       final candidates = _generateKeysFromHardNested(uidInt, nt1, nt2, par);
+      LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 1gen candidates=${candidates.length}');
       return _verifyCandidates(sector, keyTypeBit, candidates, chunkSize: 40);
     }
     if (prng == 1) {
@@ -875,10 +898,12 @@ class _IcTabState extends State<IcTab> {
             .toList();
         final recovered =
             Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
+        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
         if (recovered.isNotEmpty) {
           return _verifyCandidates(sector, keyTypeBit, recovered);
         }
       }
+      LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK all retries failed');
     }
     return null;
   }
@@ -887,7 +912,11 @@ class _IcTabState extends State<IcTab> {
   Future<String?> _verifyCandidates(
       int sector, int keyTypeBit, List<int> candidates,
       {int chunkSize = 20}) async {
-    if (candidates.isEmpty) return null;
+    if (candidates.isEmpty) {
+      LogService.instance.log('[_verifyCandidates] sector=$sector candidates empty');
+      return null;
+    }
+    LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length}');
     final mask = Uint8List(10);
     mask.fillRange(0, 10, 0xFF);
     mask[sector >> 2] ^= keyTypeBit << (6 - sector % 4 * 2);
@@ -904,7 +933,12 @@ class _IcTabState extends State<IcTab> {
         keys: keys, mask: mask, chunkSize: chunkSize);
     final idx = keyTypeBit == 2 ? sector * 2 : sector * 2 + 1;
     final found = res.sectorKeys[idx];
-    return found != null ? _hexStr(found) : null;
+    if (found != null) {
+      LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(found)}');
+      return _hexStr(found);
+    }
+    LogService.instance.log('[_verifyCandidates] sector=$sector NOT FOUND (found bit=0)');
+    return null;
   }
 
   /// 1代卡 HardNested 密钥生成（对齐小程序 generate_keys：从 nt1^nt2 恢复候选密钥）
