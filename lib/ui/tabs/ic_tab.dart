@@ -879,28 +879,38 @@ class _IcTabState extends State<IcTab> {
     if (prng == 1) {
       // WEAK 嵌套：重试5次 + 暴力验证
       for (var retry = 0; retry < 5; retry++) {
-        final distRes = await _dev.cmdMf1TestNtDistance(
-            block: eSector * 4, keyType: eKeyType, key: eKey);
-        final dist = _bytesInt(distRes.dist.sublist(0, 4));
-        final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
-        final nested = await _dev.cmdMf1AcquireNested(
-            block: eSector * 4,
-            keyType: eKeyType,
-            key: eKey,
-            targetBlock: sector * 4,
-            targetKeyType: targetKeyType);
-        final atks = nested
-            .map((a) => {
-                  'nt1': _bytesInt(a.nt1),
-                  'nt2': _bytesInt(a.nt2),
-                  'par': a.par,
-                })
-            .toList();
-        final recovered =
-            Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
-        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
-        if (recovered.isNotEmpty) {
-          return _verifyCandidates(sector, keyTypeBit, recovered);
+        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry START');
+        try {
+          final distRes = await _dev.cmdMf1TestNtDistance(
+              block: eSector * 4, keyType: eKeyType, key: eKey);
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry distRes.uid=${distRes.uid.length} dist=${distRes.dist.length}');
+          final dist = _bytesInt(distRes.dist.sublist(0, 4));
+          final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dist=$dist nestedUid=$nestedUid');
+          final nested = await _dev.cmdMf1AcquireNested(
+              block: eSector * 4,
+              keyType: eKeyType,
+              key: eKey,
+              targetBlock: sector * 4,
+              targetKeyType: targetKeyType);
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry nested.length=${nested.length}');
+          final atks = nested
+              .map((a) => {
+                    'nt1': _bytesInt(a.nt1),
+                    'nt2': _bytesInt(a.nt2),
+                    'par': a.par,
+                  })
+              .toList();
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
+          final recovered =
+              Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
+          if (recovered.isNotEmpty) {
+            return _verifyCandidates(sector, keyTypeBit, recovered);
+          }
+        } catch (e) {
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry ERROR=$e');
+          rethrow;
         }
       }
       LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK all retries failed');
