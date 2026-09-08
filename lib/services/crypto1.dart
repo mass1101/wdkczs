@@ -712,10 +712,11 @@ class Crypto1 {
         for (final e in y.toList()) {
           if (seen.contains(e)) continue;
           seen.add(e);
-          final buf8 = Uint8List(8);
-          ByteData.sublistView(buf8).setUint64(2, e & 0xFFFFFFFFFFFF, Endian.big);
-          final r2 = Uint8List.fromList(buf8.sublist(2));
-          if (await checkKey(r2)) return e;
+          final buf = Uint8List(6);
+          final bd = ByteData.sublistView(buf);
+          bd.setUint16(0, (e >> 32) & 0xFFFF, Endian.big);
+          bd.setUint32(2, e & 0xFFFFFFFF, Endian.big);
+          if (await checkKey(buf)) return e;
         }
       }
     }

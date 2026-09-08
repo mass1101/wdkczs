@@ -832,6 +832,7 @@ class _IcTabState extends State<IcTab> {
         final distRes = await _dev.cmdMf1TestNtDistance(
             block: eSector * 4, keyType: eKeyType, key: eKey);
         final dist = _bytesInt(distRes.dist.sublist(0, 4));
+        final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
         final nested = await _dev.cmdMf1AcquireNested(
             block: eSector * 4,
             keyType: eKeyType,
@@ -845,7 +846,8 @@ class _IcTabState extends State<IcTab> {
                   'par': a.par,
                 })
             .toList();
-        final recovered = Crypto1.nested(uid: uidInt, dist: dist, atks: atks);
+        final recovered =
+            Crypto1.nested(uid: nestedUid, dist: dist, atks: atks);
         if (recovered.isNotEmpty) {
           return _verifyCandidates(sector, keyTypeBit, recovered);
         }
@@ -864,8 +866,9 @@ class _IcTabState extends State<IcTab> {
     final keys = candidates
         .map((k) {
           final buf = Uint8List(6);
-          ByteData.sublistView(buf).setUint32(2, k & 0xFFFFFFFFFFFF,
-              Endian.big);
+          final bd = ByteData.sublistView(buf);
+          bd.setUint16(0, (k >> 32) & 0xFFFF, Endian.big);
+          bd.setUint32(2, k & 0xFFFFFFFF, Endian.big);
           return buf;
         })
         .toList();
