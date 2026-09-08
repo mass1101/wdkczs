@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../../models/enums.dart';
 import '../../services/device_service.dart';
+import '../../services/log_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common.dart';
 
@@ -307,6 +308,53 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
+  /// 查看日志
+  void _showLogs() {
+    final logs = LogService.instance.logs;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Text('调试日志', style: TextStyle(fontSize: 16)),
+            const Spacer(),
+            TextButton(
+              onPressed: () {
+                LogService.instance.clear();
+                Navigator.pop(ctx);
+                _showLogs();
+              },
+              child: const Text('清除'),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 400,
+          height: 500,
+          child: logs.isEmpty
+              ? const Center(child: Text('暂无日志'))
+              : ListView.builder(
+                  itemCount: logs.length,
+                  itemBuilder: (_, i) => SelectableText(
+                    logs[i],
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ========== UI ==========
   @override
   Widget build(BuildContext context) {
@@ -382,7 +430,26 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                   ),
-                  // 关于
+                    // 调试日志
+                    SectionCard(
+                      title: '调试',
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '查看应用调试日志',
+                            style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+                          ),
+                          ActionButton(
+                            label: '查看日志',
+                            icon: Icons.article,
+                            color: primary,
+                            onTap: _showLogs,
+                          ),
+                        ],
+                      ),
+                    ),
+                    // 关于
                   SectionCard(
                     title: '关于',
                     child: Column(
