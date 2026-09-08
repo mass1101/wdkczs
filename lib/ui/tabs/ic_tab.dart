@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -635,12 +636,91 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
-      // 全加密卡（无已知密钥），无法进行嵌套攻击
+      // 全加密卡：尝试 Darkside 攻击块0 keyA（对齐小程序 hS.darkside）
       if (eSector == -1) {
+        progress.value = '破解密钥：发现全加密卡，尝试Darkside攻击...';
+        try {
+          final darkKey = await Crypto1.darkside(
+            (isFirst) async {
+              progress.value = '破解密钥：发现全加密卡，破解密钥中';
+              final res = await _dev.cmdMf1AcquireDarkside(
+                  block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
+              if (res.status == 0) {
+                return {
+                  'uid': res.uid!,
+                  'nt': res.nt!,
+                  'par': res.par!,
+                  'ks': res.ks!,
+                  'nr': res.nr!,
+                  'ar': res.ar!,
+                };
+              }
+              return null;
+            },
+            (key) async => await _dev.cmdMf1CheckBlockKey(
+                block: 0, keyType: KeyType.keyA, key: key),
+          );
+          final darkHex = _int6Hex(darkKey!);
+          sectorKeys[0].hasKeyA = true;
+          sectorKeys[0].keyA = darkHex;
+          eSector = 0;
+          eKeyType = KeyType.keyA;
+          eKeyHex = darkHex;
+          progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
+        } catch (_) {
+          _appendKeysFromSectors(sectorKeys);
+          progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
+          if (mounted) Navigator.of(context).pop();
+          _toast('全加密卡，Darkside攻击失败，请先通过其他方式获取至少一个密钥');
+          return;
+        }
+      }
+
+      // 加密嵌套检测：判断是否为第三代无漏洞卡（对齐小程序）
+      progress.value = '破解密钥：检测第三代无漏洞卡...';
+      Mf1AcquireStaticEncryptedNestedDecoder? encNested;
+      final specialKeys = ['A396EFA4E24F', 'A31667A8CEC1', '518B3354E760'];
+      for (final sk in specialKeys) {
+        try {
+          final n1 = await _dev.cmdMf1AcquireStaticEncryptedNested(
+              key: _hex(sk));
+          final n2 = await _dev.cmdMf1AcquireStaticEncryptedNested(
+              key: _hex(sk));
+          if (n1.atks.isNotEmpty && n2.atks.isNotEmpty &&
+              n1.atks.first.$4 == n2.atks.first.$4) {
+            encNested = n1;
+          }
+          break;
+        } catch (_) {}
+      }
+      if (encNested != null && encNested.atks.isNotEmpty) {
+        // 第三代无漏洞卡破解（对齐小程序 Crack_3gen）
+        progress.value = '破解密钥：发现第三代无漏洞卡，正在破解...';
+        for (var i = 0; i + 1 < encNested.atks.length; i += 2) {
+          final atkA = encNested.atks[i];
+          final atkB = encNested.atks[i + 1];
+          final s = atkA.$1;
+          try {
+            final stateA = Crypto1.lfsrRecovery64(atkA.$4, atkA.$5 >> 4);
+            final stateB = Crypto1.lfsrRecovery64(atkB.$4, atkB.$5 >> 4);
+            stateA.lfsrRollbackWord(_bytesInt(encNested.uid.sublist(0, 4)) ^ atkA.$3, 0);
+            stateB.lfsrRollbackWord(_bytesInt(encNested.uid.sublist(0, 4)) ^ atkB.$3, 0);
+            final keyA = stateA.getLfsr();
+            final keyB = stateB.getLfsr();
+            if (!sectorKeys[s].hasKeyA) {
+              sectorKeys[s].hasKeyA = true;
+              sectorKeys[s].keyA = _int6Hex(keyA);
+            }
+            if (!sectorKeys[s].hasKeyB) {
+              sectorKeys[s].hasKeyB = true;
+              sectorKeys[s].keyB = _int6Hex(keyB);
+            }
+          } catch (_) {}
+        }
         _appendKeysFromSectors(sectorKeys);
-        progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
+        progress.value = '解卡片：第三代无漏洞卡破解成功';
         if (mounted) Navigator.of(context).pop();
-        _toast('全加密卡，密钥区为空，请先通过其他方式获取至少一个密钥');
+        _toast('第三代无漏洞卡破解成功');
         return;
       }
 
@@ -720,6 +800,7 @@ class _IcTabState extends State<IcTab> {
       int uidInt, int sector, KeyType targetKeyType, int prng,
       int eSector, KeyType eKeyType, String eKeyHex) async {
     final eKey = _hex(eKeyHex);
+    final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
 
     if (prng == 0) {
       // STATIC 嵌套：检查 nt2 区分1代/2代卡
@@ -733,17 +814,25 @@ class _IcTabState extends State<IcTab> {
           .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
           .toList();
       if (atks.isEmpty) return null;
-      // 2代卡：nt2 不一致，使用 staticnested
       final nt2s = atks.map((a) => a['nt2']!).toSet();
       if (nt2s.length > 1) {
+        // 2代卡：nt2 不一致，staticnested + 暴力验证
         final recovered = Crypto1.staticnested(
             uid: uidInt, keyType: targetKeyType.value, atks: atks);
-        if (recovered.isNotEmpty) return _int6Hex(recovered.first);
+        return _verifyCandidates(sector, keyTypeBit, recovered);
       }
-      return null;
+      // 1代卡：nt2 一致，HardNested + 暴力验证
+      final hardRes = await _dev.cmdMf1AcquireHardNested(
+          block: eSector * 4, keyType: eKeyType, key: eKey,
+          targetBlock: sector * 4, targetKeyType: targetKeyType);
+      if (hardRes.isEmpty) return null;
+      final nt1 = _bytesInt(res.atks.first.$1);
+      final nt2 = _bytesInt(res.atks.first.$2);
+      final candidates = _generateKeysFromHardNested(nt1, nt2);
+      return _verifyCandidates(sector, keyTypeBit, candidates);
     }
     if (prng == 1) {
-      // WEAK 嵌套：重试5次（对齐小程序 WEAK 分支重试逻辑）
+      // WEAK 嵌套：重试5次 + 暴力验证
       for (var retry = 0; retry < 5; retry++) {
         final distRes = await _dev.cmdMf1TestNtDistance(
             block: eSector * 4, keyType: eKeyType, key: eKey);
@@ -762,10 +851,43 @@ class _IcTabState extends State<IcTab> {
                 })
             .toList();
         final recovered = Crypto1.nested(uid: uidInt, dist: dist, atks: atks);
-        if (recovered.isNotEmpty) return _int6Hex(recovered.first);
+        if (recovered.isNotEmpty) {
+          return _verifyCandidates(sector, keyTypeBit, recovered);
+        }
       }
     }
     return null;
+  }
+
+  /// 暴力验证候选密钥（对齐小程序 bruteforce_Crack + mf1CheckKeysOfSectors）
+  Future<String?> _verifyCandidates(
+      int sector, int keyTypeBit, List<int> candidates) async {
+    if (candidates.isEmpty) return null;
+    final mask = Uint8List(10);
+    mask.fillRange(0, 10, 0xFF);
+    mask[sector >> 2] ^= keyTypeBit << (6 - sector % 4 * 2);
+    final keys = candidates
+        .map((k) {
+          final buf = Uint8List(6);
+          ByteData.sublistView(buf).setUint32(2, k & 0xFFFFFFFFFFFF,
+              Endian.big);
+          return buf;
+        })
+        .toList();
+    final res = await _dev.cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
+    final idx = keyTypeBit == 2 ? sector * 2 : sector * 2 + 1;
+    final found = res.sectorKeys[idx];
+    return found != null ? _hexStr(found) : null;
+  }
+
+  /// 1代卡 HardNested 密钥生成（对齐小程序 generate_keys：从 nt1^nt2 恢复候选密钥）
+  List<int> _generateKeysFromHardNested(int nt1, int nt2) {
+    final ks = nt1 ^ nt2;
+    final states = Crypto1.lfsrRecovery32(nt1, ks);
+    return states.map((s) {
+      s.lfsrRollbackWord(0, 0);
+      return s.getLfsr();
+    }).toList();
   }
 
   /// 卡号 XOR 校验（对齐小程序 btnWrite：卡第5字节 BCC = 前4字节异或）
