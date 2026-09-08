@@ -1083,10 +1083,10 @@ class DeviceService {
       found.setRange(0, 10, r.sublist(0, 10));
       for (var i = 0; i < 10; i++) {
         foundAll[i] |= found[i];
+        mask[i] |= found[i];
       }
       for (var i = 0; i < 80; i++) {
-        final bit = (found[i >> 3] >> (7 - (i & 7))) & 1;
-        if (bit == 1 && sectorKeysAll[i] == null) {
+        if (sectorKeysAll[i] == null) {
           sectorKeysAll[i] = r.sublist(10 + i * 6, 10 + i * 6 + 6);
         }
       }
