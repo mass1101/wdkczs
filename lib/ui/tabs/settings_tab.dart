@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../main.dart';
 import '../../models/enums.dart';
@@ -318,6 +319,18 @@ class _SettingsTabState extends State<SettingsTab> {
           children: [
             const Text('调试日志', style: TextStyle(fontSize: 16)),
             const Spacer(),
+            TextButton(
+              onPressed: () async {
+                final allLogs = logs.join('\n');
+                await Clipboard.setData(ClipboardData(text: allLogs));
+                if (mounted) {
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(SnackBar(content: const Text('已复制全部日志'), duration: const Duration(seconds: 2)));
+                }
+              },
+              child: const Text('复制全部'),
+            ),
             TextButton(
               onPressed: () {
                 LogService.instance.clear();
