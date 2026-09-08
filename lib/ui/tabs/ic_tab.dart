@@ -636,46 +636,6 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
-      // 全加密卡：尝试 Darkside 攻击块0 keyA（对齐小程序 hS.darkside）
-      if (eSector == -1) {
-        progress.value = '破解密钥：发现全加密卡，尝试Darkside攻击...';
-        try {
-          final darkKey = await Crypto1.darkside(
-            (isFirst) async {
-              progress.value = '破解密钥：发现全加密卡，破解密钥中';
-              final res = await _dev.cmdMf1AcquireDarkside(
-                  block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
-              if (res.status == 0) {
-                return {
-                  'uid': res.uid!,
-                  'nt': res.nt!,
-                  'par': res.par!,
-                  'ks': res.ks!,
-                  'nr': res.nr!,
-                  'ar': res.ar!,
-                };
-              }
-              return null;
-            },
-            (key) async => await _dev.cmdMf1CheckBlockKey(
-                block: 0, keyType: KeyType.keyA, key: key),
-          );
-          final darkHex = _int6Hex(darkKey!);
-          sectorKeys[0].hasKeyA = true;
-          sectorKeys[0].keyA = darkHex;
-          eSector = 0;
-          eKeyType = KeyType.keyA;
-          eKeyHex = darkHex;
-          progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
-        } catch (_) {
-          _appendKeysFromSectors(sectorKeys);
-          progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
-          if (mounted) Navigator.of(context).pop();
-          _toast('全加密卡，Darkside攻击失败，请先通过其他方式获取至少一个密钥');
-          return;
-        }
-      }
-
       // 加密嵌套检测：判断是否为第三代无漏洞卡（对齐小程序）
       progress.value = '破解密钥：检测第三代无漏洞卡...';
       Mf1AcquireStaticEncryptedNestedDecoder? encNested;
@@ -722,6 +682,46 @@ class _IcTabState extends State<IcTab> {
         if (mounted) Navigator.of(context).pop();
         _toast('第三代无漏洞卡破解成功');
         return;
+      }
+
+      // 全加密卡：尝试 Darkside 攻击块0 keyA（对齐小程序 hS.darkside）
+      if (eSector == -1) {
+        progress.value = '破解密钥：发现全加密卡，尝试Darkside攻击...';
+        try {
+          final darkKey = await Crypto1.darkside(
+            (isFirst) async {
+              progress.value = '破解密钥：发现全加密卡，破解密钥中';
+              final res = await _dev.cmdMf1AcquireDarkside(
+                  block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
+              if (res.status == 0) {
+                return {
+                  'uid': res.uid!,
+                  'nt': res.nt!,
+                  'par': res.par!,
+                  'ks': res.ks!,
+                  'nr': res.nr!,
+                  'ar': res.ar!,
+                };
+              }
+              return null;
+            },
+            (key) async => await _dev.cmdMf1CheckBlockKey(
+                block: 0, keyType: KeyType.keyA, key: key),
+          );
+          final darkHex = _int6Hex(darkKey!);
+          sectorKeys[0].hasKeyA = true;
+          sectorKeys[0].keyA = darkHex;
+          eSector = 0;
+          eKeyType = KeyType.keyA;
+          eKeyHex = darkHex;
+          progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
+        } catch (_) {
+          _appendKeysFromSectors(sectorKeys);
+          progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
+          if (mounted) Navigator.of(context).pop();
+          _toast('全加密卡，Darkside攻击失败，请先通过其他方式获取至少一个密钥');
+          return;
+        }
       }
 
       // 解卡片：逐扇区破解（对齐小程序 Crack()）
