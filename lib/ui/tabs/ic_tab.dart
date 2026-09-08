@@ -890,6 +890,209 @@ class _IcTabState extends State<IcTab> {
     }).toList();
   }
 
+  /// 从加密嵌套数据生成候选密钥（对齐小程序 generate_keys：lfsrRecovery64 + rollback）
+  int _generateKeyFromEncryptedNested(
+      Uint8List uid, int nt, int ntEnc, int par) {
+    final state = Crypto1.lfsrRecovery64(ntEnc, par >> 4);
+    final uidInt = _bytesInt(uid.sublist(0, 4));
+    state.lfsrRollbackWord(uidInt ^ nt, 0);
+    return state.getLfsr();
+  }
+
+  /// 变换加密嵌套 atks（对齐小程序：nt 前推16步，par 与 ntEnc 高位异或）
+  List<(int, int, int, int)> _transformEncNestedAtks(
+      List<(int, KeyType, int, int, int)> atks) {
+    return atks.map((a) {
+      final nt = Crypto1.prngSuccessor(a.$3, 16);
+      final p = a.$5;
+      final n = a.$4;
+      final par = ((p >> 3 & 1) ^ (n >> 24 & 1)) << 3 |
+          ((p >> 2 & 1) ^ (n >> 16 & 1)) << 2 |
+          ((p >> 1 & 1) ^ (n >> 8 & 1)) << 1 |
+          ((p & 1) ^ (n & 1));
+      return (a.$1, nt, n, par);
+    }).toList();
+  }
+
+  /// 双卡破解（对齐小程序 Crack_with2cards：两张同系统不同UID的卡）
+  Future<void> _crackWith2Cards() async {
+    final progress = ValueNotifier<String>('双卡破解：正在读取第一张卡...');
+    final step = ValueNotifier<int>(0);
+    try {
+      await _dev.assureDeviceMode(DeviceMode.reader);
+      final tags1 = await _dev.cmdHf14aScan();
+      if (tags1.isEmpty) throw DeviceException(1, '未发现卡片');
+      final tag1 = tags1.first;
+      if (tag1.sakHex != '08') {
+        _toast('发现非标准M1卡，该卡无法破解');
+        return;
+      }
+      final uid1 = tag1.uid;
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => CrackProgressDialog(
+          title: '双卡破解...',
+          steps: const ['读取卡1', '读取卡2', '生成密钥'],
+          step: step,
+          progress: progress,
+          onCancel: null,
+        ),
+      );
+
+      // 第一张卡：加密嵌套采集
+      Mf1AcquireStaticEncryptedNestedDecoder? enc1;
+      final specialKeys = ['A396EFA4E24F', 'A31667A8CEC1', '518B3354E760'];
+      for (final sk in specialKeys) {
+        try {
+          final res = await _dev.cmdMf1AcquireStaticEncryptedNested(
+              key: _hex(sk));
+          if (res.atks.isNotEmpty) {
+            enc1 = res;
+            break;
+          }
+        } catch (_) {}
+      }
+      if (enc1 == null) {
+        throw DeviceException(1,
+            '破解失败，只有第一、三代无漏洞卡支持双卡破解！');
+      }
+
+      // 等待用户换卡（对齐小程序：100秒超时）
+      progress.value = '双卡破解：请读取第二张卡...';
+      Uint8List? uid2;
+      for (var i = 0; i < 100; i++) {
+        progress.value =
+            '双卡破解：请读取第二张卡，用时${i}s...';
+        try {
+          final tags2 = await _dev.cmdHf14aScan();
+          if (tags2.isNotEmpty) {
+            final tag2 = tags2.first;
+            if (_hexStr(tag2.uid) != _hexStr(uid1)) {
+              uid2 = tag2.uid;
+              break;
+            }
+          }
+        } catch (_) {}
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      if (uid2 == null) {
+        throw DeviceException(1, '超时，未检测到第二张卡');
+      }
+
+      // 第二张卡：加密嵌套采集
+      progress.value = '双卡破解：正在读取第二张卡...';
+      Mf1AcquireStaticEncryptedNestedDecoder? enc2;
+      for (final sk in specialKeys) {
+        try {
+          final res = await _dev.cmdMf1AcquireStaticEncryptedNested(
+              key: _hex(sk));
+          if (res.atks.isNotEmpty) {
+            enc2 = res;
+            break;
+          }
+        } catch (_) {}
+      }
+      if (enc2 == null) {
+        throw DeviceException(1,
+            '破解失败，第二张卡不支持双卡破解！');
+      }
+
+      // 变换 atks 并生成候选密钥
+      step.value = 2;
+      final sectorKeys = List.generate(16, (s) => _SectorKey(s));
+      // 从当前卡片状态初始化已有密钥
+      for (var s = 0; s < 16; s++) {
+        final b3 = _app.card.sectors[s].blocks[3].data;
+        if (b3.length >= 32) {
+          final keyA = b3.substring(0, 12);
+          final keyB = b3.substring(20, 32);
+          if (keyA != '000000000000') {
+            sectorKeys[s].hasKeyA = true;
+            sectorKeys[s].keyA = keyA;
+          }
+          if (keyB != '000000000000') {
+            sectorKeys[s].hasKeyB = true;
+            sectorKeys[s].keyB = keyB;
+          }
+        }
+      }
+
+      final atks1 = _transformEncNestedAtks(enc1.atks);
+      final atks2 = _transformEncNestedAtks(enc2.atks);
+
+      for (var s = 0; s < 16; s++) {
+        if (sectorKeys[s].hasKeyA && sectorKeys[s].hasKeyB) continue;
+        if (s * 2 + 1 >= atks1.length || s * 2 + 1 >= atks2.length) break;
+
+        // keyA：索引 2*s
+        if (!sectorKeys[s].hasKeyA &&
+            s * 2 < atks1.length && s * 2 < atks2.length) {
+          final a1 = atks1[s * 2];
+          final a2 = atks2[s * 2];
+          final key1 = _generateKeyFromEncryptedNested(uid1, a1.$2, a1.$3, a1.$4);
+          final key2 = _generateKeyFromEncryptedNested(uid2, a2.$2, a2.$3, a2.$4);
+          if (key1 == key2) {
+            final keyHex = _int6Hex(key1);
+            final valid = await _dev.cmdMf1CheckBlockKey(
+                block: s * 4, keyType: KeyType.keyA, key: _hex(keyHex));
+            if (valid) {
+              sectorKeys[s].hasKeyA = true;
+              sectorKeys[s].keyA = keyHex;
+              progress.value =
+                  '双卡破解：扇区$s keyA=$keyHex';
+            }
+          }
+        }
+
+        // keyB：索引 2*s+1
+        if (!sectorKeys[s].hasKeyB &&
+            s * 2 + 1 < atks1.length && s * 2 + 1 < atks2.length) {
+          final a1 = atks1[s * 2 + 1];
+          final a2 = atks2[s * 2 + 1];
+          final key1 = _generateKeyFromEncryptedNested(uid1, a1.$2, a1.$3, a1.$4);
+          final key2 = _generateKeyFromEncryptedNested(uid2, a2.$2, a2.$3, a2.$4);
+          if (key1 == key2) {
+            final keyHex = _int6Hex(key1);
+            final valid = await _dev.cmdMf1CheckBlockKey(
+                block: s * 4, keyType: KeyType.keyB, key: _hex(keyHex));
+            if (valid) {
+              sectorKeys[s].hasKeyB = true;
+              sectorKeys[s].keyB = keyHex;
+              progress.value =
+                  '双卡破解：扇区$s keyB=$keyHex';
+            }
+          }
+        }
+      }
+
+      // 检查是否全部找到
+      var allFound = true;
+      for (var s = 0; s < 16; s++) {
+        if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
+          allFound = false;
+          break;
+        }
+      }
+
+      _appendKeysFromSectors(sectorKeys);
+      if (allFound) {
+        progress.value = '双卡破解：破解成功，已重新标记密钥信息.';
+        if (mounted) Navigator.of(context).pop();
+        _toast('双卡破解成功');
+      } else {
+        progress.value = '双卡破解：破解失败，这两张卡分别拥有不同密钥！';
+        if (mounted) Navigator.of(context).pop();
+        _toast('双卡破解失败，请确认两张卡属于同一系统');
+      }
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      _toast('双卡破解失败: $e');
+    }
+  }
+
   /// 卡号 XOR 校验（对齐小程序 btnWrite：卡第5字节 BCC = 前4字节异或）
   bool _nuidXorValid() {
     final b0 = _app.card.sectors[0].blocks[0].data;
@@ -1755,6 +1958,7 @@ const Text('ATS:',
               _sideBtn('读卡片', Icons.radio_button_checked, _readCard, primary),
               _sideBtn('写卡片', Icons.save_alt, _writeCard, primary),
               _sideBtn('解卡片', Icons.lock_open, _crackCard, primary),
+              _sideBtn('双卡破解', Icons.contactless, _crackWith2Cards, primary),
               _sideBtn('读卡槽', Icons.memory, _readSlot, primary),
               _sideBtn('写卡槽', Icons.memory, _writeSlot, primary),
               _sideBtn('算密钥', Icons.calculate, _mfkey, primary),
