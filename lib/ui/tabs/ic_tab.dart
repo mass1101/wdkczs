@@ -306,6 +306,12 @@ class _IcTabState extends State<IcTab> {
       progress.value = '读卡片：失败，$e';
       if (mounted) Navigator.of(context).pop();
       _toast('读卡失败: $e');
+    } finally {
+      // 对齐小程序 btnRead finally：恢复标签模式 + 提取密钥
+      try {
+        await _dev.cmdChangeDeviceMode(DeviceMode.tag);
+      } catch (_) {}
+      _grabKeys();
     }
   }
 
@@ -772,6 +778,12 @@ class _IcTabState extends State<IcTab> {
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _toast('破解失败: $e');
+    } finally {
+      // 对齐小程序 Crack() finally：恢复标签模式 + 提取密钥
+      try {
+        await _dev.cmdChangeDeviceMode(DeviceMode.tag);
+      } catch (_) {}
+      _grabKeys();
     }
   }
 
@@ -1096,6 +1108,33 @@ class _IcTabState extends State<IcTab> {
       _keyCtrl.text = lines.isEmpty
           ? toAdd.join('\n')
           : '${lines.join('\n')}\n${toAdd.join('\n')}';
+      _app.card.keys = _keyCtrl.text;
+      _validateKeys(_keyCtrl.text);
+    });
+  }
+
+  /// 从扇区块3提取密钥（对齐小程序 btnKeysGrab）
+  void _grabKeys() {
+    final lines = _keys.toList();
+    final sectors = _app.card.sectors;
+    if (sectors.isEmpty) return;
+    for (var s = 0; s < 16 && s < sectors.length; s++) {
+      final blocks = sectors[s].blocks;
+      if (blocks.length < 4) continue;
+      final trailer = blocks[3].data;
+      if (trailer.length != 32) continue;
+      final kA = trailer.substring(0, 12);
+      final kB = trailer.substring(20, 32);
+      if (kA != 'ffffffffffff' && kA != '000000000000' && !lines.contains(kA)) {
+        lines.add(kA);
+      }
+      if (kB != 'ffffffffffff' && kB != '000000000000' && !lines.contains(kB)) {
+        lines.add(kB);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _keyCtrl.text = lines.join('\n');
       _app.card.keys = _keyCtrl.text;
       _validateKeys(_keyCtrl.text);
     });
