@@ -763,7 +763,7 @@ class _IcTabState extends State<IcTab> {
           eKeyType = KeyType.keyA;
           eKeyHex = darkHex;
           _appendKeysFromSectors(sectorKeys);
-          await _checkCrackedKeys(_keys.map(_hex).toList(), sectorKeys);
+          await _propagateKeys(sectorKeys);
           crackTick.value++;
           progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
         } catch (_) {
