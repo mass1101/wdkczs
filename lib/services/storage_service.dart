@@ -14,7 +14,8 @@ class StorageService {
   static const _kCurrentUid = 'nfctool_current_uid';
   static const _kCurrentSlot = 'nfctool_current_slot';
   static const _kCloudEndpoint = 'nfctool_cloud_endpoint';
-  static const _kDefaultCloudEndpoint = 'https://cloud.geektoy.com';
+  static const _kDefaultCloudEndpoint =
+      'https://fc-mp-25581e18-9b6b-41d7-a1c9-69bb4c0020f7.next.bspapp.com';
   static const _kCrackTasks = 'nfctool_crack_tasks';
 
   SharedPreferences? _prefs;
@@ -145,7 +146,12 @@ class StorageService {
 
   Future<String> getCloudEndpoint() async {
     final p = await _p;
-    return p.getString(_kCloudEndpoint) ?? _kDefaultCloudEndpoint;
+    final v = p.getString(_kCloudEndpoint);
+    // 作者旧域名已失效(DNS 解析失败), 自动迁移到小程序同款端点
+    if (v == null || v == 'https://cloud.geektoy.com') {
+      return _kDefaultCloudEndpoint;
+    }
+    return v;
   }
 
   Future<void> setCloudEndpoint(String endpoint) async {

@@ -287,7 +287,7 @@ class _SettingsTabState extends State<SettingsTab> {
             ),
             const SizedBox(height: 8),
             Text(
-              '默认使用作者提供的云端服务。可修改为自建后端。',
+              '默认使用小程序同款云端服务(bspapp.com)。可修改为自建后端。',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
           ],
