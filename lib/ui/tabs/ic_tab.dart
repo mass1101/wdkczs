@@ -784,6 +784,18 @@ class _IcTabState extends State<IcTab> {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
               LogService.instance.log('[_crackCard] sector=$s keyB FOUND=$rec');
+              // M1 卡 keyA==keyB 很常见：用 keyB 回头验证 keyA
+              if (!sectorKeys[s].hasKeyA) {
+                try {
+                  final okA = await _dev.cmdMf1CheckBlockKey(
+                      block: s * 4, keyType: KeyType.keyA, key: _hex(rec));
+                  if (okA) {
+                    sectorKeys[s].hasKeyA = true;
+                    sectorKeys[s].keyA = rec;
+                    LogService.instance.log('[_crackCard] sector=$s keyA=keyB=$rec (verified)');
+                  }
+                } catch (_) {}
+              }
             } else {
               LogService.instance.log('[_crackCard] sector=$s keyB NOT FOUND');
             }
@@ -802,7 +814,7 @@ class _IcTabState extends State<IcTab> {
       for (var s = 0; s < 16; s++) {
         if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
           allFound = false;
-          LogService.instance.log('[_crackCard] sector=$s MISSING keyA=${sectorKeys[s].hasKeyA} keyB=${sectorKeys[s].hasKeyB}');
+          LogService.instance.log('[_crackCard] sector=$s not cracked: hasKeyA=${sectorKeys[s].hasKeyA} hasKeyB=${sectorKeys[s].hasKeyB}');
           break;
         }
       }
@@ -913,7 +925,10 @@ class _IcTabState extends State<IcTab> {
               Crypto1.nested(uid: nestedUid, dist: dist, atks: atks));
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
           if (recovered.isNotEmpty) {
-            return _verifyCandidates(sector, keyTypeBit, recovered);
+            final found = await _verifyCandidates(sector, keyTypeBit, recovered);
+            // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
+            if (found != null) return found;
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry verify failed, retrying');
           }
         } catch (e) {
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry ERROR=$e');
