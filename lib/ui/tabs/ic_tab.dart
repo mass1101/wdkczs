@@ -12,6 +12,7 @@ import '../../models/models.dart';
 import '../../services/crypto1.dart';
 import '../../services/device_service.dart';
 import '../../services/log_service.dart';
+import '../../services/native_recovery.dart';
 import '../../state/app_controller.dart';
 import '../../ui/dialogs/crack_dialog.dart';
 import '../../ui/dialogs/key_file_sheet.dart';
@@ -560,6 +561,7 @@ class _IcTabState extends State<IcTab> {
     final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
     final crackTick = ValueNotifier<int>(0);
     final hardnestedNotifier = ValueNotifier<bool>(false);
+    NativeRecovery.init();
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -783,6 +785,20 @@ class _IcTabState extends State<IcTab> {
         }
 
         // 两两配对交集（对齐小程序 Crack_3gen 主循环，候选集惰性生成）
+        // 候选生成：native 可用走 C（毫秒级），否则 Dart
+        List<int> gen3Candidates(Map<String, int> res) {
+          if (NativeRecovery.available) {
+            try {
+              final ks = NativeRecovery.staticEncryptedNested(
+                  uid: uidInt,
+                  nt: res['nt1']!, ntEnc: res['nt2']!, ntParEnc: res['par']!);
+              if (ks.isNotEmpty) return ks;
+            } catch (_) {}
+          }
+          return Crypto1.gen3GenerateKeys(
+              uidInt, res['nt1']!, res['nt2']!, res['par']!);
+        }
+
         Future<void> matchPair(
             int s, int r, bool useAs, bool useAr, String label) async {
           final rs = useAs ? resA[s] : resB[s];
@@ -791,10 +807,8 @@ class _IcTabState extends State<IcTab> {
           progress.value = '破解密钥：正在计算扇区 $s、$r 的共同$label密钥...';
           final cacheS = useAs ? resAKeys : resBKeys;
           final cacheR = useAr ? resAKeys : resBKeys;
-          final ka = cacheS[s] ??= Crypto1.gen3GenerateKeys(
-              uidInt, rs['nt1']!, rs['nt2']!, rs['par']!);
-          final kb = cacheR[r] ??= Crypto1.gen3GenerateKeys(
-              uidInt, rr['nt1']!, rr['nt2']!, rr['par']!);
+          final ka = cacheS[s] ??= gen3Candidates(rs);
+          final kb = cacheR[r] ??= gen3Candidates(rr);
           LogService.instance.log(
               '[_crackCard] 3gen pair $s/$r ${useAs ? 'A' : 'B'}${useAr ? 'A' : 'B'} cands=${ka.length}/${kb.length}');
           final inter = ka.toSet().intersection(kb.toSet()).toList();
@@ -1060,8 +1074,14 @@ class _IcTabState extends State<IcTab> {
       if (!is1Gen) {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
         progress?.value = '破解密钥：静态卡，正在恢复扇区$sector $keyTypeStr候选状态（约1分钟，请耐心等待）...';
-        final recovered = await Crypto1.staticNestedInIsolate(
-            uid: uidInt, keyType: targetKeyType.value, atks: atks);
+        final recovered = NativeRecovery.available && atks.length >= 2
+            ? NativeRecovery.staticNested(
+                uid: uidInt,
+                keyType: targetKeyType.value,
+                nt0: atks[0]['nt1']!, nt0Enc: atks[0]['nt2']!,
+                nt1: atks[1]['nt1']!, nt1Enc: atks[1]['nt2']!)
+            : await Crypto1.staticNestedInIsolate(
+                uid: uidInt, keyType: targetKeyType.value, atks: atks);
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}');
         return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
       }
@@ -1107,22 +1127,46 @@ class _IcTabState extends State<IcTab> {
               LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
           // 对齐小程序：每轮重试追加进度点
           progress?.value = '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
-          // 第一步：奇偶过滤得到有效采样对（快速）
-          final collected =
-              Crypto1.nestedCollect(dist: dist, atks: atks);
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry collected=${collected.length}');
-          // 第二步：逐对状态恢复（每对数十秒，放入后台 isolate 并回报进度）
-          final keysPerPair = <List<int>>[];
-          for (var i = 0; i < collected.length; i++) {
-            stop();
-            progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i + 1}/${collected.length} 对（每对约半分钟）...';
-            final pair = collected[i];
-            final keys = await Crypto1.recoverKeysInIsolate(nestedUid, pair);
-            keysPerPair.add(keys);
+          List<int> recovered;
+          if (NativeRecovery.available && atks.length >= 2) {
+            // native C 路径（PM3 mfnested，毫秒级）：采集对两两配对合并候选
+            final merged = <int>{};
+            for (var i = 0; i + 1 < atks.length; i += 2) {
+              stop();
+              merged.addAll(NativeRecovery.nested(
+                  uid: nestedUid,
+                  dist: dist,
+                  nt0: atks[i]['nt1']!, nt0Enc: atks[i]['nt2']!, par0: atks[i]['par']!,
+                  nt1: atks[i + 1]['nt1']!, nt1Enc: atks[i + 1]['nt2']!, par1: atks[i + 1]['par']!));
+            }
+            if (atks.length.isOdd) {
+              stop();
+              merged.addAll(NativeRecovery.nested(
+                  uid: nestedUid,
+                  dist: dist,
+                  nt0: atks.last['nt1']!, nt0Enc: atks.last['nt2']!, par0: atks.last['par']!,
+                  nt1: atks.first['nt1']!, nt1Enc: atks.first['nt2']!, par1: atks.first['par']!));
+            }
+            recovered = merged.toList();
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native recovered=${recovered.length}');
+          } else {
+            // Dart 路径（native 不可用时回退）
+            // 第一步：奇偶过滤得到有效采样对（快速）
+            final collected = Crypto1.nestedCollect(dist: dist, atks: atks);
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry collected=${collected.length}');
+            // 第二步：逐对状态恢复（每对数十秒，放入后台 isolate 并回报进度）
+            final keysPerPair = <List<int>>[];
+            for (var i = 0; i < collected.length; i++) {
+              stop();
+              progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i + 1}/${collected.length} 对（每对约半分钟）...';
+              final pair = collected[i];
+              final keys = await Crypto1.recoverKeysInIsolate(nestedUid, pair);
+              keysPerPair.add(keys);
+            }
+            // 第三步：合并候选取 top50（快速）
+            recovered = Crypto1.nestedMerge(keysPerPair);
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
           }
-          // 第三步：合并候选取 top50（快速）
-          final recovered = Crypto1.nestedMerge(keysPerPair);
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
           if (recovered.isNotEmpty) {
             final found = await _verifyCandidates(sector, keyTypeBit, recovered);
             // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
@@ -1221,6 +1265,7 @@ class _IcTabState extends State<IcTab> {
   Future<void> _crackWith2Cards() async {
     final progress = ValueNotifier<String>('双卡破解：正在读取第一张卡...');
     final step = ValueNotifier<int>(0);
+    NativeRecovery.init();
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags1 = await _dev.cmdHf14aScan();
@@ -2048,8 +2093,14 @@ class _IcTabState extends State<IcTab> {
             }
           }
           if (atks.isEmpty) continue;
-          final recovered = await Crypto1.staticNestedInIsolate(
-              uid: uid1, keyType: 96, atks: atks);
+          final recovered = NativeRecovery.available && atks.length >= 2
+              ? NativeRecovery.staticNested(
+                  uid: uid1,
+                  keyType: 96,
+                  nt0: atks[0]['nt1']!, nt0Enc: atks[0]['nt2']!,
+                  nt1: atks[1]['nt1']!, nt1Enc: atks[1]['nt2']!)
+              : await Crypto1.staticNestedInIsolate(
+                  uid: uid1, keyType: 96, atks: atks);
           if (recovered.isNotEmpty) {
             results.add(_int6Hex(recovered.first));
           }
