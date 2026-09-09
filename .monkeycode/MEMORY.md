@@ -43,4 +43,14 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - Dart async 函数内创建的闭包会捕获整个 async 上下文（含 `_AsyncCompleter`），作为 `Isolate.run`/`SendPort.send` 消息发送时抛 `object is unsendable`，顶层/非 async 上下文的闭包无此问题。
   - 规范：app 内所有 `Isolate.run` 调用必须通过 crypto1.dart 的非 async static 包装（`recoverKeysInIsolate`/`staticNestedInIsolate`），禁止在 async 函数体内直接写 `Isolate.run(() => ...)`。
-  - 症状特征：日志里 collected 后几十毫秒内报 isolate unsendable 错误、无 recovered 行，即恢复计算完全没跑。
+   - 症状特征：日志里 collected 后几十毫秒内报 isolate unsendable 错误、无 recovered 行，即恢复计算完全没跑。
+
+[Project Knowledge Summary]
+- Date: 2026-09-09
+- Context: FFI 集成 PM3 native C 解卡库（native/，源自 Chameleon Ultra）做合成样本真值验证时发现
+- Category: Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - C 库新入口的真值验证方法：用 app `crypto1.dart` 的 `Crypto1`（setLfsr/lfsrWord/prngSuccessor）合成已知密钥样本（enc = ntp ^ ks，ntp = prngSuccessor(nt, dist)），先跑 app 自身恢复路径确认含真 key（自洽），再喂 C 入口比对。验证脚本 `ffi_check.dart`（nested）/ `ffi_check2.dart`（static_nested），`dart run` 即可。
+  - 禁止手写简易 Crypto1 合成器：PM3 crypto1 有特有位序（`setLfsr` 的 `^7`、`crypto1_word` 的 BEBIT 输入 + `24^i` 输出重排），手写必错（表现为 lfsr_recovery32 输出 20 多万假候选）。
+  - FFI 对接前必须逐字段比对 C 结构体语义与 app 采集数据语义：CU 的 C `static_encrypted_nested` 是 lfsr_recovery32 数学，与 gen3 卡的 Doegox 2x1nt（小程序 generate_keys/`gen3GenerateKeys`）不同源，C 端无 2x1nt 实现，gen3 只能走 Dart。
+  - C `nested()` 输入 = 两条采集的 (nt 明文, nt_enc, par) 同 dist；`static_nested()` = 两条连续 auth (nt, enc)，dist 由特征值决定（0x01200145→160；0x009080A2→keyA 160/keyB 161，后续 +160）；`nested_run` 输出按出现频次排序（真 key 多条恢复时频次最高排最前）。
