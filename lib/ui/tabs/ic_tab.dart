@@ -1564,8 +1564,16 @@ class _IcTabState extends State<IcTab> {
     required void Function() checkStop,
   }) async {
     final eKey = _hex(eKeyHex);
+    // 借鉴 Chameleon Ultra（PM3 hardnested）：256 种高字节采满后校验 sum8 分布，
+    // 不在白名单说明采集质量差，重采（上限 3 次后放行，防止死循环）
+    const sumWhitelist = {
+      0, 32, 56, 64, 80, 96, 104, 112, 120, 128,
+      136, 144, 152, 160, 176, 192, 200, 224, 256
+    };
     final seen = List<bool>.filled(256, false);
     var count = 0;
+    var sum = 0;
+    var attempts = 0;
     final nonceBuf = StringBuffer();
     var uploaded = false;
     while (!uploaded) {
@@ -1587,16 +1595,30 @@ class _IcTabState extends State<IcTab> {
         if (!seen[hb]) {
           seen[hb] = true;
           count++;
+          sum += Crypto1.evenParity32((nt & 0xff000000) | ((a.par >> 4) & 0x08));
         }
         nonceBuf.write('$nt|${(a.par >> 4) & 15}\n');
         final hb2 = (ntEnc >> 24) & 255;
         if (!seen[hb2]) {
           seen[hb2] = true;
           count++;
+          sum += Crypto1.evenParity32((ntEnc & 0xff000000) | (a.par & 0x08));
         }
         nonceBuf.write('$ntEnc|${a.par & 15}\n');
       }
       if (count >= 256) {
+        if (!sumWhitelist.contains(sum) && attempts < 3) {
+          attempts++;
+          LogService.instance.log(
+              '[_collectUploadHardnestedSector] sector=$sector sum=$sum not in whitelist, retrying ($attempts/3)');
+          seen.fillRange(0, 256, false);
+          count = 0;
+          sum = 0;
+          nonceBuf.clear();
+          continue;
+        }
+        LogService.instance.log(
+            '[_collectUploadHardnestedSector] sector=$sector sum=$sum attempts=$attempts uploading');
         try {
           await _app.cloud.addJob(
               userId: userId,
