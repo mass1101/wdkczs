@@ -26,4 +26,4 @@ add_library(recovery SHARED
 
 target_include_directories(recovery PRIVATE .)
 set_target_properties(recovery PROPERTIES OUTPUT_NAME "recovery")
-target_link_libraries(recovery PRIVATE minlzlib)
+target_link_libraries(recovery PRIVATE minlzlib m)

@@ -38,20 +38,8 @@ final class _StaticNested extends Struct {
   external int nt1Enc;
 }
 
-final class _StaticEncryptedNested extends Struct {
-  @Uint32()
-  external int uid;
-  @Uint32()
-  external int nt;
-  @Uint32()
-  external int ntEnc;
-  @Uint32()
-  external int ntParEnc;
-}
-
 typedef _NestedFn = Pointer<Uint64> Function(Pointer<_Nested>, Pointer<Uint32>);
 typedef _StaticNestedFn = Pointer<Uint64> Function(Pointer<_StaticNested>, Pointer<Uint32>);
-typedef _StaticEncryptedFn = Pointer<Uint64> Function(Pointer<_StaticEncryptedNested>, Pointer<Uint32>);
 
 class NativeRecovery {
   static DynamicLibrary? _lib;
@@ -132,35 +120,6 @@ class NativeRecovery {
     data.ref.nt0Enc = nt0Enc & 0xFFFFFFFF;
     data.ref.nt1 = nt1 & 0xFFFFFFFF;
     data.ref.nt1Enc = nt1Enc & 0xFFFFFFFF;
-    countP.value = 0;
-    try {
-      final keys = f(data, countP);
-      if (keys == nullptr) return const [];
-      return _readKeys(keys, countP.value);
-    } finally {
-      malloc.free(data);
-      malloc.free(countP);
-    }
-  }
-
-  /// 单样本候选集（static-encrypted / 3gen 卡，毫秒级）
-  /// [ntParEnc] 为 4 位（bit3 对应最高字节）
-  static List<int> staticEncryptedNested({
-    required int uid,
-    required int nt,
-    required int ntEnc,
-    required int ntParEnc,
-  }) {
-    final lib = _lib;
-    if (lib == null) return const [];
-    final f = lib
-        .lookupFunction<_StaticEncryptedFn, _StaticEncryptedFn>('static_encrypted_nested');
-    final data = malloc<_StaticEncryptedNested>();
-    final countP = malloc<Uint32>();
-    data.ref.uid = uid & 0xFFFFFFFF;
-    data.ref.nt = nt & 0xFFFFFFFF;
-    data.ref.ntEnc = ntEnc & 0xFFFFFFFF;
-    data.ref.ntParEnc = ntParEnc & 0xFFFFFFFF;
     countP.value = 0;
     try {
       final keys = f(data, countP);

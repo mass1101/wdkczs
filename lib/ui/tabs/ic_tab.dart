@@ -785,16 +785,8 @@ class _IcTabState extends State<IcTab> {
         }
 
         // 两两配对交集（对齐小程序 Crack_3gen 主循环，候选集惰性生成）
-        // 候选生成：native 可用走 C（毫秒级），否则 Dart
+        // 注：C 库无 2x1nt（gen3）实现，保持 Dart 候选生成
         List<int> gen3Candidates(Map<String, int> res) {
-          if (NativeRecovery.available) {
-            try {
-              final ks = NativeRecovery.staticEncryptedNested(
-                  uid: uidInt,
-                  nt: res['nt1']!, ntEnc: res['nt2']!, ntParEnc: res['par']!);
-              if (ks.isNotEmpty) return ks;
-            } catch (_) {}
-          }
           return Crypto1.gen3GenerateKeys(
               uidInt, res['nt1']!, res['nt2']!, res['par']!);
         }
