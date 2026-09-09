@@ -116,7 +116,7 @@ class _IcTabState extends State<IcTab> {
   /// 批量检查密钥，对齐小程序 checkCrackedKey：用 mf1CheckKeysOfSectors 掩码批量检测
   /// 返回 true 表示仍有未找到的密钥
   Future<bool> _checkCrackedKeys(
-      List<Uint8List> keys, List<_SectorKey> sectorKeys) async {
+      List<Uint8List> keys, List<SectorKeyState> sectorKeys) async {
     final mask = Uint8List(10);
     mask.fillRange(0, 10, 0xFF);
     for (var s = 0; s < 16; s++) {
@@ -152,7 +152,7 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 将扇区密钥状态中的密钥追加到密钥区（对齐小程序 ss.keys 合并去重）
-  void _appendKeysFromSectors(List<_SectorKey> sectorKeys) {
+  void _appendKeysFromSectors(List<SectorKeyState> sectorKeys) {
     final all = <String>[];
     for (final sk in sectorKeys) {
       if (sk.keyA.isNotEmpty && !all.contains(sk.keyA)) all.add(sk.keyA);
@@ -163,7 +163,7 @@ class _IcTabState extends State<IcTab> {
 
   /// 新破出密钥后立即用已知密钥复查全扇区：
   /// M1 卡常多扇区共用密钥，能认证通过的槽位直接标记，跳过后续破解
-  Future<void> _propagateKeys(List<_SectorKey> sectorKeys) async {
+  Future<void> _propagateKeys(List<SectorKeyState> sectorKeys) async {
     final names = <String>[];
     for (final sk in sectorKeys) {
       if (sk.hasKeyA && sk.keyA.isNotEmpty && !names.contains(sk.keyA)) {
@@ -185,7 +185,7 @@ class _IcTabState extends State<IcTab> {
   Future<void> _readCard() async {
     final progress = ValueNotifier<String>('验证密钥：寻卡中...');
     final step = ValueNotifier<int>(0);
-    final sectorKeys = List.generate(16, (s) => _SectorKey(s));
+    final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -558,6 +558,8 @@ class _IcTabState extends State<IcTab> {
   Future<void> _crackCard() async {
     final progress = ValueNotifier<String>('验证密钥：寻卡中...');
     final step = ValueNotifier<int>(0);
+    final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
+    final crackTick = ValueNotifier<int>(0);
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -592,6 +594,8 @@ class _IcTabState extends State<IcTab> {
           steps: const ['验证密钥', '解卡片'],
           step: step,
           progress: progress,
+          sectors: sectorKeys,
+          refresh: crackTick,
           onCancel: null,
         ),
       );
@@ -634,9 +638,9 @@ class _IcTabState extends State<IcTab> {
       await _loadKeys();
 
       // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey）
-      final sectorKeys = List.generate(16, (s) => _SectorKey(s));
       final allKeys = _keys.map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
+      crackTick.value++;
       progress.value = '验证密钥：已标记扇区密钥信息.';
 
       // 检查是否全部已破解
@@ -748,6 +752,7 @@ class _IcTabState extends State<IcTab> {
           eKeyHex = darkHex;
           _appendKeysFromSectors(sectorKeys);
           await _checkCrackedKeys(_keys.map(_hex).toList(), sectorKeys);
+          crackTick.value++;
           progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
         } catch (_) {
           _appendKeysFromSectors(sectorKeys);
@@ -784,7 +789,9 @@ class _IcTabState extends State<IcTab> {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
               LogService.instance.log('[_crackCard] sector=$s keyA FOUND=$rec');
+              crackTick.value++;
               await _propagateKeys(sectorKeys);
+              crackTick.value++;
             } else {
               LogService.instance.log('[_crackCard] sector=$s keyA NOT FOUND');
             }
@@ -805,7 +812,9 @@ class _IcTabState extends State<IcTab> {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
               LogService.instance.log('[_crackCard] sector=$s keyB FOUND=$rec');
+              crackTick.value++;
               await _propagateKeys(sectorKeys);
+              crackTick.value++;
             } else {
               LogService.instance.log('[_crackCard] sector=$s keyB NOT FOUND');
             }
@@ -1129,7 +1138,7 @@ class _IcTabState extends State<IcTab> {
 
       // 变换 atks 并生成候选密钥
       step.value = 2;
-      final sectorKeys = List.generate(16, (s) => _SectorKey(s));
+      final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
       // 从当前卡片状态初始化已有密钥
       for (var s = 0; s < 16; s++) {
         final b3 = _app.card.sectors[s].blocks[3].data;
@@ -2523,16 +2532,3 @@ int _bytesInt(Uint8List b) {
 
 String _int6Hex(int v) =>
     v.toRadixString(16).padLeft(12, '0').substring(0, 12);
-
-class _SectorKey {
-  final int sector;
-  bool hasKeyA;
-  bool hasKeyB;
-  String keyA;
-  String keyB;
-  _SectorKey(this.sector)
-      : hasKeyA = false,
-        hasKeyB = false,
-        keyA = '',
-        keyB = '';
-}
