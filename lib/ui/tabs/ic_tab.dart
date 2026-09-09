@@ -1664,7 +1664,18 @@ class _IcTabState extends State<IcTab> {
         checkStop: checkStop);
     final buf = _buildHardNestedBuf(uidInt, pairs);
     progress.value = '解卡片：本地 Hardnested 计算扇区$sector ${targetType.label}\n可能需要几分钟，请勿断开设备...';
-    final key = await NativeRecovery.hardNested(buf);
+    // 可杀 isolate：轮询停止标记，点停止立即终止 C 计算
+    final job = NativeRecovery.hardNestedStart(buf);
+    var key = 0;
+    try {
+      while (!job.isCompleted) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        checkStop();
+      }
+      key = await job.future;
+    } finally {
+      job.kill();
+    }
     if (key == 0) {
       LogService.instance
           .log('[_hardnestedLocal] sector=$sector ${targetType.label} failed');

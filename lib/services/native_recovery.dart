@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -162,6 +163,57 @@ class NativeRecovery {
   /// 阻塞计算分钟级，放入独立 isolate 执行；结果为单 key（0 = 失败）。
   static Future<int> hardNested(Uint8List buf) {
     return Isolate.run(() => _hardNestedSync(buf));
+  }
+
+  /// 可取消版 Hardnested：返回 [HardNestedJob]，停止时 kill() 立即终止
+  /// C 计算（Isolate.run 无法取消，长时间计算会卡住停止响应）
+  static HardNestedJob hardNestedStart(Uint8List buf) {
+    return HardNestedJob.start(buf);
+  }
+}
+
+/// 可取消的 hardnested 计算任务
+class HardNestedJob {
+  final Completer<int> _completer = Completer<int>();
+  Isolate? _isolate;
+
+  HardNestedJob._();
+
+  bool get isCompleted => _completer.isCompleted;
+
+  Future<int> get future => _completer.future;
+
+  /// 立即终止计算（幂等；已完成时无副作用）
+  void kill() {
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    if (!_completer.isCompleted) _completer.complete(0);
+  }
+
+  static HardNestedJob start(Uint8List buf) {
+    final job = HardNestedJob._();
+    final port = ReceivePort();
+    port.listen((msg) {
+      port.close();
+      if (!job._completer.isCompleted) job._completer.complete(msg as int);
+    }, onDone: () {
+      if (!job._completer.isCompleted) job._completer.complete(0);
+    });
+    Isolate.spawn(_hardNestedEntry, (port.sendPort, buf)).then((iso) {
+      if (job._completer.isCompleted) {
+        iso.kill(priority: Isolate.immediate);
+        return;
+      }
+      job._isolate = iso;
+    }, onError: (Object e) {
+      if (!job._completer.isCompleted) job._completer.complete(0);
+    });
+    return job;
+  }
+
+  static void _hardNestedEntry((SendPort, Uint8List) args) {
+    final (port, buf) = args;
+    port.send(NativeRecovery._hardNestedSync(buf));
   }
 }
 
