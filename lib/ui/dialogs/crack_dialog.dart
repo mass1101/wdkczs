@@ -25,6 +25,7 @@ class CrackProgressDialog extends StatelessWidget {
   final VoidCallback? onCancel;
   final VoidCallback? onConfirm;
   final String confirmText;
+  final String cancelText;
   final bool showConfirm;
 
   const CrackProgressDialog({
@@ -38,6 +39,7 @@ class CrackProgressDialog extends StatelessWidget {
     this.onCancel,
     this.onConfirm,
     this.confirmText = '确认',
+    this.cancelText = '取消',
     this.showConfirm = false,
   });
 
@@ -89,7 +91,7 @@ class CrackProgressDialog extends StatelessWidget {
       ),
       actions: [
         if (onCancel != null)
-          TextButton(onPressed: onCancel, child: const Text('取消')),
+          TextButton(onPressed: onCancel, child: Text(cancelText)),
         if (showConfirm)
           TextButton(
             onPressed: onConfirm,

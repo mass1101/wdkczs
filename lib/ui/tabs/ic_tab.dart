@@ -586,6 +586,11 @@ class _IcTabState extends State<IcTab> {
       }
 
       if (!mounted) return;
+      // 对齐小程序 stop_flag + checkstop：关闭按钮请求停止，检查点终止流程
+      var crackStopRequested = false;
+      void checkStop() {
+        if (crackStopRequested) throw const CrackStoppedException();
+      }
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -596,7 +601,11 @@ class _IcTabState extends State<IcTab> {
           progress: progress,
           sectors: sectorKeys,
           refresh: crackTick,
-          onCancel: null,
+          onCancel: () {
+            crackStopRequested = true;
+            progress.value = '停止中，等待当前步骤完成...';
+          },
+          cancelText: '关闭',
         ),
       );
 
@@ -606,6 +615,7 @@ class _IcTabState extends State<IcTab> {
         final found = <String>[];
         var allRead = true;
         for (var s = 0; s < 16; s++) {
+          checkStop();
           progress.value = '破解密钥：正在解密扇区$s...';
           final Uint8List data;
           try {
@@ -726,6 +736,7 @@ class _IcTabState extends State<IcTab> {
         try {
           final darkKey = await Crypto1.darkside(
             (isFirst) async {
+              checkStop();
               progress.value = '破解密钥：发现全加密卡，破解密钥中';
               final res = await _dev.cmdMf1AcquireDarkside(
                   block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
@@ -777,6 +788,7 @@ class _IcTabState extends State<IcTab> {
       // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
       LogService.instance.log('[_crackCard] prng=$prng eSector=$eSector eKey=$eKeyHex');
       for (var s = 0; s < 16; s++) {
+        checkStop();
         if (!sectorKeys[s].hasKeyA) {
           progress.value = prng == 0
               ? '破解密钥：静态卡，正在破解扇区$s keyA...'
@@ -784,7 +796,7 @@ class _IcTabState extends State<IcTab> {
           try {
             final rec = await _crackSectorKey(
                 uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex,
-                progress: progress);
+                progress: progress, checkStop: checkStop);
             if (rec != null) {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
@@ -807,7 +819,7 @@ class _IcTabState extends State<IcTab> {
           try {
             final rec = await _crackSectorKey(
                 uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex,
-                progress: progress);
+                progress: progress, checkStop: checkStop);
             if (rec != null) {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
@@ -848,6 +860,10 @@ class _IcTabState extends State<IcTab> {
         if (mounted) Navigator.of(context).pop();
         _toast('破解失败，部分扇区密钥未找到（已写入找到的密钥）');
       }
+    } on CrackStoppedException {
+      LogService.instance.log('[_crackCard] stopped by user');
+      if (mounted) Navigator.of(context).pop();
+      _toast('停止中...');
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _toast('破解失败: $e');
@@ -864,7 +880,8 @@ class _IcTabState extends State<IcTab> {
   Future<String?> _crackSectorKey(
       int uidInt, int sector, KeyType targetKeyType, int prng,
       int eSector, KeyType eKeyType, String eKeyHex,
-      {ValueNotifier<String>? progress}) async {
+      {ValueNotifier<String>? progress, void Function()? checkStop}) async {
+    void stop() => checkStop?.call();
     final eKey = _hex(eKeyHex);
     final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
     final keyTypeStr = targetKeyType == KeyType.keyA ? 'keyA' : 'keyB';
@@ -915,6 +932,7 @@ class _IcTabState extends State<IcTab> {
     if (prng == 1) {
       // WEAK 嵌套：重试5次 + 暴力验证
       for (var retry = 0; retry < 5; retry++) {
+        stop();
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry START');
         try {
           final distRes = await _dev.cmdMf1TestNtDistance(
@@ -947,6 +965,7 @@ class _IcTabState extends State<IcTab> {
           // 第二步：逐对状态恢复（每对数十秒，放入后台 isolate 并回报进度）
           final keysPerPair = <List<int>>[];
           for (var i = 0; i < collected.length; i++) {
+            stop();
             progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i + 1}/${collected.length} 对（每对约半分钟）...';
             final pair = collected[i];
             final keys = await Isolate.run(
@@ -2509,6 +2528,14 @@ class _SectorTableState extends State<_SectorTable> {
 }
 
 // ========== 辅助 ==========
+/// 用户请求停止解卡（对齐小程序 stop_flag + checkstop 抛错终止）
+class CrackStoppedException implements Exception {
+  const CrackStoppedException();
+
+  @override
+  String toString() => 'call to stop';
+}
+
 Uint8List _hex(String hex) {
   final clean = hex.replaceAll(RegExp(r'[\s-]'), '');
   final bytes = Uint8List(clean.length ~/ 2);
