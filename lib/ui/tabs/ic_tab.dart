@@ -615,6 +615,8 @@ class _IcTabState extends State<IcTab> {
       // 验证密钥：尝试 Gen1a 免密读卡
       try {
         progress.value = '验证密钥：发现UID卡，可免密读卡...';
+        LogService.instance.log(
+            '[解卡] Gen1a免密读卡可用(UID魔改卡, 无漏洞限制, 直接读全部密钥)');
         final found = <String>[];
         var allRead = true;
         for (var s = 0; s < 16; s++) {
@@ -804,6 +806,10 @@ class _IcTabState extends State<IcTab> {
           LogService.instance.log(
               '[_crackCard] 3gen pair $s/$r ${useAs ? 'A' : 'B'}${useAr ? 'A' : 'B'} cands=${ka.length}/${kb.length}');
           final inter = ka.toSet().intersection(kb.toSet()).toList();
+          if (inter.isEmpty) {
+            LogService.instance.log(
+                '[解卡] 3gen 扇区$s/$r $label: 候选交集为空(两扇区候选无共同密钥, 采样不足)');
+          }
           if (inter.isNotEmpty) {
             await verifyKeys(inter);
             await crackAllBySeedNt();
@@ -851,6 +857,17 @@ class _IcTabState extends State<IcTab> {
         }
         _appendKeysFromSectors(sectorKeys);
         final allDone = sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB);
+        if (!allDone) {
+          final missing = <String>[];
+          for (var s = 0; s < 16; s++) {
+            if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
+              missing.add(
+                  '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
+            }
+          }
+          LogService.instance.log(
+              '[解卡] 3gen 解不开的扇区: ${missing.join(',')} (候选交集为空或种子恢复失败, 卡片nonce采样质量不足)');
+        }
         progress.value = allDone
             ? '解卡片：第三代无漏洞卡破解成功'
             : '解卡片：第三代无漏洞卡破解完成，部分扇区密钥未恢复';
@@ -894,10 +911,14 @@ class _IcTabState extends State<IcTab> {
           await _propagateKeys(sectorKeys);
           crackTick.value++;
           progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
+          LogService.instance.log(
+              '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyA=$darkHex, 进入半加密流程');
         } catch (_) {
           _appendKeysFromSectors(sectorKeys);
           progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
           if (mounted) Navigator.of(context).pop();
+          LogService.instance.log(
+              '[解卡] 全加密卡解不开: Darkside攻击失败(卡片防Darkside), 全卡无已知密钥');
           _toast('全加密卡，Darkside攻击失败，请先通过其他方式获取至少一个密钥');
           return;
         }
@@ -941,7 +962,13 @@ class _IcTabState extends State<IcTab> {
       }
 
       // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
-      LogService.instance.log('[_crackCard] prng=$prng eSector=$eSector eKey=$eKeyHex');
+      final prngName = prng >= 2
+          ? 'HARD硬加密(PRNG不可预测, 无本地漏洞, 走Hardnested采集计算)'
+          : prng == 1
+              ? 'WEAK弱随机(PRNG可预测, 有嵌套漏洞)'
+              : 'STATIC静态(固定nonce, 有静态漏洞)';
+      LogService.instance.log(
+          '[解卡] PRNG分型=$prng -> $prngName; 已知密钥: 扇区$eSector ${eKeyType.label}=$eKeyHex');
       for (var s = 0; s < 16; s++) {
         checkStop();
         if (!sectorKeys[s].hasKeyA) {
@@ -997,20 +1024,22 @@ class _IcTabState extends State<IcTab> {
 
       // 检查是否全部破解成功（对齐小程序 Check_Crack_isfaild）
       var allFound = true;
+      final missing = <String>[];
       for (var s = 0; s < 16; s++) {
         if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
           allFound = false;
-          LogService.instance.log('[_crackCard] sector=$s not cracked: hasKeyA=${sectorKeys[s].hasKeyA} hasKeyB=${sectorKeys[s].hasKeyB}');
-          break;
+          missing.add(
+              '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
         }
       }
       if (allFound) {
-        LogService.instance.log('[_crackCard] ALL sectors cracked successfully');
+        LogService.instance.log('[解卡] 全部16扇区A/B密钥破解成功');
         progress.value = '解卡片：破解成功，已重新标记密钥信息.';
         if (mounted) Navigator.of(context).pop();
         _toast('破解成功');
       } else {
-        LogService.instance.log('[_crackCard] CRACK FAILED - some sectors not found');
+        LogService.instance.log(
+            '[解卡] 破解失败, 未破扇区: ${missing.join(', ')} (各扇区失败原因见上方[解卡]日志)');
         progress.value = '解卡片：破解失败，部分扇区密钥未找到';
         if (mounted) Navigator.of(context).pop();
         _toast('破解失败，部分扇区密钥未找到（已写入找到的密钥）');
@@ -1040,7 +1069,8 @@ class _IcTabState extends State<IcTab> {
     final eKey = _hex(eKeyHex);
     final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
     final keyTypeStr = targetKeyType == KeyType.keyA ? 'keyA' : 'keyB';
-    LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr prng=$prng eSector=$eSector eKey=$eKeyHex');
+    LogService.instance.log(
+        '[解卡] 扇区$sector $keyTypeStr: ${prng == 0 ? '静态嵌套' : '弱随机嵌套'}攻击 (依据: 扇区$eSector 已知密钥)');
 
     if (prng == 0) {
       // STATIC 嵌套：检查 nt2 区分1代/2代卡
@@ -1054,7 +1084,8 @@ class _IcTabState extends State<IcTab> {
           .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
           .toList();
       if (atks.isEmpty) {
-        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr STATIC atks empty');
+        LogService.instance.log(
+            '[解卡] 扇区$sector $keyTypeStr 解不开: 静态嵌套未采集到数据(设备通信异常)');
         return null;
       }
       final nt1 = atks[0]['nt1']!;
@@ -1063,6 +1094,8 @@ class _IcTabState extends State<IcTab> {
       final is1Gen = atks.length > 1 &&
           Crypto1.toUint32(nt2).toRadixString(16) ==
               Crypto1.toUint32(atks[1]['nt2']!).toRadixString(16);
+      LogService.instance.log(
+          '[解卡] 扇区$sector $keyTypeStr: 静态卡${is1Gen ? '1代(加密nonce固定) -> HardNested候选生成' : '2代(加密nonce变化) -> staticnested状态恢复'}');
       if (!is1Gen) {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
         progress?.value = '破解密钥：静态卡，正在恢复扇区$sector $keyTypeStr候选状态（约1分钟，请耐心等待）...';
@@ -1075,6 +1108,10 @@ class _IcTabState extends State<IcTab> {
             : await Crypto1.staticNestedInIsolate(
                 uid: uidInt, keyType: targetKeyType.value, atks: atks);
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}');
+        if (recovered.isEmpty) {
+          LogService.instance.log(
+              '[解卡] 扇区$sector $keyTypeStr 解不开: staticnested恢复候选为0(采集数据质量差)');
+        }
         return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
       }
       // 1代卡：nt2 一致，HardNested + 暴力验证
@@ -1082,12 +1119,17 @@ class _IcTabState extends State<IcTab> {
           block: eSector * 4, keyType: eKeyType, key: eKey,
           targetBlock: sector * 4, targetKeyType: targetKeyType);
       if (hardRes.isEmpty) {
-        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 1gen hardRes empty');
+        LogService.instance.log(
+            '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested未采集到数据(设备通信异常)');
         return null;
       }
       final par = hardRes.first.par;
       final candidates = _generateKeysFromHardNested(uidInt, nt1, nt2, par);
       LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 1gen candidates=${candidates.length}');
+      if (candidates.isEmpty) {
+        LogService.instance.log(
+            '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested候选为0(parity校验全部失败, 采集数据质量差)');
+      }
       return _verifyCandidates(sector, keyTypeBit, candidates, chunkSize: 40);
     }
     if (prng == 1) {
@@ -1159,18 +1201,23 @@ class _IcTabState extends State<IcTab> {
             recovered = Crypto1.nestedMerge(keysPerPair);
             LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
           }
-          if (recovered.isNotEmpty) {
+          if (recovered.isEmpty) {
+            LogService.instance.log(
+                '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选交集为空(采集样本质量差), 重试');
+          } else {
             final found = await _verifyCandidates(sector, keyTypeBit, recovered);
             // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
             if (found != null) return found;
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry verify failed, retrying');
+            LogService.instance.log(
+                '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选${recovered.length}个全部验证失败(采集样本质量差), 重试');
           }
         } catch (e) {
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry ERROR=$e');
           rethrow;
         }
       }
-      LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK all retries failed');
+      LogService.instance.log(
+          '[解卡] 扇区$sector $keyTypeStr 解不开: 弱随机嵌套5轮重试全部失败(PRNG距离抖动过大或卡异常), 该扇区放弃');
     }
     return null;
   }
@@ -1554,10 +1601,12 @@ class _IcTabState extends State<IcTab> {
             }
           }
         }
-        LogService.instance.log('[_crackHardnestedCloud] local hardnested done, fallback to cloud');
+        LogService.instance.log(
+            '[解卡] 本地Hardnested流程结束, 未能全破, 转云端继续(云字典+云端Hardnested)');
         progress.value = '解卡片：本地计算未能全部破解，转云端继续...';
       } catch (e) {
-        LogService.instance.log('[_crackHardnestedCloud] local hardnested ERROR=$e, fallback to cloud');
+        LogService.instance.log(
+            '[解卡] 本地Hardnested异常=$e, 转云端继续');
       }
     }
 
@@ -1677,13 +1726,13 @@ class _IcTabState extends State<IcTab> {
       job.kill();
     }
     if (key == 0) {
-      LogService.instance
-          .log('[_hardnestedLocal] sector=$sector ${targetType.label} failed');
+      LogService.instance.log(
+          '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算未找到密钥(候选空间缩减不足或采集质量差), 转云端');
       return null;
     }
     final keyHex = key.toRadixString(16).padLeft(12, '0');
     LogService.instance.log(
-        '[_hardnestedLocal] sector=$sector ${targetType.label} FOUND=$keyHex');
+        '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算找到密钥=$keyHex');
     return keyHex;
   }
 
@@ -1756,12 +1805,16 @@ class _IcTabState extends State<IcTab> {
         if (!sumWhitelist.contains(sum) && attempts < 3) {
           attempts++;
           LogService.instance.log(
-              '[_collectHardnestedData] sector=$sector sum=$sum not in whitelist, retrying ($attempts/3)');
+              '[解卡] 扇区$sector ${targetType.label}: 采集质量差(sum8=$sum 不在白名单), 重采($attempts/3)');
           seen.fillRange(0, 256, false);
           count = 0;
           sum = 0;
           pairs.clear();
           continue;
+        }
+        if (!sumWhitelist.contains(sum)) {
+          LogService.instance.log(
+              '[解卡] 扇区$sector ${targetType.label}: 重采3次sum8仍异常($sum), 放行上传(可能影响恢复成功率)');
         }
         LogService.instance.log(
             '[_collectHardnestedData] sector=$sector sum=$sum attempts=$attempts done, pairs=${pairs.length}');
