@@ -1,3 +1,4 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 
 /// MIFARE Crypto1 引擎移植（对应逆向 hS/et 类，mfkey32v2 算法）
@@ -622,6 +623,22 @@ class Crypto1 {
       keys.add(e.getLfsr());
     }
     return keys;
+  }
+
+  /// isolate 包装：闭包在非 async 上下文创建。
+  /// async 函数里的闭包会捕获整个 async 上下文（含 _AsyncCompleter），
+  /// 导致 isolate 消息不可发送（object is unsendable）。
+  static Future<List<int>> recoverKeysInIsolate(int uid, Map<String, int> pair) {
+    return Isolate.run(() => nestedRecoverKeys(uid, pair));
+  }
+
+  /// isolate 包装（同上原因），供静态嵌套整体计算使用
+  static Future<List<int>> staticNestedInIsolate({
+    required int uid,
+    required int keyType,
+    required List<Map<String, int>> atks,
+  }) {
+    return Isolate.run(() => staticnested(uid: uid, keyType: keyType, atks: atks));
   }
 
   /// nested 第三步：合并各采样对候选密钥，按出现次数排序取 top50（快速）

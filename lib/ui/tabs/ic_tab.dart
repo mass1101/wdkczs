@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -911,8 +910,8 @@ class _IcTabState extends State<IcTab> {
       if (!is1Gen) {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
         progress?.value = '破解密钥：静态卡，正在恢复扇区$sector $keyTypeStr候选状态（约1分钟，请耐心等待）...';
-        final recovered = await Isolate.run(() => Crypto1.staticnested(
-            uid: uidInt, keyType: targetKeyType.value, atks: atks));
+        final recovered = await Crypto1.staticNestedInIsolate(
+            uid: uidInt, keyType: targetKeyType.value, atks: atks);
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}');
         return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
       }
@@ -968,8 +967,7 @@ class _IcTabState extends State<IcTab> {
             stop();
             progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i + 1}/${collected.length} 对（每对约半分钟）...';
             final pair = collected[i];
-            final keys = await Isolate.run(
-                () => Crypto1.nestedRecoverKeys(nestedUid, pair));
+            final keys = await Crypto1.recoverKeysInIsolate(nestedUid, pair);
             keysPerPair.add(keys);
           }
           // 第三步：合并候选取 top50（快速）
@@ -1729,8 +1727,8 @@ class _IcTabState extends State<IcTab> {
             }
           }
           if (atks.isEmpty) continue;
-          final recovered = await Isolate.run(
-              () => Crypto1.staticnested(uid: uid1, keyType: 96, atks: atks));
+          final recovered = await Crypto1.staticNestedInIsolate(
+              uid: uid1, keyType: 96, atks: atks);
           if (recovered.isNotEmpty) {
             results.add(_int6Hex(recovered.first));
           }
