@@ -64,3 +64,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 云端各接口实测响应格式：`add_job` 返回 `{"id": "<objid>"}`（无 affectedDocs）；`query_job` 返回 `{"affectedDocs": N, "data": [{_id,user_id,card_id,sector,keytype,nonce,key,openid}]}`（key="" 计算中 / "error" 出错）；`del_job` 返回 `{"affectedDocs":1,"deleted":1}`。
   - add_job 的 nonce 格式（与小程序对齐）：每行 `十进制nt|par高4位\n` 与 `十进制ntEnc|par低4位\n`，集满 256 个去重高字节后上传；keytype 传 "A"/"B"；card_id 为 8 位小写 hex uid（上传查询自洽即可）。
   - 排查云端问题先用 curl 直接测端点（query_job 只读无副作用；add_job 测试数据记得 del_job 清理）。
+
+[Project Knowledge Summary]
+- Date: 2026-09-09
+- Context: 借鉴 Chameleon Ultra 落地本地 Hardnested（native mfnestedhard）时发现
+- Category: Build Methods | Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - C `hardnested()` 输入 = PM3 nonce 缓冲：6 字节头（uid 大端 4B + 2 占位）+ 每条 9 字节（4B nt + 4B ntEnc + 1B par），与 CU `getHardNested` 逐字节对齐；C 端 `read_nonces` 对每条产出 2 个 add_nonce（par 高半给 nt、低半给 ntEnc），sum8 非白名单直接失败返回。
+  - C hardnested 只消费 par 的 bit3（sum8，最高字节）与 bit2（sum16/bitflip，第 2 字节），每半字节内 bit3↔最高字节（大端位序），与 valid_nonce 的 par_int（bit0↔最高字节）**相反**，两套位序并存勿混淆。
+  - 合成 hard 卡样本无法从外部复刻：固件返回的两个 4B 的明文/加密视角与 par 各位语义依赖固件实现（PM3 valid_nonce 的 BIT(ks1,16-8m) 只覆盖 3 字节，第 4 字节 ks 位来自后续 keystream 流），合成数据 sum8 无法稳定落入白名单。C 算法正确性依据 = CU 产品背书 + 数据流与云端上传同源（小程序线上验证）+ 真机实测兜底。
+  - Dart 侧 ByteData 陷阱：`ByteData(n)` 创建**独立**缓冲，与 `Uint8List(n)` 底层内存不共享；必须用 `u8list.buffer.asByteData()`。已实际踩坑（C 端读到全 0 还收敛出假 key）。
+  - mfnestedhard 为分钟级阻塞计算，FFI 调用必须 Isolate.run（非 async static 包装，遵循既有 isolate 规范）；停止按钮只放弃结果（isolate 计算继续），与 CU 行为一致。
