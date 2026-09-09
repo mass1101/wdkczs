@@ -559,6 +559,7 @@ class _IcTabState extends State<IcTab> {
     final step = ValueNotifier<int>(0);
     final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
     final crackTick = ValueNotifier<int>(0);
+    final hardnestedNotifier = ValueNotifier<bool>(false);
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       final tags = await _dev.cmdHf14aScan();
@@ -605,6 +606,7 @@ class _IcTabState extends State<IcTab> {
             progress.value = '停止中，等待当前步骤完成...';
           },
           cancelText: '关闭',
+          hardnested: hardnestedNotifier,
         ),
       );
 
@@ -778,8 +780,34 @@ class _IcTabState extends State<IcTab> {
       final prng = await _dev.cmdMf1TestPrngType();
 
       if (prng >= 2) {
-        progress.value = '解卡片：该卡片为强随机卡，正在云端破解...';
-        await _submitHardnested(uid);
+        progress.value = '解卡片：该卡片为国产兼容卡\n正在云端破解...';
+        await _crackHardnestedCloud(
+            uid: uid,
+            uidInt: uidInt,
+            eSector: eSector,
+            eKeyType: eKeyType,
+            eKeyHex: eKeyHex,
+            sectorKeys: sectorKeys,
+            progress: progress,
+            crackTick: crackTick,
+            checkStop: checkStop);
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
+
+      // WEAK 卡手动勾选 Hardnested 云端破解（对齐小程序 c_modal.Crack_hardnested）
+      if (hardnestedNotifier.value) {
+        LogService.instance.log('[_crackCard] WEAK hardnested cloud mode');
+        await _crackHardnestedCloud(
+            uid: uid,
+            uidInt: uidInt,
+            eSector: eSector,
+            eKeyType: eKeyType,
+            eKeyHex: eKeyHex,
+            sectorKeys: sectorKeys,
+            progress: progress,
+            crackTick: crackTick,
+            checkStop: checkStop);
         if (mounted) Navigator.of(context).pop();
         return;
       }
@@ -1301,20 +1329,169 @@ class _IcTabState extends State<IcTab> {
     });
   }
 
-  Future<void> _submitHardnested(Uint8List uid) async {
+  /// 云端 Hardnested 破解（对齐小程序 Crack_hardnested）：
+  /// 1) query_job 拉取云字典，验证全扇区；2) 逐扇区采集 256 个去重 nt 上传 add_job
+  Future<void> _crackHardnestedCloud({
+    required Uint8List uid,
+    required int uidInt,
+    required int eSector,
+    required KeyType eKeyType,
+    required String eKeyHex,
+    required List<SectorKeyState> sectorKeys,
+    required ValueNotifier<String> progress,
+    required ValueNotifier<int> crackTick,
+    required void Function() checkStop,
+  }) async {
     final uidHex = _hexStr(uid.sublist(0, 4));
     final userId = '01';
-    final task = CrackTask(
-      id: 'local_${DateTime.now().millisecondsSinceEpoch}',
-      cardId: uidHex,
-      sector: 0,
-      keyType: KeyType.keyA,
-    );
-    await _app.storage.addCrackTask(task);
+
+    // 第一步：云字典查询（对齐小程序 query_job + KeyFor_<card_id>.txt）
+    var dictKeys = <String>[];
     try {
-      await _app.cloud.addJob(userId: userId, openid: uidHex, cardId: uidHex, sector: 0, keyType: KeyType.keyA);
+      progress.value = '解卡片：正在查询云端任务...';
+      final tasks = await _app.cloud.queryJobs(userId);
+      final all = <String>[];
+      for (final t in tasks) {
+        if (t.key.isNotEmpty && t.key != 'error') {
+          if (!all.contains(t.key.toLowerCase())) all.add(t.key.toLowerCase());
+        }
+      }
+      dictKeys = all;
+      LogService.instance.log('[_crackHardnestedCloud] dict tasks=${tasks.length} keys=${dictKeys.length}');
     } catch (e) {
-      _toast('云端任务提交失败（已保存本地）: $e');
+      LogService.instance.log('[_crackHardnestedCloud] query_job ERROR=$e');
+    }
+
+    if (dictKeys.isNotEmpty) {
+      progress.value = '解卡片：云端获取到 ${dictKeys.length} 个密钥，正在验证...';
+      try {
+        final keys = dictKeys.map(_hex).toList();
+        await _checkCrackedKeys(keys, sectorKeys);
+        crackTick.value++;
+        _appendKeysFromSectors(sectorKeys);
+        if (sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB)) {
+          LogService.instance.log('[_crackHardnestedCloud] ALL sectors cracked from cloud dict');
+          progress.value = '解卡片：破解成功，已重新标记密钥信息.';
+          _toast('破解成功');
+          return;
+        }
+        LogService.instance.log('[_crackHardnestedCloud] dict verify done, still missing keys');
+      } catch (e) {
+        LogService.instance.log('[_crackHardnestedCloud] dict verify ERROR=$e');
+      }
+    }
+
+    // 第二步：逐扇区采集上传（对齐小程序 256 个去重 nt 高字节 + add_job）
+    var uploadedAny = false;
+    for (var s = 0; s < 16; s++) {
+      checkStop();
+      if (!sectorKeys[s].hasKeyA) {
+        await _collectUploadHardnestedSector(
+            uidHex: uidHex,
+            userId: userId,
+            eSector: eSector,
+            eKeyType: eKeyType,
+            eKeyHex: eKeyHex,
+            sector: s,
+            targetType: KeyType.keyA,
+            sectorKeys: sectorKeys,
+            progress: progress,
+            checkStop: checkStop);
+        uploadedAny = true;
+      }
+      checkStop();
+      if (!sectorKeys[s].hasKeyB) {
+        await _collectUploadHardnestedSector(
+            uidHex: uidHex,
+            userId: userId,
+            eSector: eSector,
+            eKeyType: eKeyType,
+            eKeyHex: eKeyHex,
+            sector: s,
+            targetType: KeyType.keyB,
+            sectorKeys: sectorKeys,
+            progress: progress,
+            checkStop: checkStop);
+        uploadedAny = true;
+      }
+    }
+    if (uploadedAny) {
+      final task = CrackTask(
+        id: 'local_${DateTime.now().millisecondsSinceEpoch}',
+        cardId: uidHex,
+        sector: 0,
+        keyType: KeyType.keyA,
+      );
+      await _app.storage.addCrackTask(task);
+      progress.value = '解卡片：数据已上传云端计算\n请稍后在"查询任务"中查看结果';
+      _toast('已上传云端任务');
+    }
+  }
+
+  /// 采集单扇区单密钥类型的 hardnested 数据并上传（对齐小程序 Crack_hardnested 内层循环）
+  Future<void> _collectUploadHardnestedSector({
+    required String uidHex,
+    required String userId,
+    required int eSector,
+    required KeyType eKeyType,
+    required String eKeyHex,
+    required int sector,
+    required KeyType targetType,
+    required List<SectorKeyState> sectorKeys,
+    required ValueNotifier<String> progress,
+    required void Function() checkStop,
+  }) async {
+    final eKey = _hex(eKeyHex);
+    final seen = List<bool>.filled(256, false);
+    var count = 0;
+    final nonceBuf = StringBuffer();
+    var uploaded = false;
+    while (!uploaded) {
+      checkStop();
+      progress.value =
+          '破解密钥：该卡片为国产兼容卡\n正在获取扇区：$sector ${targetType.label}的数据.\n已获取$count/256个有效数据...';
+      final data = await _dev.cmdMf1AcquireHardNested(
+          block: eSector * 4,
+          keyType: eKeyType,
+          key: eKey,
+          targetBlock: sector * 4,
+          targetKeyType: targetType);
+      LogService.instance.log(
+          '[_collectUploadHardnestedSector] sector=$sector ${targetType.label} batch=${data.length} uniq=$count');
+      for (final a in data) {
+        final nt = _bytesInt(a.nt);
+        final ntEnc = _bytesInt(a.ntEnc);
+        final hb = (nt >> 24) & 255;
+        if (!seen[hb]) {
+          seen[hb] = true;
+          count++;
+        }
+        nonceBuf.write('$nt|${(a.par >> 4) & 15}\n');
+        final hb2 = (ntEnc >> 24) & 255;
+        if (!seen[hb2]) {
+          seen[hb2] = true;
+          count++;
+        }
+        nonceBuf.write('$ntEnc|${a.par & 15}\n');
+      }
+      if (count >= 256) {
+        try {
+          await _app.cloud.addJob(
+              userId: userId,
+              openid: uidHex,
+              cardId: uidHex,
+              sector: sector,
+              keyType: targetType,
+              nonceData: nonceBuf.toString());
+          LogService.instance.log(
+              '[_collectUploadHardnestedSector] sector=$sector ${targetType.label} uploaded nonce=${nonceBuf.length}');
+          uploaded = true;
+        } catch (e) {
+          LogService.instance.log(
+              '[_collectUploadHardnestedSector] add_job ERROR=$e, retrying');
+          // 上传失败重试采集（对齐小程序无限循环直到成功）
+        }
+      }
     }
   }
 

@@ -27,6 +27,7 @@ class CrackProgressDialog extends StatelessWidget {
   final String confirmText;
   final String cancelText;
   final bool showConfirm;
+  final ValueNotifier<bool>? hardnested;
 
   const CrackProgressDialog({
     super.key,
@@ -41,6 +42,7 @@ class CrackProgressDialog extends StatelessWidget {
     this.confirmText = '确认',
     this.cancelText = '取消',
     this.showConfirm = false,
+    this.hardnested,
   });
 
   @override
@@ -87,6 +89,24 @@ class CrackProgressDialog extends StatelessWidget {
               const SizedBox(height: 12),
               _SectorGrid(sectors: sectors!, refresh: refresh!),
             ],
+          if (hardnested != null) ...[
+            const SizedBox(height: 4),
+            ValueListenableBuilder<bool>(
+              valueListenable: hardnested!,
+              builder: (ctx, v, _) => CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text('Hardnested 云端破解',
+                    style: TextStyle(fontSize: 13)),
+                subtitle: const Text('采集数据上传云端计算，支持国产兼容卡',
+                    style: TextStyle(fontSize: 11)),
+                value: v,
+                onChanged: (x) => hardnested!.value = x ?? false,
+              ),
+            ),
+          ],
         ],
       ),
       actions: [
