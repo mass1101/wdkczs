@@ -641,6 +641,129 @@ class Crypto1 {
     return Isolate.run(() => staticnested(uid: uid, keyType: keyType, atks: atks));
   }
 
+  // ========== 第三代无漏洞卡（固定 nonce，卡端用扇区密钥加密 nonce）==========
+  // 对齐小程序 Crack_3gen / generate_keys / Crack_bySeedNt / cI / lI
+
+  static const List<int> _gen3Tab1 = [0, 8, 9, 4, 6, 11, 1, 15, 12, 5, 2, 13, 10, 14, 3, 7];
+  static const List<int> _gen3Tab2 = [0, 13, 1, 14, 4, 10, 15, 7, 5, 3, 8, 6, 9, 2, 12, 11];
+  static List<int>? _gen3TableS;
+  static List<int>? _gen3TableA;
+
+  static void _ensureGen3Tables() {
+    if (_gen3TableS != null) return;
+    final sI = List<int>.filled(65536, 0);
+    final aI = List<int>.filled(65536, 0);
+    var e = 1;
+    for (var t = 1; t < 65536; ++t) {
+      sI[((e & 255) << 8) | (e >> 8)] = t;
+      aI[t] = ((e & 255) << 8) | (e >> 8);
+      e = (e >> 1) | ((e ^ (e >> 2) ^ (e >> 3) ^ (e >> 5)) << 15);
+      e &= 65535;
+    }
+    _gen3TableS = sI;
+    _gen3TableA = aI;
+  }
+
+  /// 16 位 LFSR 单步（对齐小程序 lI，经 CRC 反查表实现）
+  static int _gen3Step(int s) {
+    _ensureGen3Tables();
+    var t = _gen3TableS![s & 0xFFFF];
+    if (t == 0) return 0; // JS: sI miss -> undefined, 位运算按 0
+    t = t == 1 ? 65535 : t - 1;
+    return _gen3TableA![t];
+  }
+
+  /// 卡端加密 nonce 特征函数（对齐小程序 cI(nt, key)，key 为 48 位）
+  static int gen3NonceTag(int nt, int key) {
+    _ensureGen3Tables();
+    var s = (nt >> 16) & 0xFFFF;
+    for (var d = 0; d < 14; d++) {
+      s = _gen3Step(s);
+    }
+    var l = 1;
+    var t = key;
+    for (var d = 0; d < 48; d += 8) {
+      if (d == 32) {
+        t = (t >> 32) & 0xFFFF;
+        if (l == 1) {
+          s ^= _gen3Tab1[t & 15];
+          s ^= _gen3Tab2[(t >> 4) & 15] << 4;
+        } else {
+          s ^= _gen3Tab2[t & 15];
+          s ^= _gen3Tab1[(t >> 4) & 15] << 4;
+        }
+      } else if (d > 32) {
+        t = (t >> 8) & 0xFF;
+        if (l == 1) {
+          s ^= _gen3Tab1[t & 15];
+          s ^= _gen3Tab2[(t >> 4) & 15] << 4;
+        } else {
+          s ^= _gen3Tab2[t & 15];
+          s ^= _gen3Tab1[(t >> 4) & 15] << 4;
+        }
+      } else {
+        final lo = (t >> d) & 15;
+        final hi = (t >> (d + 4)) & 15;
+        if (l == 1) {
+          s ^= _gen3Tab1[lo];
+          s ^= _gen3Tab2[hi] << 4;
+        } else {
+          s ^= _gen3Tab2[lo];
+          s ^= _gen3Tab1[hi] << 4;
+        }
+      }
+      l ^= 1;
+      for (var k = 0; k < 8; k++) {
+        s = _gen3Step(s);
+      }
+    }
+    return s;
+  }
+
+  /// 单样本候选密钥集（对齐小程序 generate_keys：恢复状态 + 回滚 + 奇校验过滤）
+  static List<int> gen3GenerateKeys(int uid, int nt1, int nt2, int par) {
+    final ks1 = toUint32(nt1 ^ nt2);
+    final input = toUint32(nt1 ^ uid);
+    final states = lfsrRecovery32(ks1, input);
+    final keys = <int>[];
+    for (final st in states) {
+      st.lfsrRollbackWord(input, 0);
+      final key = st.getLfsr();
+      st.setLfsr(key);
+      st.lfsrWord(input, 0);
+      final w = st.lfsrWord(0, 0);
+      if (oddParity8(nt1 & 255) == ((par & 1) ^ ((w >> 24) & 1))) {
+        keys.add(key);
+      }
+    }
+    return keys;
+  }
+
+  /// 种子恢复（对齐小程序 Crack_bySeedNt）：候选中找特征值与已知参照一致的密钥
+  static List<int> gen3RecoverBySeed({
+    required int uid,
+    required int nt1,
+    required int nt2,
+    required int par,
+    required int seedTag,
+  }) {
+    final ks1 = toUint32(nt1 ^ nt2);
+    final input = toUint32(nt1 ^ uid);
+    final states = lfsrRecovery32(ks1, input);
+    final keys = <int>[];
+    for (final st in states) {
+      st.lfsrRollbackWord(input, 0);
+      final key = st.getLfsr();
+      st.setLfsr(key);
+      st.lfsrWord(input, 0);
+      final w = st.lfsrWord(0, 0);
+      if (oddParity8(nt1 & 255) == ((par & 1) ^ ((w >> 24) & 1))) {
+        if (seedTag == gen3NonceTag(nt1, key)) keys.add(key);
+      }
+    }
+    return keys;
+  }
+
   /// nested 第三步：合并各采样对候选密钥，按出现次数排序取 top50（快速）
   static List<int> nestedMerge(List<List<int>> keysPerPair) {
     final counts = <int, int>{};

@@ -701,33 +701,155 @@ class _IcTabState extends State<IcTab> {
         } catch (_) {}
       }
       if (encNested != null && encNested.atks.isNotEmpty) {
-        // 第三代无漏洞卡破解（对齐小程序 Crack_3gen）
+        // 第三代无漏洞卡破解（对齐小程序 Crack_3gen：候选集 + 两两配对交集 + 种子恢复）
         progress.value = '破解密钥：发现第三代无漏洞卡，正在破解...';
-        for (var i = 0; i + 1 < encNested.atks.length; i += 2) {
-          final atkA = encNested.atks[i];
-          final atkB = encNested.atks[i + 1];
-          final s = atkA.$1;
-          try {
-            final stateA = Crypto1.lfsrRecovery64(atkA.$4, atkA.$5 >> 4);
-            final stateB = Crypto1.lfsrRecovery64(atkB.$4, atkB.$5 >> 4);
-            stateA.lfsrRollbackWord(_bytesInt(encNested.uid.sublist(0, 4)) ^ atkA.$3, 0);
-            stateB.lfsrRollbackWord(_bytesInt(encNested.uid.sublist(0, 4)) ^ atkB.$3, 0);
-            final keyA = stateA.getLfsr();
-            final keyB = stateB.getLfsr();
-            if (!sectorKeys[s].hasKeyA) {
-              sectorKeys[s].hasKeyA = true;
-              sectorKeys[s].keyA = _int6Hex(keyA);
+        final uidInt = _bytesInt(encNested.uid.sublist(0, 4));
+        LogService.instance.log('[_crackCard] 3gen uid=$uidInt atks=${encNested.atks.length}');
+
+        // 预处理：每扇区 A/B 样本 → nt1/nt2/明文域 par（对齐小程序 resA/resB）
+        final resA = List<Map<String, int>?>.filled(16, null);
+        final resB = List<Map<String, int>?>.filled(16, null);
+        final resAKeys = List<List<int>?>.filled(16, null);
+        final resBKeys = List<List<int>?>.filled(16, null);
+        int fixPar(int par, int ntEnc) =>
+            (((par >> 3) & 1) ^ Crypto1.oddParity8((ntEnc >> 24) & 255)) << 3 |
+            (((par >> 2) & 1) ^ Crypto1.oddParity8((ntEnc >> 16) & 255)) << 2 |
+            (((par >> 1) & 1) ^ Crypto1.oddParity8((ntEnc >> 8) & 255)) << 1 |
+            ((par & 1) ^ Crypto1.oddParity8(ntEnc & 255)) << 0;
+        for (final a in encNested.atks) {
+          final res = <String, int>{
+            'nt1': Crypto1.prngSuccessor(a.$3, 16),
+            'nt2': a.$4,
+            'par': fixPar(a.$5, a.$4),
+          };
+          LogService.instance.log(
+              '[_crackCard] 3gen atk sector=${a.$1} type=${a.$2} res=${a.$2 == KeyType.keyA ? 'A' : 'B'} nt1=${res['nt1']} nt2=${res['nt2']} par=${res['par']}');
+          if (a.$2 == KeyType.keyA) {
+            resA[a.$1] = res;
+          } else {
+            resB[a.$1] = res;
+          }
+        }
+
+        int hex6Int(String hex) => int.parse(hex, radix: 16);
+        Uint8List int6Bytes(int k) {
+          final b = Uint8List(6);
+          for (var i = 5; i >= 0; i--) {
+            b[i] = k & 0xFF;
+            k >>= 8;
+          }
+          return b;
+        }
+
+        // 候选批量验证（对齐小程序 checkCrackedKey）
+        Future<void> verifyKeys(List<int> cands) async {
+          if (cands.isEmpty) return;
+          final keys = cands.map(int6Bytes).toList();
+          LogService.instance.log('[_crackCard] 3gen verify candidates=${keys.length}');
+          await _checkCrackedKeys(keys, sectorKeys);
+          crackTick.value++;
+          _appendKeysFromSectors(sectorKeys);
+        }
+
+        // 种子恢复（对齐小程序 CrackAll_bySeedNt）：A 已知推 B，B 已知推 A
+        Future<void> crackAllBySeedNt() async {
+          for (var s = 0; s < 16; s++) {
+            checkStop();
+            final ra = resA[s];
+            final rb = resB[s];
+            if (ra == null || rb == null) continue;
+            if (sectorKeys[s].hasKeyA && !sectorKeys[s].hasKeyB) {
+              progress.value = '破解密钥：正在计算扇区 $s 的共同密钥...';
+              final tag =
+                  Crypto1.gen3NonceTag(ra['nt1']!, hex6Int(sectorKeys[s].keyA));
+              final cands = Crypto1.gen3RecoverBySeed(
+                  uid: uidInt,
+                  nt1: rb['nt1']!, nt2: rb['nt2']!, par: rb['par']!,
+                  seedTag: tag);
+              LogService.instance.log('[_crackCard] 3gen seed sector=$s B cands=${cands.length}');
+              await verifyKeys(cands);
+            } else if (!sectorKeys[s].hasKeyA && sectorKeys[s].hasKeyB) {
+              progress.value = '破解密钥：正在计算扇区 $s 的共同密钥...';
+              final tag =
+                  Crypto1.gen3NonceTag(rb['nt1']!, hex6Int(sectorKeys[s].keyB));
+              final cands = Crypto1.gen3RecoverBySeed(
+                  uid: uidInt,
+                  nt1: ra['nt1']!, nt2: ra['nt2']!, par: ra['par']!,
+                  seedTag: tag);
+              LogService.instance.log('[_crackCard] 3gen seed sector=$s A cands=${cands.length}');
+              await verifyKeys(cands);
             }
-            if (!sectorKeys[s].hasKeyB) {
-              sectorKeys[s].hasKeyB = true;
-              sectorKeys[s].keyB = _int6Hex(keyB);
+          }
+        }
+
+        // 两两配对交集（对齐小程序 Crack_3gen 主循环，候选集惰性生成）
+        Future<void> matchPair(
+            int s, int r, bool useAs, bool useAr, String label) async {
+          final rs = useAs ? resA[s] : resB[s];
+          final rr = useAr ? resA[r] : resB[r];
+          if (rs == null || rr == null) return;
+          progress.value = '破解密钥：正在计算扇区 $s、$r 的共同$label密钥...';
+          final cacheS = useAs ? resAKeys : resBKeys;
+          final cacheR = useAr ? resAKeys : resBKeys;
+          final ka = cacheS[s] ??= Crypto1.gen3GenerateKeys(
+              uidInt, rs['nt1']!, rs['nt2']!, rs['par']!);
+          final kb = cacheR[r] ??= Crypto1.gen3GenerateKeys(
+              uidInt, rr['nt1']!, rr['nt2']!, rr['par']!);
+          LogService.instance.log(
+              '[_crackCard] 3gen pair $s/$r ${useAs ? 'A' : 'B'}${useAr ? 'A' : 'B'} cands=${ka.length}/${kb.length}');
+          final inter = ka.toSet().intersection(kb.toSet()).toList();
+          if (inter.isNotEmpty) {
+            await verifyKeys(inter);
+            await crackAllBySeedNt();
+          }
+        }
+
+        // 全卡已有半边密钥的扇区先做种子恢复
+        await crackAllBySeedNt();
+        for (var o = 0; o < 15; o++) {
+          checkStop();
+          if (!sectorKeys[o].hasKeyA) {
+            for (var r = o + 1; r < 16; r++) {
+              checkStop();
+              if (!sectorKeys[r].hasKeyA) {
+                await matchPair(o, r, true, true, 'keyA');
+              }
+              checkStop();
+              if (!sectorKeys[r].hasKeyB) {
+                final ra = resA[r];
+                final rb = resB[r];
+                if (ra != null && rb != null && ra['nt1'] == rb['nt1']) continue;
+                await matchPair(o, r, true, false, 'keyB');
+              }
             }
-          } catch (_) {}
+          }
+          checkStop();
+          if (!sectorKeys[o].hasKeyB) {
+            final ra = resA[o];
+            final rb = resB[o];
+            if (ra != null && rb != null && ra['nt1'] == rb['nt1']) continue;
+            for (var r = o + 1; r < 16; r++) {
+              checkStop();
+              if (!sectorKeys[r].hasKeyA) {
+                await matchPair(o, r, false, true, 'keyA');
+              }
+              checkStop();
+              if (!sectorKeys[r].hasKeyB) {
+                final ra = resA[r];
+                final rb = resB[r];
+                if (ra != null && rb != null && ra['nt1'] == rb['nt1']) continue;
+                await matchPair(o, r, false, false, 'keyB');
+              }
+            }
+          }
         }
         _appendKeysFromSectors(sectorKeys);
-        progress.value = '解卡片：第三代无漏洞卡破解成功';
+        final allDone = sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB);
+        progress.value = allDone
+            ? '解卡片：第三代无漏洞卡破解成功'
+            : '解卡片：第三代无漏洞卡破解完成，部分扇区密钥未恢复';
         if (mounted) Navigator.of(context).pop();
-        _toast('第三代无漏洞卡破解成功');
+        _toast(allDone ? '第三代无漏洞卡破解成功' : '部分扇区密钥未恢复');
         return;
       }
 
