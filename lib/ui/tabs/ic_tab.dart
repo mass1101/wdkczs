@@ -161,6 +161,26 @@ class _IcTabState extends State<IcTab> {
     _appendKeys(all);
   }
 
+  /// 新破出密钥后立即用已知密钥复查全扇区：
+  /// M1 卡常多扇区共用密钥，能认证通过的槽位直接标记，跳过后续破解
+  Future<void> _propagateKeys(List<_SectorKey> sectorKeys) async {
+    final names = <String>[];
+    for (final sk in sectorKeys) {
+      if (sk.hasKeyA && sk.keyA.isNotEmpty && !names.contains(sk.keyA)) {
+        names.add(sk.keyA);
+      }
+      if (sk.hasKeyB && sk.keyB.isNotEmpty && !names.contains(sk.keyB)) {
+        names.add(sk.keyB);
+      }
+    }
+    for (final k in _keys) {
+      if (!names.contains(k)) names.add(k);
+    }
+    if (names.isEmpty) return;
+    LogService.instance.log('[_propagateKeys] checking ${names.length} known keys against all sectors');
+    await _checkCrackedKeys(names.map(_hex).toList(), sectorKeys);
+  }
+
   // ========== 读卡（对齐小程序 btnRead + btnGen2Read 完整流程） ==========
   Future<void> _readCard() async {
     final progress = ValueNotifier<String>('验证密钥：寻卡中...');
@@ -764,6 +784,7 @@ class _IcTabState extends State<IcTab> {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
               LogService.instance.log('[_crackCard] sector=$s keyA FOUND=$rec');
+              await _propagateKeys(sectorKeys);
             } else {
               LogService.instance.log('[_crackCard] sector=$s keyA NOT FOUND');
             }
@@ -784,18 +805,7 @@ class _IcTabState extends State<IcTab> {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
               LogService.instance.log('[_crackCard] sector=$s keyB FOUND=$rec');
-              // M1 卡 keyA==keyB 很常见：用 keyB 回头验证 keyA
-              if (!sectorKeys[s].hasKeyA) {
-                try {
-                  final okA = await _dev.cmdMf1CheckBlockKey(
-                      block: s * 4, keyType: KeyType.keyA, key: _hex(rec));
-                  if (okA) {
-                    sectorKeys[s].hasKeyA = true;
-                    sectorKeys[s].keyA = rec;
-                    LogService.instance.log('[_crackCard] sector=$s keyA=keyB=$rec (verified)');
-                  }
-                } catch (_) {}
-              }
+              await _propagateKeys(sectorKeys);
             } else {
               LogService.instance.log('[_crackCard] sector=$s keyB NOT FOUND');
             }
