@@ -35,3 +35,12 @@ Entries discovered by the Agent during task execution should follow this format:
   - `$l.sortedIndex` 是 lowerBound（`s<t`），`sortedLastIndex` 才是 upperBound（`s<=t`）；Dart `_sortedIndex` 用 lowerBound 正确。
   - 验证脚本：`/workspace/nfctool-app/nested_check.dart`（`dart run nested_check.dart` 跑完整 nested 约 100 秒；`dart run -Dsingle_pair=true nested_check.dart` 只跑第一个采集对约 15 秒）。已知正确输出：states=82056，完整流程 recovered=50 candidates 且首候选即注入密钥。
   - 算法性能参考：单 pair lfsrRecovery32 JS(Node) 约 1.6 秒、Dart(dart run) 约 15 秒；app 内 WEAK 破解预计数十秒到几分钟，UI 需有等待提示。
+
+[Project Knowledge Summary]
+- Date: 2026-09-09
+- Context: 排查解卡每扇区报 `object is unsendable - _AsyncCompleter` 时发现
+- Category: Environment Configuration | Troubleshooting & Debugging
+- Instructions:
+  - Dart async 函数内创建的闭包会捕获整个 async 上下文（含 `_AsyncCompleter`），作为 `Isolate.run`/`SendPort.send` 消息发送时抛 `object is unsendable`，顶层/非 async 上下文的闭包无此问题。
+  - 规范：app 内所有 `Isolate.run` 调用必须通过 crypto1.dart 的非 async static 包装（`recoverKeysInIsolate`/`staticNestedInIsolate`），禁止在 async 函数体内直接写 `Isolate.run(() => ...)`。
+  - 症状特征：日志里 collected 后几十毫秒内报 isolate unsendable 错误、无 recovered 行，即恢复计算完全没跑。
