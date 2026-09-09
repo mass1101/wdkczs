@@ -929,8 +929,10 @@ class _IcTabState extends State<IcTab> {
       final prng = await _dev.cmdMf1TestPrngType();
 
       if (prng >= 2) {
-        progress.value = '解卡片：该卡片为国产兼容卡\n正在云端破解...';
-        await _crackHardnestedCloud(
+        progress.value = '解卡片：该卡片为国产兼容卡\n正在本地Hardnested破解...';
+        LogService.instance.log(
+            '[解卡] HARD卡进入本地Hardnested流程(纯本地计算, 无云端)');
+        await _crackHardnestedLocal(
             uid: uid,
             uidInt: uidInt,
             eSector: eSector,
@@ -944,10 +946,10 @@ class _IcTabState extends State<IcTab> {
         return;
       }
 
-      // WEAK 卡手动勾选 Hardnested 云端破解（对齐小程序 c_modal.Crack_hardnested）
+      // WEAK 卡手动勾选 Hardnested 本地破解（对齐小程序 c_modal.Crack_hardnested）
       if (hardnestedNotifier.value) {
-        LogService.instance.log('[_crackCard] WEAK hardnested cloud mode');
-        await _crackHardnestedCloud(
+        LogService.instance.log('[_crackCard] WEAK hardnested local mode');
+        await _crackHardnestedLocal(
             uid: uid,
             uidInt: uidInt,
             eSector: eSector,
@@ -1535,9 +1537,9 @@ class _IcTabState extends State<IcTab> {
     });
   }
 
-  /// 云端 Hardnested 破解（对齐小程序 Crack_hardnested）：
-  /// 1) query_job 拉取云字典，验证全扇区；2) 逐扇区采集 256 个去重 nt 上传 add_job
-  Future<void> _crackHardnestedCloud({
+  /// 本地 Hardnested 破解（对齐小程序 Crack_hardnested）：
+  /// 逐扇区采集 256 个去重 nt → native mfnestedhard 本地计算，纯本地无云端
+  Future<void> _crackHardnestedLocal({
     required Uint8List uid,
     required int uidInt,
     required int eSector,
@@ -1548,146 +1550,74 @@ class _IcTabState extends State<IcTab> {
     required ValueNotifier<int> crackTick,
     required void Function() checkStop,
   }) async {
-    final uidHex = _hexStr(uid.sublist(0, 4));
-    final userId = '01';
-
-    // 第零步（借鉴 Chameleon Ultra）：native 可用时本地 Hardnested 优先
-    // PM3 mfnestedhard 多线程计算，单目标分钟级；找到即验证标记，全破则返回
-    if (NativeRecovery.available) {
-      try {
-        for (var s = 0; s < 16; s++) {
-          checkStop();
-          if (!sectorKeys[s].hasKeyA) {
-            final key = await _hardnestedLocal(
-                uidInt: uidInt,
-                eSector: eSector,
-                eKeyType: eKeyType,
-                eKeyHex: eKeyHex,
-                sector: s,
-                targetType: KeyType.keyA,
-                progress: progress,
-                checkStop: checkStop);
-            if (key != null) {
-              await _checkCrackedKeys([_hex(key)], sectorKeys);
-              crackTick.value++;
-              _appendKeysFromSectors(sectorKeys);
-              if (sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB)) {
-                progress.value = '解卡片：破解成功，已重新标记密钥信息.';
-                _toast('破解成功');
-                return;
-              }
-            }
-          }
-          checkStop();
-          if (!sectorKeys[s].hasKeyB) {
-            final key = await _hardnestedLocal(
-                uidInt: uidInt,
-                eSector: eSector,
-                eKeyType: eKeyType,
-                eKeyHex: eKeyHex,
-                sector: s,
-                targetType: KeyType.keyB,
-                progress: progress,
-                checkStop: checkStop);
-            if (key != null) {
-              await _checkCrackedKeys([_hex(key)], sectorKeys);
-              crackTick.value++;
-              _appendKeysFromSectors(sectorKeys);
-              if (sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB)) {
-                progress.value = '解卡片：破解成功，已重新标记密钥信息.';
-                _toast('破解成功');
-                return;
-              }
-            }
-          }
-        }
-        LogService.instance.log(
-            '[解卡] 本地Hardnested流程结束, 未能全破, 转云端继续(云字典+云端Hardnested)');
-        progress.value = '解卡片：本地计算未能全部破解，转云端继续...';
-      } catch (e) {
-        LogService.instance.log(
-            '[解卡] 本地Hardnested异常=$e, 转云端继续');
-      }
+    // 纯本地 Hardnested：PM3 mfnestedhard 多线程计算，单目标分钟级
+    // native 库不可用时无法进行 Hardnested 计算，直接结束
+    if (!NativeRecovery.available) {
+      LogService.instance.log(
+          '[解卡] 本地Hardnested不可用: native计算库加载失败(需rebuild安装librecovery.so)');
+      progress.value = '解卡片：本地计算库不可用，无法进行Hardnested破解';
+      _toast('本地计算库不可用，请重新安装应用');
+      return;
     }
 
-    // 第一步：云字典查询（对齐小程序 query_job + KeyFor_<card_id>.txt）
-    var dictKeys = <String>[];
+    final missing = <String>[];
     try {
-      progress.value = '解卡片：正在查询云端任务...';
-      final tasks = await _app.cloud.queryJobs(userId);
-      final all = <String>[];
-      for (final t in tasks) {
-        if (t.key.isNotEmpty && t.key != 'error') {
-          if (!all.contains(t.key.toLowerCase())) all.add(t.key.toLowerCase());
+      for (var s = 0; s < 16; s++) {
+        checkStop();
+        if (!sectorKeys[s].hasKeyA) {
+          final key = await _hardnestedLocal(
+              uidInt: uidInt,
+              eSector: eSector,
+              eKeyType: eKeyType,
+              eKeyHex: eKeyHex,
+              sector: s,
+              targetType: KeyType.keyA,
+              progress: progress,
+              checkStop: checkStop);
+          if (key != null) {
+            await _checkCrackedKeys([_hex(key)], sectorKeys);
+            crackTick.value++;
+            _appendKeysFromSectors(sectorKeys);
+          }
+        }
+        checkStop();
+        if (!sectorKeys[s].hasKeyB) {
+          final key = await _hardnestedLocal(
+              uidInt: uidInt,
+              eSector: eSector,
+              eKeyType: eKeyType,
+              eKeyHex: eKeyHex,
+              sector: s,
+              targetType: KeyType.keyB,
+              progress: progress,
+              checkStop: checkStop);
+          if (key != null) {
+            await _checkCrackedKeys([_hex(key)], sectorKeys);
+            crackTick.value++;
+            _appendKeysFromSectors(sectorKeys);
+          }
         }
       }
-      dictKeys = all;
-      LogService.instance.log('[_crackHardnestedCloud] dict tasks=${tasks.length} keys=${dictKeys.length}');
+    } on CrackStoppedException {
+      rethrow;
     } catch (e) {
-      LogService.instance.log('[_crackHardnestedCloud] query_job ERROR=$e');
+      LogService.instance.log('[解卡] 本地Hardnested异常=$e');
     }
 
-    if (dictKeys.isNotEmpty) {
-      progress.value = '解卡片：云端获取到 ${dictKeys.length} 个密钥，正在验证...';
-      try {
-        final keys = dictKeys.map(_hex).toList();
-        await _checkCrackedKeys(keys, sectorKeys);
-        crackTick.value++;
-        _appendKeysFromSectors(sectorKeys);
-        if (sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB)) {
-          LogService.instance.log('[_crackHardnestedCloud] ALL sectors cracked from cloud dict');
-          progress.value = '解卡片：破解成功，已重新标记密钥信息.';
-          _toast('破解成功');
-          return;
-        }
-        LogService.instance.log('[_crackHardnestedCloud] dict verify done, still missing keys');
-      } catch (e) {
-        LogService.instance.log('[_crackHardnestedCloud] dict verify ERROR=$e');
-      }
-    }
-
-    // 第二步：逐扇区采集上传（对齐小程序 256 个去重 nt 高字节 + add_job）
-    var uploadedAny = false;
     for (var s = 0; s < 16; s++) {
-      checkStop();
-      if (!sectorKeys[s].hasKeyA) {
-        await _collectUploadHardnestedSector(
-            uidHex: uidHex,
-            userId: userId,
-            eSector: eSector,
-            eKeyType: eKeyType,
-            eKeyHex: eKeyHex,
-            sector: s,
-            targetType: KeyType.keyA,
-            progress: progress,
-            checkStop: checkStop);
-        uploadedAny = true;
-      }
-      checkStop();
-      if (!sectorKeys[s].hasKeyB) {
-        await _collectUploadHardnestedSector(
-            uidHex: uidHex,
-            userId: userId,
-            eSector: eSector,
-            eKeyType: eKeyType,
-            eKeyHex: eKeyHex,
-            sector: s,
-            targetType: KeyType.keyB,
-            progress: progress,
-            checkStop: checkStop);
-        uploadedAny = true;
+      if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
+        missing.add(
+            '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
       }
     }
-    if (uploadedAny) {
-      final task = CrackTask(
-        id: 'local_${DateTime.now().millisecondsSinceEpoch}',
-        cardId: uidHex,
-        sector: 0,
-        keyType: KeyType.keyA,
-      );
-      await _app.storage.addCrackTask(task);
-      progress.value = '解卡片：数据已上传云端计算\n请稍后在"查询任务"中查看结果';
-      _toast('已上传云端任务');
+    if (missing.isEmpty) {
+      progress.value = '解卡片：破解成功，已重新标记密钥信息.';
+      _toast('破解成功');
+    } else {
+      LogService.instance.log(
+          '[解卡] 本地Hardnested结束, 未破扇区: ${missing.join(', ')} (计算未找到密钥或采集质量差, 各扇区原因见上方[解卡]日志)');
+      progress.value = '解卡片：本地破解完成，部分扇区密钥未找到';
+      _toast('部分扇区密钥未找到（已写入找到的密钥）');
     }
   }
 
@@ -1727,7 +1657,7 @@ class _IcTabState extends State<IcTab> {
     }
     if (key == 0) {
       LogService.instance.log(
-          '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算未找到密钥(候选空间缩减不足或采集质量差), 转云端');
+          '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算未找到密钥(候选空间缩减不足或采集质量差), 该扇区放弃');
       return null;
     }
     final keyHex = key.toRadixString(16).padLeft(12, '0');
@@ -1824,52 +1754,6 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 上传单扇区 hardnested 数据（对齐小程序 add_job，nonce=采集数据）
-  Future<void> _collectUploadHardnestedSector({
-    required String uidHex,
-    required String userId,
-    required int eSector,
-    required KeyType eKeyType,
-    required String eKeyHex,
-    required int sector,
-    required KeyType targetType,
-    required ValueNotifier<String> progress,
-    required void Function() checkStop,
-  }) async {
-    var uploaded = false;
-    while (!uploaded) {
-      checkStop();
-      final pairs = await _collectHardnestedData(
-          eSector: eSector,
-          eKeyType: eKeyType,
-          eKeyHex: eKeyHex,
-          sector: sector,
-          targetType: targetType,
-          progress: progress,
-          checkStop: checkStop);
-      final nonceBuf = StringBuffer();
-      for (final a in pairs) {
-        nonceBuf.write('${_bytesInt(a.nt)}|${(a.par >> 4) & 15}\n');
-        nonceBuf.write('${_bytesInt(a.ntEnc)}|${a.par & 15}\n');
-      }
-      try {
-        await _app.cloud.addJob(
-            userId: userId,
-            openid: uidHex,
-            cardId: uidHex,
-            sector: sector,
-            keyType: targetType,
-            nonceData: nonceBuf.toString());
-        LogService.instance.log(
-            '[_collectUploadHardnestedSector] sector=$sector ${targetType.label} uploaded nonce=${nonceBuf.length}');
-        uploaded = true;
-      } catch (e) {
-        LogService.instance.log(
-            '[_collectUploadHardnestedSector] add_job ERROR=$e, retrying');
-        // 上传失败重试采集（对齐小程序无限循环直到成功）
-      }
-    }
-  }
-
   // ========== 算密钥（mfkey32v2） ==========
   Future<void> _mfkey() async {
     try {
@@ -2122,7 +2006,7 @@ class _IcTabState extends State<IcTab> {
             ListTile(
                 leading: const Icon(Icons.cloud_upload),
                 title: const Text('云端破解'),
-                subtitle: const Text('国产兼容卡 hardnested 云端计算'),
+                subtitle: const Text('手动提交卡片数据到云端计算'),
                 onTap: () {
                   Navigator.pop(ctx);
                   _cloudCrack();
