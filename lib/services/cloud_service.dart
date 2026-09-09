@@ -28,8 +28,12 @@ class CloudService {
     final uri = base.replace(path: '${base.path}/api');
     final http.Response res;
     if (method == 'POST') {
+      // 云端（uniCloud 云函数）只接受 JSON body（form-urlencoded 会报
+      // FunctionBizError: Unexpected token ... in JSON at position 0）
       res = await http
-          .post(uri, body: data)
+          .post(uri,
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode(data))
           .timeout(const Duration(seconds: 20));
     } else {
       res = await http
@@ -96,7 +100,9 @@ class CloudService {
       'openid': openid,
     }, method: 'POST');
     final res = jsonDecode(body);
-    if (res is Map && res['affectedDocs'] == 1) {
+    // 云端实际返回 {"id": "<objid>"}（实测），小程序不检查响应体；
+    // affectedDocs==1 为兼容保留
+    if (res is Map && (res['id'] != null || res['affectedDocs'] == 1)) {
       return 'ok';
     }
     if (res is Map && res['errMsg'] != null) {
