@@ -1504,6 +1504,63 @@ class _IcTabState extends State<IcTab> {
     final uidHex = _hexStr(uid.sublist(0, 4));
     final userId = '01';
 
+    // 第零步（借鉴 Chameleon Ultra）：native 可用时本地 Hardnested 优先
+    // PM3 mfnestedhard 多线程计算，单目标分钟级；找到即验证标记，全破则返回
+    if (NativeRecovery.available) {
+      try {
+        for (var s = 0; s < 16; s++) {
+          checkStop();
+          if (!sectorKeys[s].hasKeyA) {
+            final key = await _hardnestedLocal(
+                uidInt: uidInt,
+                eSector: eSector,
+                eKeyType: eKeyType,
+                eKeyHex: eKeyHex,
+                sector: s,
+                targetType: KeyType.keyA,
+                progress: progress,
+                checkStop: checkStop);
+            if (key != null) {
+              await _checkCrackedKeys([_hex(key)], sectorKeys);
+              crackTick.value++;
+              _appendKeysFromSectors(sectorKeys);
+              if (sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB)) {
+                progress.value = '解卡片：破解成功，已重新标记密钥信息.';
+                _toast('破解成功');
+                return;
+              }
+            }
+          }
+          checkStop();
+          if (!sectorKeys[s].hasKeyB) {
+            final key = await _hardnestedLocal(
+                uidInt: uidInt,
+                eSector: eSector,
+                eKeyType: eKeyType,
+                eKeyHex: eKeyHex,
+                sector: s,
+                targetType: KeyType.keyB,
+                progress: progress,
+                checkStop: checkStop);
+            if (key != null) {
+              await _checkCrackedKeys([_hex(key)], sectorKeys);
+              crackTick.value++;
+              _appendKeysFromSectors(sectorKeys);
+              if (sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB)) {
+                progress.value = '解卡片：破解成功，已重新标记密钥信息.';
+                _toast('破解成功');
+                return;
+              }
+            }
+          }
+        }
+        LogService.instance.log('[_crackHardnestedCloud] local hardnested done, fallback to cloud');
+        progress.value = '解卡片：本地计算未能全部破解，转云端继续...';
+      } catch (e) {
+        LogService.instance.log('[_crackHardnestedCloud] local hardnested ERROR=$e, fallback to cloud');
+      }
+    }
+
     // 第一步：云字典查询（对齐小程序 query_job + KeyFor_<card_id>.txt）
     var dictKeys = <String>[];
     try {
@@ -1553,7 +1610,6 @@ class _IcTabState extends State<IcTab> {
             eKeyHex: eKeyHex,
             sector: s,
             targetType: KeyType.keyA,
-            sectorKeys: sectorKeys,
             progress: progress,
             checkStop: checkStop);
         uploadedAny = true;
@@ -1568,7 +1624,6 @@ class _IcTabState extends State<IcTab> {
             eKeyHex: eKeyHex,
             sector: s,
             targetType: KeyType.keyB,
-            sectorKeys: sectorKeys,
             progress: progress,
             checkStop: checkStop);
         uploadedAny = true;
@@ -1587,33 +1642,77 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  /// 采集单扇区单密钥类型的 hardnested 数据并上传（对齐小程序 Crack_hardnested 内层循环）
-  Future<void> _collectUploadHardnestedSector({
-    required String uidHex,
-    required String userId,
+  /// 本地 Hardnested 单目标（借鉴 Chameleon Ultra）：
+  /// 采集 256 高字节 → native mfnestedhard 计算 → 返回 12 位 hex 密钥（失败 null）
+  Future<String?> _hardnestedLocal({
+    required int uidInt,
     required int eSector,
     required KeyType eKeyType,
     required String eKeyHex,
     required int sector,
     required KeyType targetType,
-    required List<SectorKeyState> sectorKeys,
     required ValueNotifier<String> progress,
     required void Function() checkStop,
   }) async {
-    final eKey = _hex(eKeyHex);
-    // 借鉴 Chameleon Ultra（PM3 hardnested）：256 种高字节采满后校验 sum8 分布，
-    // 不在白名单说明采集质量差，重采（上限 3 次后放行，防止死循环）
+    final pairs = await _collectHardnestedData(
+        eSector: eSector,
+        eKeyType: eKeyType,
+        eKeyHex: eKeyHex,
+        sector: sector,
+        targetType: targetType,
+        progress: progress,
+        checkStop: checkStop);
+    final buf = _buildHardNestedBuf(uidInt, pairs);
+    progress.value = '解卡片：本地 Hardnested 计算扇区$sector ${targetType.label}\n可能需要几分钟，请勿断开设备...';
+    final key = await NativeRecovery.hardNested(buf);
+    if (key == 0) {
+      LogService.instance
+          .log('[_hardnestedLocal] sector=$sector ${targetType.label} failed');
+      return null;
+    }
+    final keyHex = key.toRadixString(16).padLeft(12, '0');
+    LogService.instance.log(
+        '[_hardnestedLocal] sector=$sector ${targetType.label} FOUND=$keyHex');
+    return keyHex;
+  }
+
+  /// PM3 nonce 缓冲：6 字节头（uid 大端 + 2 占位）+ 每条 9 字节（nt/ntEnc/par），
+  /// 与 native hardnested.c read_nonces 格式对齐
+  Uint8List _buildHardNestedBuf(int uidInt, List<Mf1AcquireHardNestedRes> pairs) {
+    final buf = Uint8List(6 + pairs.length * 9);
+    final bd = ByteData(buf.length);
+    bd.setUint32(0, uidInt & 0xFFFFFFFF);
+    for (var i = 0; i < pairs.length; i++) {
+      final off = 6 + i * 9;
+      bd.setUint32(off, _bytesInt(pairs[i].nt) & 0xFFFFFFFF);
+      bd.setUint32(off + 4, _bytesInt(pairs[i].ntEnc) & 0xFFFFFFFF);
+      buf[off + 8] = pairs[i].par & 0xFF;
+    }
+    return buf;
+  }
+
+  /// 采集单扇区 hardnested 数据直到 256 个去重高字节集满
+  /// （借鉴 Chameleon Ultra/PM3：sum8 白名单校验，上限 3 次重采后放行防死循环）
+  Future<List<Mf1AcquireHardNestedRes>> _collectHardnestedData({
+    required int eSector,
+    required KeyType eKeyType,
+    required String eKeyHex,
+    required int sector,
+    required KeyType targetType,
+    required ValueNotifier<String> progress,
+    required void Function() checkStop,
+  }) async {
     const sumWhitelist = {
       0, 32, 56, 64, 80, 96, 104, 112, 120, 128,
       136, 144, 152, 160, 176, 192, 200, 224, 256
     };
+    final eKey = _hex(eKeyHex);
     final seen = List<bool>.filled(256, false);
     var count = 0;
     var sum = 0;
     var attempts = 0;
-    final nonceBuf = StringBuffer();
-    var uploaded = false;
-    while (!uploaded) {
+    final pairs = <Mf1AcquireHardNestedRes>[];
+    while (true) {
       checkStop();
       progress.value =
           '破解密钥：该卡片为国产兼容卡\n正在获取扇区：$sector ${targetType.label}的数据.\n已获取$count/256个有效数据...';
@@ -1624,7 +1723,8 @@ class _IcTabState extends State<IcTab> {
           targetBlock: sector * 4,
           targetKeyType: targetType);
       LogService.instance.log(
-          '[_collectUploadHardnestedSector] sector=$sector ${targetType.label} batch=${data.length} uniq=$count');
+          '[_collectHardnestedData] sector=$sector ${targetType.label} batch=${data.length} uniq=$count');
+      pairs.addAll(data);
       for (final a in data) {
         final nt = _bytesInt(a.nt);
         final ntEnc = _bytesInt(a.ntEnc);
@@ -1634,44 +1734,74 @@ class _IcTabState extends State<IcTab> {
           count++;
           sum += Crypto1.evenParity32((nt & 0xff000000) | ((a.par >> 4) & 0x08));
         }
-        nonceBuf.write('$nt|${(a.par >> 4) & 15}\n');
         final hb2 = (ntEnc >> 24) & 255;
         if (!seen[hb2]) {
           seen[hb2] = true;
           count++;
           sum += Crypto1.evenParity32((ntEnc & 0xff000000) | (a.par & 0x08));
         }
-        nonceBuf.write('$ntEnc|${a.par & 15}\n');
       }
       if (count >= 256) {
         if (!sumWhitelist.contains(sum) && attempts < 3) {
           attempts++;
           LogService.instance.log(
-              '[_collectUploadHardnestedSector] sector=$sector sum=$sum not in whitelist, retrying ($attempts/3)');
+              '[_collectHardnestedData] sector=$sector sum=$sum not in whitelist, retrying ($attempts/3)');
           seen.fillRange(0, 256, false);
           count = 0;
           sum = 0;
-          nonceBuf.clear();
+          pairs.clear();
           continue;
         }
         LogService.instance.log(
-            '[_collectUploadHardnestedSector] sector=$sector sum=$sum attempts=$attempts uploading');
-        try {
-          await _app.cloud.addJob(
-              userId: userId,
-              openid: uidHex,
-              cardId: uidHex,
-              sector: sector,
-              keyType: targetType,
-              nonceData: nonceBuf.toString());
-          LogService.instance.log(
-              '[_collectUploadHardnestedSector] sector=$sector ${targetType.label} uploaded nonce=${nonceBuf.length}');
-          uploaded = true;
-        } catch (e) {
-          LogService.instance.log(
-              '[_collectUploadHardnestedSector] add_job ERROR=$e, retrying');
-          // 上传失败重试采集（对齐小程序无限循环直到成功）
-        }
+            '[_collectHardnestedData] sector=$sector sum=$sum attempts=$attempts done, pairs=${pairs.length}');
+        return pairs;
+      }
+    }
+  }
+
+  /// 上传单扇区 hardnested 数据（对齐小程序 add_job，nonce=采集数据）
+  Future<void> _collectUploadHardnestedSector({
+    required String uidHex,
+    required String userId,
+    required int eSector,
+    required KeyType eKeyType,
+    required String eKeyHex,
+    required int sector,
+    required KeyType targetType,
+    required ValueNotifier<String> progress,
+    required void Function() checkStop,
+  }) async {
+    var uploaded = false;
+    while (!uploaded) {
+      checkStop();
+      final pairs = await _collectHardnestedData(
+          eSector: eSector,
+          eKeyType: eKeyType,
+          eKeyHex: eKeyHex,
+          sector: sector,
+          targetType: targetType,
+          progress: progress,
+          checkStop: checkStop);
+      final nonceBuf = StringBuffer();
+      for (final a in pairs) {
+        nonceBuf.write('${_bytesInt(a.nt)}|${(a.par >> 4) & 15}\n');
+        nonceBuf.write('${_bytesInt(a.ntEnc)}|${a.par & 15}\n');
+      }
+      try {
+        await _app.cloud.addJob(
+            userId: userId,
+            openid: uidHex,
+            cardId: uidHex,
+            sector: sector,
+            keyType: targetType,
+            nonceData: nonceBuf.toString());
+        LogService.instance.log(
+            '[_collectUploadHardnestedSector] sector=$sector ${targetType.label} uploaded nonce=${nonceBuf.length}');
+        uploaded = true;
+      } catch (e) {
+        LogService.instance.log(
+            '[_collectUploadHardnestedSector] add_job ERROR=$e, retrying');
+        // 上传失败重试采集（对齐小程序无限循环直到成功）
       }
     }
   }

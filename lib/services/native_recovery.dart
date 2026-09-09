@@ -1,4 +1,6 @@
 import 'dart:ffi';
+import 'dart:isolate';
+import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 // FFI 绑定：Chameleon Ultra 移植的 PM3 native 解卡库（native/CMakeLists.txt 构建）
@@ -40,6 +42,14 @@ final class _StaticNested extends Struct {
 
 typedef _NestedFn = Pointer<Uint64> Function(Pointer<_Nested>, Pointer<Uint32>);
 typedef _StaticNestedFn = Pointer<Uint64> Function(Pointer<_StaticNested>, Pointer<Uint32>);
+typedef _HardnestedFn = Uint64 Function(Pointer<_HardNested>);
+typedef _HardnestedDartFn = int Function(Pointer<_HardNested>);
+
+final class _HardNested extends Struct {
+  external Pointer<Char> nonces;
+  @Uint32()
+  external int length;
+}
 
 class NativeRecovery {
   static DynamicLibrary? _lib;
@@ -129,6 +139,29 @@ class NativeRecovery {
       malloc.free(data);
       malloc.free(countP);
     }
+  }
+
+  /// PM3 nonce 缓冲（6 字节头 uid+占位 + 每条 9 字节 nt/ntEnc/par，大端）
+  /// → native hardnested（mfnestedhard，多线程，分钟级阻塞），返回 0 表示失败。
+  /// 必须在 isolate 中执行（[hardNested]）。
+  static int _hardNestedSync(Uint8List buf) {
+    final lib = DynamicLibrary.open('librecovery.so');
+    final f = lib.lookupFunction<_HardnestedFn, _HardnestedDartFn>('hardnested');
+    final p = malloc<_HardNested>();
+    final data = malloc<Uint8>(buf.length);
+    data.asTypedList(buf.length).setAll(0, buf);
+    p.ref.nonces = data.cast<Char>();
+    p.ref.length = buf.length;
+    final result = f(p);
+    malloc.free(p);
+    malloc.free(data);
+    return result;
+  }
+
+  /// Hardnested 攻击（借鉴 Chameleon Ultra：PM3 mfnestedhard native 多线程）。
+  /// 阻塞计算分钟级，放入独立 isolate 执行；结果为单 key（0 = 失败）。
+  static Future<int> hardNested(Uint8List buf) {
+    return Isolate.run(() => _hardNestedSync(buf));
   }
 }
 
