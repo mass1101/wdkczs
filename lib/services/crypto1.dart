@@ -589,9 +589,8 @@ class Crypto1 {
     return nestedRecoverState(uid: uid, atks: converted);
   }
 
-  /// nested：非静态随机数嵌套攻击
-  static List<int> nested({
-    required int uid,
+  /// nested 第一步：PRNG 窗口 + 奇偶过滤，得到有效采样对（快速）
+  static List<Map<String, int>> nestedCollect({
     required int dist,
     required List<Map<String, int>> atks,
   }) {
@@ -609,7 +608,46 @@ class Crypto1 {
         }
       }
     }
-    return nestedRecoverState(uid: uid, atks: collected);
+    return collected;
+  }
+
+  /// nested 第二步：单个采样对的状态恢复（耗时步骤，可放入 isolate），
+  /// 返回回滚后的候选密钥列表
+  static List<int> nestedRecoverKeys(int uid, Map<String, int> pair) {
+    final n = toUint32(pair['ntp']! ^ uid);
+    final states = lfsrRecovery32(pair['ks1']!, n);
+    final keys = <int>[];
+    for (final e in states) {
+      e.lfsrRollbackWord(n, 0);
+      keys.add(e.getLfsr());
+    }
+    return keys;
+  }
+
+  /// nested 第三步：合并各采样对候选密钥，按出现次数排序取 top50（快速）
+  static List<int> nestedMerge(List<List<int>> keysPerPair) {
+    final counts = <int, int>{};
+    for (final keys in keysPerPair) {
+      for (final k in keys) {
+        counts[k] = (counts[k] ?? 0) + 1;
+      }
+    }
+    final sorted = counts.entries.toList()
+      ..sort((x, y) => y.value.compareTo(x.value));
+    return sorted.take(50).map((e) => e.key).toList();
+  }
+
+  /// nested：非静态随机数嵌套攻击
+  static List<int> nested({
+    required int uid,
+    required int dist,
+    required List<Map<String, int>> atks,
+  }) {
+    final collected = nestedCollect(dist: dist, atks: atks);
+    final keysPerPair = [
+      for (final p in collected) nestedRecoverKeys(uid, p),
+    ];
+    return nestedMerge(keysPerPair);
   }
 
   static bool nestedIsValidNonce(int e, int t, int r, int i) {

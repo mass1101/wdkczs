@@ -929,10 +929,23 @@ class _IcTabState extends State<IcTab> {
                   })
               .toList();
               LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
-          progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态（约1-2分钟，请耐心等待）...';
-          // 恢复计算耗时数十秒到数分钟，放入后台 isolate 避免 UI 卡死
-          final recovered = await Isolate.run(() =>
-              Crypto1.nested(uid: nestedUid, dist: dist, atks: atks));
+          // 对齐小程序：每轮重试追加进度点
+          progress?.value = '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
+          // 第一步：奇偶过滤得到有效采样对（快速）
+          final collected =
+              Crypto1.nestedCollect(dist: dist, atks: atks);
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry collected=${collected.length}');
+          // 第二步：逐对状态恢复（每对数十秒，放入后台 isolate 并回报进度）
+          final keysPerPair = <List<int>>[];
+          for (var i = 0; i < collected.length; i++) {
+            progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i + 1}/${collected.length} 对（每对约半分钟）...';
+            final pair = collected[i];
+            final keys = await Isolate.run(
+                () => Crypto1.nestedRecoverKeys(nestedUid, pair));
+            keysPerPair.add(keys);
+          }
+          // 第三步：合并候选取 top50（快速）
+          final recovered = Crypto1.nestedMerge(keysPerPair);
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
           if (recovered.isNotEmpty) {
             final found = await _verifyCandidates(sector, keyTypeBit, recovered);
