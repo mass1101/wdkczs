@@ -54,3 +54,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - 禁止手写简易 Crypto1 合成器：PM3 crypto1 有特有位序（`setLfsr` 的 `^7`、`crypto1_word` 的 BEBIT 输入 + `24^i` 输出重排），手写必错（表现为 lfsr_recovery32 输出 20 多万假候选）。
   - FFI 对接前必须逐字段比对 C 结构体语义与 app 采集数据语义：CU 的 C `static_encrypted_nested` 是 lfsr_recovery32 数学，与 gen3 卡的 Doegox 2x1nt（小程序 generate_keys/`gen3GenerateKeys`）不同源，C 端无 2x1nt 实现，gen3 只能走 Dart。
   - C `nested()` 输入 = 两条采集的 (nt 明文, nt_enc, par) 同 dist；`static_nested()` = 两条连续 auth (nt, enc)，dist 由特征值决定（0x01200145→160；0x009080A2→keyA 160/keyB 161，后续 +160）；`nested_run` 输出按出现频次排序（真 key 多条恢复时频次最高排最前）。
+
+[Project Knowledge Summary]
+- Date: 2026-09-09
+- Context: 审查云端 Hardnested 破解逻辑时实测发现（POST 格式 bug 已修复于 076d6b9）
+- Category: Environment Configuration | Troubleshooting & Debugging
+- Instructions:
+  - 云端（uniCloud 云函数，默认端点见 cloud_service.dart）**只接受 application/json** body：form-urlencoded 返回 `FunctionBizError: Unexpected token ... in JSON at position 0`。GET（Analy/savesharedata）用 query 参数不受影响。
+  - 云端各接口实测响应格式：`add_job` 返回 `{"id": "<objid>"}`（无 affectedDocs）；`query_job` 返回 `{"affectedDocs": N, "data": [{_id,user_id,card_id,sector,keytype,nonce,key,openid}]}`（key="" 计算中 / "error" 出错）；`del_job` 返回 `{"affectedDocs":1,"deleted":1}`。
+  - add_job 的 nonce 格式（与小程序对齐）：每行 `十进制nt|par高4位\n` 与 `十进制ntEnc|par低4位\n`，集满 256 个去重高字节后上传；keytype 传 "A"/"B"；card_id 为 8 位小写 hex uid（上传查询自洽即可）。
+  - 排查云端问题先用 curl 直接测端点（query_job 只读无副作用；add_job 测试数据记得 del_job 清理）。
