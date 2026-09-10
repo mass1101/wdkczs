@@ -599,7 +599,7 @@ class _IcTabState extends State<IcTab> {
       });
       _syncCardInfo();
 
-      if (_keys.isEmpty) {
+      if (_dictKeys.isEmpty) {
         _toast('请先填写密钥');
         return;
       }
