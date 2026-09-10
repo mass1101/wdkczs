@@ -2624,7 +2624,7 @@ class _IcTabState extends State<IcTab> {
                 subtitle: const Text('锁定 UFUID 卡（不可逆）'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _runChip(_dev.lockUfuid);
+                  _lockUfuidFlow();
                 }),
             ListTile(
                 leading: const Icon(Icons.restart_alt),
@@ -2659,7 +2659,8 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 通用卡操作包装（连接检查 + 进度）
-  Future<void> _runChip(Future<void> Function() task) async {
+  Future<bool> _runChip(Future<void> Function() task,
+      {String successText = '操作完成'}) async {
     try {
       if (!_app.connected) throw Exception('设备未连接');
       showDialog(
@@ -2675,10 +2676,51 @@ class _IcTabState extends State<IcTab> {
       } finally {
         if (mounted) Navigator.of(context).pop();
       }
-      _toast('操作完成');
+      _toast(successText);
+      return true;
     } catch (e) {
       _toast('操作失败: $e');
+      return false;
     }
+  }
+
+  /// 锁 UFUID 流程（对齐 2.8.3 lockUFUID）：先检测（只读不写）→ 通过后二次确认 → 锁定
+  Future<void> _lockUfuidFlow() async {
+    final askDetect = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确定要检测UFUID卡吗？', style: TextStyle(fontSize: 16)),
+        content: const Text(
+            '即将检测该卡是否支持UFUID卡锁卡指令，继续吗?\n'
+            'tips.1 UFUID卡锁定前功能和UID卡一致.\n'
+            'tips.2 UFUID卡锁定后变成普通卡,且操作不可逆.\n'
+            'tips.3 UFUID卡锁定需二次确认,请放心操作.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+        ],
+      ),
+    );
+    if (askDetect != true || !mounted) return;
+    final detected = await _runChip(_dev.detectUfuid,
+        successText: '检测通过：该卡为UFUID卡');
+    if (!detected || !mounted) return;
+    final askLock = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确定要锁定UFUID吗？', style: TextStyle(fontSize: 16)),
+        content: const Text(
+            '发现UFUID卡,即将锁定该卡,继续吗?\n'
+            'tips.1 UFUID卡锁定前功能和UID卡一致.\n'
+            'tips.2 UFUID卡锁定后变成普通卡,且操作不可逆.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+        ],
+      ),
+    );
+    if (askLock != true || !mounted) return;
+    await _runChip(_dev.lockUfuid, successText: 'lockUFUID 成功');
   }
 
   // ========== 格式化 ==========

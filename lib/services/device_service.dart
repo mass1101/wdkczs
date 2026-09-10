@@ -1047,10 +1047,9 @@ class DeviceService {
     }
   }
 
-  /// 锁 UFUID 卡（对应逆向 lockUFUID：固定 5 段指令流）
-  Future<void> lockUfuid() async {
-    await assureDeviceMode(DeviceMode.reader);
-    await cmdHf14aScan();
+  /// Gen1a 后门授权三步（failed 0-3）：halt → 0x40(7bit) → 0x43 → 写授权 e100e1ee
+  /// 三步全部 ACK(0x0A) 即检测通过（UFUID/UID 后门卡特征），供检测与锁定复用
+  Future<void> _ufuidAuth() async {
     try {
       await mf1Halt();
     } catch (e) {
@@ -1065,6 +1064,20 @@ class DeviceService {
     final r3 = await cmdHf14aRaw(data: _hexToBytes('e100e1ee'), keepRfField: true)
         .catchError((e) => throw DeviceException(-1, 'failed 3，不支持锁卡指令'));
     if (r3.isEmpty || r3[0] != 10) throw DeviceException(-1, 'failed 3，不支持锁卡指令');
+  }
+
+  /// 检测 UFUID 卡（对齐 2.8.3 lockUFUID 检测阶段）：只走授权三步，不写锁指令
+  Future<void> detectUfuid() async {
+    await assureDeviceMode(DeviceMode.reader);
+    await cmdHf14aScan();
+    await _ufuidAuth();
+  }
+
+  /// 锁 UFUID 卡（对应 2.8.3 lockUFUID 锁定阶段）：授权三步 + 0x85 锁块指令
+  Future<void> lockUfuid() async {
+    await assureDeviceMode(DeviceMode.reader);
+    await cmdHf14aScan();
+    await _ufuidAuth();
     final r4 = await cmdHf14aRaw(data: _hexToBytes('850000000000000000000000000000081847'), keepRfField: true)
         .catchError((e) => throw DeviceException(-1, 'failed 4，不支持锁卡指令'));
     if (r4.isEmpty || r4[0] != 10) throw DeviceException(-1, 'failed 4，不支持锁卡指令');
