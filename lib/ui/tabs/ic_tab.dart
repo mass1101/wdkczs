@@ -85,18 +85,23 @@ class _IcTabState extends State<IcTab> {
     _atsCtrl.text = _app.card.ats;
   }
 
-  Future<void> _loadKeys() async {
-    final names = await _app.storage.getKeyNames();
-    if (names.isEmpty || !mounted) return;
-    final existing = _keys.toList();
-    final merged = <String>[...existing];
-    for (final v in names.values) {
-      for (final line in v.split('\n').map((e) => e.trim()).where((e) => e.length == 12)) {
-        if (!merged.contains(line)) merged.add(line);
+  /// 收集验证密钥集合：编辑框现有 + 所有密钥文件(default_keys.txt/KeyFor_*.txt)
+  /// 去重返回，不改动编辑框内容（对齐小程序 autoloadKeys 加载进内存 ss.ic_keys，
+  /// 避免解卡后编辑框被全库密钥污染）
+  Future<List<String>> _collectVerifyKeys() async {
+    final merged = _keys.toList();
+    try {
+      final names = await _app.storage.getKeyNames();
+      for (final v in names.values) {
+        for (final line in v
+            .split('\n')
+            .map((e) => e.trim())
+            .where((e) => e.length == 12)) {
+          if (!merged.contains(line)) merged.add(line);
+        }
       }
-    }
-    _keyCtrl.text = merged.join('\n');
-    _validateKeys(_keyCtrl.text);
+    } catch (_) {}
+    return merged;
   }
 
   void _validateKeys(String text) {
@@ -316,12 +321,11 @@ class _IcTabState extends State<IcTab> {
 
       // Gen1a 失败：autoloadKeys + checkCrackedKey + btnGen2Read（对齐小程序）
       progress.value = '验证密钥：验证中...';
-      await _loadKeys();
 
       // 批量检测扇区密钥（对齐小程序 checkCrackedKey）
       // 读卡仅用用户密钥：扩展字典 44 把全 miss 时会跑满 1500+ 次失败认证（30-60s），
       // 且部分命中后 anyMissing 仍提示去解卡，收益极低；扩展字典留给解卡第一步
-      final allKeys = _keys.map(_hex).toList();
+      final allKeys = (await _collectVerifyKeys()).map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
           onProgress: (processed) {
         progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
@@ -499,7 +503,7 @@ class _IcTabState extends State<IcTab> {
       // 验证密钥：验证中...
       step.value = 0;
       progress.value = '验证密钥：验证中...';
-      await _loadKeys();
+      final writeKeys = await _collectVerifyKeys();
 
       // 写卡片：逐扇区写入（对齐小程序 btnGen2Write）
       step.value = 1;
@@ -514,7 +518,7 @@ class _IcTabState extends State<IcTab> {
           if (stopFlag) break;
           final blockNum = sector * 4 + b;
           var written = false;
-          for (final keyStr in _keys) {
+          for (final keyStr in writeKeys) {
             final key = _hex(keyStr);
             if (!written) {
               try {
@@ -990,10 +994,13 @@ class _IcTabState extends State<IcTab> {
       // 验证密钥：验证中...
       step.value = 0;
       progress.value = '验证密钥：验证中...';
-      await _loadKeys();
 
       // 断点续破（对齐小程序破解任务）：同 UID 且字典一致时恢复上次进度
-      final dictKeysHex = _dictKeys;
+      // 验证集合=编辑框+全库密钥文件+扩展字典（编辑框内容保持不变，不灌全库密钥）
+      final dictKeysHex = await _collectVerifyKeys();
+      for (final k in kExtendedKeys) {
+        if (!dictKeysHex.contains(k)) dictKeysHex.add(k);
+      }
       var dictStart = 0;
       final resume = await _app.storage.getCrackResume();
       if (resume != null &&
@@ -1028,7 +1035,10 @@ class _IcTabState extends State<IcTab> {
       final allKeys = dictKeysHex.sublist(dictStart).map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
           onProgress: (processed) {
-        // 大字典逐块(32把/约31s)验证，实时反馈进度并点亮已恢复扇区
+        // 批量验证按 32 把/块(约31s)推进，块返回即检查停止，
+        // 停止请求后最多再等一个块即可中断，而非跑完全部字典
+        checkStop();
+        // 大字典逐块验证，实时反馈进度并点亮已恢复扇区
         progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
         _appendKeysFromSectors(sectorKeys);
         crackTick.value++;
@@ -1951,10 +1961,9 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  /// 破解/读卡回填后自动保存该 UID 的密钥文件（合并去重，静默失败）
   /// 自动保存该 UID 的密钥文件：仅合并 [keys]（本次命中的密钥）与文件原有内容。
-  /// 编辑框在解卡过程中已被 _loadKeys 扩成全库密钥，直接取编辑框会把
-  /// 与本卡无关的密钥混入文件（下次读卡导入拖慢验证），故须显式传参
+  /// 编辑框是用户自管内容（验证集合由 _collectVerifyKeys 临时构造），
+  /// 直接取编辑框会把与本卡无关的密钥混入文件（下次读卡导入拖慢验证），故须显式传参
   Future<void> _autoSaveKeyFileForUid(String uidHex, List<String> keys) async {
     try {
       final list = keys.where((k) => k.length == 12).toList();
