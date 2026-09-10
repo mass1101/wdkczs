@@ -2700,23 +2700,20 @@ class _IcTabState extends State<IcTab> {
       _toast('解卡未获得密钥，无法格式化加密卡');
       return;
     }
-    final keys = <int, (KeyType, Uint8List)>{};
+    // 每扇区实测出 keyA/keyB（可能各有一把，写块时按 ACL 灵活选用）
+    final keys = <int, (Uint8List?, Uint8List?)>{};
     final keyBytes = lines.map(_hex).toList();
     for (var s = 0; s < 16; s++) {
       final hit = await _dev.mf1CheckSectorKeys(s, keyBytes);
-      final a = hit[KeyType.keyA.value];
-      if (a != null) {
-        keys[s] = (KeyType.keyA, a);
-        continue;
-      }
-      final b = hit[KeyType.keyB.value];
-      if (b != null) keys[s] = (KeyType.keyB, b);
+      final pair = (hit[KeyType.keyA.value], hit[KeyType.keyB.value]);
+      if (pair.$1 != null || pair.$2 != null) keys[s] = pair;
     }
     if (keys.isEmpty) {
       _toast('解卡未获得密钥，无法格式化加密卡');
       return;
     }
     // 常规认证写擦除：数据块清零，block3 重置默认 ACL+密钥（block0 只读跳过）
+    // 单块失败（ACL 限制 keyType 无写权限等）换另一把密钥重试，仍失败则跳过继续
     if (!mounted) return;
     showDialog(
       context: context,
@@ -2726,22 +2723,44 @@ class _IcTabState extends State<IcTab> {
         onCancel: null,
       ),
     );
+    final failedBlocks = <int>[];
     try {
       const empty = '00000000000000000000000000000000';
       const acl = 'ffffffffffffff078069ffffffffffff';
       for (final e in keys.entries) {
         final s = e.key;
-        final (kt, key) = e.value;
+        final (ka, kb) = e.value;
         for (var b = 0; b < 4; b++) {
           final block = s * 4 + b;
           if (block == 0) continue;
           final data = b == 3 ? acl : empty;
-          await _dev.cmdMf1WriteBlock(
-              block: block, keyType: kt, key: key, data: _hex(data));
+          // 传输配置（ff0780）下 trailor 仅 keyA 可写，keyA 优先
+          final tryKeys = <(KeyType, Uint8List)>[
+            if (ka != null) (KeyType.keyA, ka),
+            if (kb != null) (KeyType.keyB, kb),
+          ];
+          var wrote = false;
+          for (final (kt, key) in tryKeys) {
+            try {
+              await _dev.cmdMf1WriteBlock(
+                  block: block, keyType: kt, key: key, data: _hex(data));
+              wrote = true;
+              break;
+            } on DeviceException {
+              // 换另一把密钥再试
+            }
+          }
+          if (!wrote) failedBlocks.add(block);
         }
       }
       if (mounted) Navigator.of(context).pop();
-      _toast('格式化完成');
+      if (failedBlocks.isEmpty) {
+        _toast('格式化完成');
+      } else {
+        LogService.instance.log(
+            '[格式化] ACL受限未写入块: ${failedBlocks.join(', ')}');
+        _toast('格式化完成，${failedBlocks.length} 个块 ACL 受限未重置');
+      }
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _toast('格式化失败: $e');
