@@ -926,9 +926,16 @@ class DeviceService {
 
   /// 空卡体（保留当前 UID，对应逆向 getEmptyCardBodyWithoutUID）
   Future<List<String>> getEmptyCardBodyWithoutUID() async {
-    final factory = (await cmdHf14aScan()).isNotEmpty
-        ? (await mf1Gen1aReadBlocks(0)).map((b) => b.toRadixString(16).padLeft(2, '0')).join()
-        : 'deadbeef220804000177a2cc35afa51d';
+    var factory = 'deadbeef220804000177a2cc35afa51d';
+    if ((await cmdHf14aScan()).isNotEmpty) {
+      try {
+        factory = (await mf1Gen1aReadBlocks(0))
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
+      } catch (_) {
+        // 非 UID 卡后门读 block0 失败：保留默认块，错误留给后续认证环节报出
+      }
+    }
     const empty = '00000000000000000000000000000000';
     const acl = 'ffffffffffffff078069ffffffffffff';
     return List.generate(16, (s) {
