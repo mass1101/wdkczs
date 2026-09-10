@@ -1080,7 +1080,9 @@ class DeviceService {
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
-    int chunkSize = 5,
+    // 20 把/块（9198c91 同款）：20×32 槽位×~30ms ≈ 19s < 60s 超时，
+    // 往返次数是 5 把/块的 1/4（每次 BLE 往返 50-100ms）
+    int chunkSize = 20,
     void Function(Mf1CheckKeysOfSectorsRes partial)? onChunk,
   }) async {
     await assureDeviceMode(DeviceMode.reader);
