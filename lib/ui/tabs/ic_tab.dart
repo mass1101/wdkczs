@@ -1028,6 +1028,8 @@ class _IcTabState extends State<IcTab> {
       final allKeys = dictKeysHex.sublist(dictStart).map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
           onProgress: (processed) {
+        // 大字典逐块(32把/约31s)验证，实时反馈进度并点亮已恢复扇区
+        progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
         _appendKeysFromSectors(sectorKeys);
         crackTick.value++;
         _app.storage.saveCrackResume({
