@@ -1100,6 +1100,8 @@ class _IcTabState extends State<IcTab> {
                   'ar': res.ar!,
                 };
               }
+              LogService.instance.log(
+                  '[解卡] Darkside采集失败 status=${res.status} (0=OK, 非0含卡无响应/防Darkside)');
               return null;
             },
             (key) async => await _dev.cmdMf1CheckBlockKey(

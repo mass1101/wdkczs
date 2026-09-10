@@ -850,6 +850,11 @@ class DeviceService {
       final r2 = await cmdHf14aRaw(data: Uint8List.fromList([0x43]), keepRfField: true)
           .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 2: $e'));
       if (r2.isEmpty || r2[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 2');
+      // e100e1ee 写授权：Gen1a 标准 third step（对齐小程序/CU lockUFUID 序列），
+      // 缺此步 CUID 卡读块失败且卡停留在异常授权态，污染后续 Darkside 采集
+      final r3 = await cmdHf14aRaw(data: _hexToBytes('e100e1ee'), keepRfField: true)
+          .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 3: $e'));
+      if (r3.isEmpty || r3[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 3');
       return await cb();
     } finally {
       if (isConnected()) {
