@@ -2111,35 +2111,45 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  /// 上传单扇区 hardnested 数据（对齐小程序 add_job，nonce=采集数据）
-  // ========== 算密钥（mfkey32v2） ==========
+  // ========== 算密钥（mfkey32v2，对齐小程序 btnRecover + btnRecoverHard） ==========
   Future<void> _mfkey() async {
+    ValueNotifier<String>? progress;
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
-      final tags = await _dev.cmdHf14aScan();
-      if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
-      final uidInt = _bytesInt(tags.first.uid.sublist(0, 4));
-      // 采集两组认证数据（用已知密钥读块触发 auth 交互）
-      final firstKey = _hex(_keys.isEmpty ? 'ffffffffffff' : _keys.first);
-      Future<Uint8List> collectAuth(int block) async {
-        final data = await _dev.cmdMf1ReadBlock(
-            block: block, keyType: KeyType.keyA, key: firstKey);
-        return data;
+
+      // 第一步：读取侦测数据（对齐小程序：count 预检 + 分批拉取全部日志）
+      final count = await _dev.cmdMf1GetDetectionCount();
+      if (count < 2) {
+        throw Exception(
+            '侦测数据不足，请将设备当做门禁卡至门禁处刷卡，刷卡不少于两次\n（次数越多成功率越高，次数过多会增加计算时间）');
+      }
+      if (!mounted) return;
+      progress = ValueNotifier<String>('读取数据： 0 / $count');
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => CrackProgressDialog(
+            title: '算密钥...', progress: progress, onCancel: null),
+      );
+      final logs = <Mf1DetectionLog>[];
+      while (logs.length < count) {
+        logs.addAll(await _dev.cmdMf1GetDetectionLogs(logs.length));
+        progress.value = '读取数据： ${logs.length} / $count';
       }
 
-      await collectAuth(0);
-      final detections = await _dev.cmdMf1GetDetectionLogs(0);
-      if (detections.length < 2) {
-        _toast('认证数据不足，请重试');
-        return;
+      // 第二步：按 uid-block-keyType 分组（对齐小程序 groupBy）
+      final groups = <String, List<Mf1DetectionLog>>{};
+      for (final l in logs) {
+        groups
+            .putIfAbsent(
+                '${_hexStr(l.uid)}-${l.block}-${l.isKeyB ? 1 : 0}', () => [])
+            .add(l);
       }
-      // 对齐小程序：对全部检测日志每对(相邻两条)逐一计算，密钥插入密钥区头部
-      var foundCount = 0;
-      for (var i = 0; i + 1 < detections.length; i += 2) {
-        final a = detections[i];
-        final b = detections[i + 1];
+
+      // 第三步：普通计算（每组前两条）→ 强力计算（仍未解出的组内两两配对）
+      int? mfkeyOnce(Mf1DetectionLog a, Mf1DetectionLog b) {
         final keys = Crypto1.mfkey32v2(
-          uid: uidInt,
+          uid: _bytesInt(a.uid.sublist(0, 4)),
           nt0: _bytesInt(a.nt),
           nr0: _bytesInt(a.nr),
           ar0: _bytesInt(a.ar),
@@ -2147,22 +2157,79 @@ class _IcTabState extends State<IcTab> {
           nr1: _bytesInt(b.nr),
           ar1: _bytesInt(b.ar),
         );
-        if (keys.isEmpty) continue;
-        final found = _int6Hex(keys.first);
-        if (!mounted) return;
-        setState(() {
-          _keyCtrl.text = '$found\n${_keyCtrl.text}';
-          _app.card.keys = _keyCtrl.text;
-          _validateKeys(_keyCtrl.text);
-        });
-        foundCount++;
+        return keys.isEmpty ? null : keys.first;
       }
-      if (foundCount == 0) {
+
+      final added = <String>[];
+      final unsolved = <List<Mf1DetectionLog>>[];
+      var done = 0;
+      progress.value = '计算密钥： 0 / ${groups.length}';
+      for (final g in groups.values) {
+        try {
+          if (g.length >= 2) {
+            final k = mfkeyOnce(g[0], g[1]);
+            if (k != null) {
+              added.add(_int6Hex(k));
+            } else {
+              unsolved.add(g);
+            }
+          } else {
+            unsolved.add(g);
+          }
+        } catch (_) {
+          unsolved.add(g);
+        }
+        done++;
+        progress.value = '计算密钥： $done / ${groups.length}';
+      }
+      // 强力计算（对齐小程序 btnRecoverHard：组内两两全配对）
+      if (unsolved.isNotEmpty) {
+        progress.value = '强力计算： 0 / ${unsolved.length}';
+        var hardDone = 0;
+        for (final g in unsolved) {
+          outer:
+          for (var i = 0; i < g.length; i++) {
+            for (var j = i + 1; j < g.length; j++) {
+              if (i == 0 && j == 1) continue; // 普通计算已试过
+              try {
+                final k = mfkeyOnce(g[i], g[j]);
+                if (k != null) {
+                  added.add(_int6Hex(k));
+                  break outer;
+                }
+              } catch (_) {}
+            }
+          }
+          hardDone++;
+          progress.value = '强力计算： $hardDone / ${unsolved.length}';
+        }
+      }
+      if (mounted) Navigator.of(context).pop();
+
+      // 第四步：去重回填密钥区头部（对齐 ss.keys = key + "\n" + keys）
+      if (added.isEmpty) {
         _toast('未计算出密钥');
         return;
       }
-      _toast('算得密钥：$foundCount 个');
+      final uniq = <String>[];
+      for (final k in added) {
+        if (!uniq.contains(k)) uniq.add(k);
+      }
+      final fresh =
+          uniq.where((k) => !_keys.contains(k)).toList();
+      if (fresh.isEmpty) {
+        _toast('算得密钥均已存在');
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _keyCtrl.text = '${fresh.reversed.join('\n')}\n${_keyCtrl.text}';
+        _app.card.keys = _keyCtrl.text;
+        _validateKeys(_keyCtrl.text);
+      });
+      _toast('算得密钥：${fresh.length} 个');
     } catch (e) {
+      if (mounted && progress != null) Navigator.of(context).pop();
       _toast('算密钥失败: $e');
     }
   }
