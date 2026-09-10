@@ -2679,7 +2679,62 @@ class _IcTabState extends State<IcTab> {
     );
     if (ok != true) return;
     await _dev.assureDeviceMode(DeviceMode.reader);
-    await _dev.formatCard();
+    // 优先 Gen1a 后门免密格式化（UID 卡）
+    try {
+      await _dev.formatCard();
+      _toast('格式化完成');
+      return;
+    } on DeviceException {
+      // 非 UID 卡后门失败 → 解卡后常规认证写擦除
+    }
+    // 解卡（内部自带进度弹窗，成功后密钥回填编辑区）
+    await _crackCard();
+    final keys = <int, (KeyType, Uint8List)>{};
+    for (var s = 0; s < 16; s++) {
+      final b3 = _app.card.sectors[s].blocks[3].data;
+      if (b3.length < 32) continue;
+      final keyA = b3.substring(0, 12);
+      final keyB = b3.substring(20, 32);
+      if (keyA != '000000000000' && keyA != 'ffffffffffff') {
+        keys[s] = (KeyType.keyA, _hex(keyA));
+      } else if (keyB != '000000000000' && keyB != 'ffffffffffff') {
+        keys[s] = (KeyType.keyB, _hex(keyB));
+      }
+    }
+    if (keys.isEmpty) {
+      _toast('解卡未获得密钥，无法格式化加密卡');
+      return;
+    }
+    // 常规认证写擦除：数据块清零，block3 重置默认 ACL+密钥（block0 只读跳过）
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const CrackProgressDialog(
+        title: '格式化中...',
+        onCancel: null,
+      ),
+    );
+    try {
+      const empty = '00000000000000000000000000000000';
+      const acl = 'ffffffffffffff078069ffffffffffff';
+      for (final e in keys.entries) {
+        final s = e.key;
+        final (kt, key) = e.value;
+        for (var b = 0; b < 4; b++) {
+          final block = s * 4 + b;
+          if (block == 0) continue;
+          final data = b == 3 ? acl : empty;
+          await _dev.cmdMf1WriteBlock(
+              block: block, keyType: kt, key: key, data: _hex(data));
+        }
+      }
+      if (mounted) Navigator.of(context).pop();
+      _toast('格式化完成');
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      _toast('格式化失败: $e');
+    }
   }
 
   // ========== 修改卡号 ==========
