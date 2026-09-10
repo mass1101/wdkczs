@@ -75,3 +75,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 合成 hard 卡样本无法从外部复刻：固件返回的两个 4B 的明文/加密视角与 par 各位语义依赖固件实现（PM3 valid_nonce 的 BIT(ks1,16-8m) 只覆盖 3 字节，第 4 字节 ks 位来自后续 keystream 流），合成数据 sum8 无法稳定落入白名单。C 算法正确性依据 = CU 产品背书 + 数据流与云端上传同源（小程序线上验证）+ 真机实测兜底。
   - Dart 侧 ByteData 陷阱：`ByteData(n)` 创建**独立**缓冲，与 `Uint8List(n)` 底层内存不共享；必须用 `u8list.buffer.asByteData()`。已实际踩坑（C 端读到全 0 还收敛出假 key）。
   - mfnestedhard 为分钟级阻塞计算，FFI 调用必须 Isolate.run（非 async static 包装，遵循既有 isolate 规范）；停止按钮只放弃结果（isolate 计算继续），与 CU 行为一致。
+
+[Project Knowledge Summary]
+- Date: 2026-09-10
+- Context: 落地 Gen2/CUID 后门卡恢复（dd45818，对齐 CU NTLevel.backdoor 分支）时发现
+- Category: Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - C 库真值验证优先用 CU 官方测试样本对拍（chameleonultra-app/test/recovery_test.dart 有真机采集的 (uid, nt, ntEnc, ntParEnc)→候选断言，数量精确匹配如 34675/35256），优于自合成样本——合成 parity 语义（密文域/明文域、位序、千位编码）极易踩错，官方样本一次通过。验证脚本 `ffi_check4.dart`。
+  - C `static_encrypted_nested`（lfsr_recovery32）单条输入候选约 3.5 万（KEY_SPACE_SIZE=1<<18），上卡验证必须分块（当前 500/块）防蓝牙包过大。
+  - 后门卡双路径设计：后门 key（A396EFA4E24F 等 3 个）普通认证命中 → 作为已知密钥走常规 nested/hardnested（精准）；认证未命中（真后门卡）→ 后门采集 + C static_encrypted_nested 恢复 + 批量验证兜底。CU 的 0x64 后门认证采集命令 nfctool 固件无对应，weak 后门卡依赖认证试探路径。
+  - 后门采集 nt 仅含高 16 位，明文 NT = reconstructFullNt = (nt16<<16) | prngSuccessor(nt16,16)；parity 千位编码（CU parityToInt）：bit3→千位，C 端 bin_to_uint8_arr 按十进制逐位拆回，bit3↔最高字节。
+  - CU StaticEncryptedKeysFilterAsync.filterKeys（gen3NonceTag/cI 种子交叉）仅对静态加密卡有效（同 seed），weak/hard 卡跳过该过滤直接批量验证；nfctool 3gen 路径已覆盖静态卡，backdoor 兜底路径不做交叉。
