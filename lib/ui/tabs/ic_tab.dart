@@ -1268,8 +1268,10 @@ class _IcTabState extends State<IcTab> {
         }
       }
       await _appendKeysToDefaultFile(gainedKeys);
-      // 破解结束（成功/停止/失败）回填密钥后，自动保存该 UID 的密钥文件
-      if (crackUidHex.isNotEmpty) {
+      // 仅当本次真正获得密钥时才保存该 UID 的密钥文件：
+      // 失败时编辑框已被 _loadKeys 合并成全库密钥，此时保存会让
+      // KeyFor_<UID>.txt 混入大量无关密钥（下次读卡导入拖慢验证）
+      if (gainedKeys.isNotEmpty && crackUidHex.isNotEmpty) {
         await _autoSaveKeyFileForUid(crackUidHex);
       }
     }
