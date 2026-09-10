@@ -1519,6 +1519,11 @@ class _IcTabState extends State<IcTab> {
       }
       final uid1 = tag1.uid;
       final uid1Int = _bytesInt(uid1.sublist(0, 4));
+      // 对齐小程序 Crack() 分流：STATIC 卡走 1 代分支，其余走后门通用分支
+      final prngType = await _dev.cmdMf1TestPrngType();
+      if (prngType == 0) {
+        return _crackWith2Cards1Gen();
+      }
 
       if (!mounted) return;
       showDialog(
@@ -1666,6 +1671,207 @@ class _IcTabState extends State<IcTab> {
         if (!sectorKeys[s].hasKeyB) {
           await crackSlot(
               s, KeyType.keyB, enc1.atks[s * 2 + 1], enc2.atks[s * 2 + 1]);
+        }
+      }
+
+      // 检查是否全部找到
+      var allFound = true;
+      for (var s = 0; s < 16; s++) {
+        if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
+          allFound = false;
+          break;
+        }
+      }
+
+      _appendKeysFromSectors(sectorKeys);
+      if (allFound) {
+        progress.value = '双卡破解：破解成功，已重新标记密钥信息.';
+        if (mounted) Navigator.of(context).pop();
+        _toast('双卡破解成功');
+      } else {
+        progress.value = '双卡破解：破解失败，这两张卡分别拥有不同密钥！';
+        if (mounted) Navigator.of(context).pop();
+        _toast('双卡破解失败，请确认两张卡属于同一系统');
+      }
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      _toast('双卡破解失败: $e');
+    }
+  }
+
+  /// 双卡破解 1 代静态卡分支（对齐小程序 Crack_with2cards_1gen）
+  /// 以已知密钥扇区为采集源（ss.e_sector），staticnested 采集 nt1/nt2 +
+  /// hardnested 采集 par，双卡候选求交集后验证
+  Future<void> _crackWith2Cards1Gen() async {
+    // 已知密钥扇区（对齐 ss.e_sector）：从当前卡片数据中找第一个有效密钥
+    int eSector = -1;
+    KeyType eKeyType = KeyType.keyA;
+    String eKeyHex = '';
+    for (var s = 0; s < 16; s++) {
+      final b3 = _app.card.sectors[s].blocks[3].data;
+      if (b3.length >= 32) {
+        final keyA = b3.substring(0, 12);
+        final keyB = b3.substring(20, 32);
+        if (keyA != '000000000000' && keyA != 'ffffffffffff') {
+          eSector = s;
+          eKeyType = KeyType.keyA;
+          eKeyHex = keyA;
+          break;
+        }
+        if (keyB != '000000000000' && keyB != 'ffffffffffff') {
+          eSector = s;
+          eKeyType = KeyType.keyB;
+          eKeyHex = keyB;
+          break;
+        }
+      }
+    }
+    if (eSector == -1) {
+      _toast('破解失败，发现全加密无漏洞卡，并且该卡无法使用"双卡破解"功能');
+      return;
+    }
+
+    final progress = ValueNotifier<String>('双卡破解：正在读取第一张卡...');
+    final step = ValueNotifier<int>(0);
+    try {
+      await _dev.assureDeviceMode(DeviceMode.reader);
+      final tags1 = await _dev.cmdHf14aScan();
+      if (tags1.isEmpty) throw DeviceException(1, '未发现卡片');
+      final tag1 = tags1.first;
+      if (tag1.sakHex != '08') {
+        _toast('发现非标准M1卡，该卡无法破解');
+        return;
+      }
+      final uid1 = tag1.uid;
+      final uid1Int = _bytesInt(uid1.sublist(0, 4));
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => CrackProgressDialog(
+          title: '双卡破解...',
+          steps: const ['读取卡1', '读取卡2', '生成密钥'],
+          step: step,
+          progress: progress,
+          onCancel: null,
+        ),
+      );
+
+      // 采集单槽位：staticnested 出 nt1/nt2 + hardnested 出 par
+      Future<(int, int, int)> acquireSlot(int sector, KeyType kt) async {
+        final sn = await _dev.cmdMf1AcquireStaticNested(
+            block: eSector * 4,
+            keyType: eKeyType,
+            key: _hex(eKeyHex),
+            targetBlock: sector * 4,
+            targetKeyType: kt);
+        final hard = await _dev.cmdMf1AcquireHardNested(
+            block: eSector * 4,
+            keyType: eKeyType,
+            key: _hex(eKeyHex),
+            targetBlock: sector * 4,
+            targetKeyType: kt);
+        return (
+          _bytesInt(sn.atks[0].$1),
+          _bytesInt(sn.atks[0].$2),
+          hard.isEmpty ? 0 : hard.first.par
+        );
+      }
+
+      // 预检：1 代卡加密 nonce 固定（两次采集 nt2 一致，对齐小程序）
+      final check = await _dev.cmdMf1AcquireStaticNested(
+          block: eSector * 4,
+          keyType: eKeyType,
+          key: _hex(eKeyHex),
+          targetBlock: 0,
+          targetKeyType: KeyType.keyA);
+      if (check.atks.length > 1 &&
+          _hexStr(check.atks[0].$2) != _hexStr(check.atks[1].$2)) {
+        throw DeviceException(1, '破解失败，请注意，只有第一、三代无漏洞卡支持双卡破解！');
+      }
+
+      // 卡1 逐扇区采集 keyA/keyB
+      step.value = 0;
+      final res1 = List.generate(16, (_) => <KeyType, (int, int, int)?>{});
+      for (var s = 0; s < 16; s++) {
+        for (final kt in [KeyType.keyA, KeyType.keyB]) {
+          progress.value = '双卡破解：正在读取卡1，扇区$s ${kt.label}...';
+          res1[s][kt] = await acquireSlot(s, kt);
+        }
+      }
+
+      // 等待用户换卡（对齐小程序：100秒超时）
+      progress.value = '双卡破解：请读取第二张卡...';
+      Uint8List? uid2;
+      for (var i = 0; i < 100; i++) {
+        progress.value = '双卡破解：请读取第二张卡，用时${i}s...';
+        try {
+          final tags2 = await _dev.cmdHf14aScan();
+          if (tags2.isNotEmpty) {
+            final tag2 = tags2.first;
+            if (_hexStr(tag2.uid) != _hexStr(uid1)) {
+              uid2 = tag2.uid;
+              break;
+            }
+          }
+        } catch (_) {}
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      if (uid2 == null) {
+        throw DeviceException(1, '超时，未检测到第二张卡');
+      }
+      final uid2Int = _bytesInt(uid2.sublist(0, 4));
+
+      // 卡2 逐扇区采集 + 双卡候选交集验证
+      step.value = 2;
+      final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
+      for (var s = 0; s < 16; s++) {
+        final b3 = _app.card.sectors[s].blocks[3].data;
+        if (b3.length >= 32) {
+          final keyA = b3.substring(0, 12);
+          final keyB = b3.substring(20, 32);
+          if (keyA != '000000000000') {
+            sectorKeys[s].hasKeyA = true;
+            sectorKeys[s].keyA = keyA;
+          }
+          if (keyB != '000000000000') {
+            sectorKeys[s].hasKeyB = true;
+            sectorKeys[s].keyB = keyB;
+          }
+        }
+      }
+
+      for (var s = 0; s < 16; s++) {
+        for (final kt in [KeyType.keyA, KeyType.keyB]) {
+          final has = kt == KeyType.keyA
+              ? sectorKeys[s].hasKeyA
+              : sectorKeys[s].hasKeyB;
+          if (has) continue;
+          final a1 = res1[s][kt];
+          if (a1 == null) continue;
+          progress.value = '双卡破解：正在读取卡2，扇区$s ${kt.label}...';
+          final a2 = await acquireSlot(s, kt);
+          final cands1 = _generateKeysFromHardNested(uid1Int, a1.$1, a1.$2, a1.$3);
+          final cands2 = _generateKeysFromHardNested(uid2Int, a2.$1, a2.$2, a2.$3);
+          final set2 = cands2.toSet();
+          final inter = cands1.where(set2.contains).toSet();
+          for (final k in inter) {
+            final keyHex = _int6Hex(k);
+            final valid = await _dev.cmdMf1CheckBlockKey(
+                block: s * 4, keyType: kt, key: _hex(keyHex));
+            if (valid) {
+              if (kt == KeyType.keyA) {
+                sectorKeys[s].hasKeyA = true;
+                sectorKeys[s].keyA = keyHex;
+              } else {
+                sectorKeys[s].hasKeyB = true;
+                sectorKeys[s].keyB = keyHex;
+              }
+              progress.value = '双卡破解：扇区$s ${kt.label}=$keyHex';
+              break;
+            }
+          }
         }
       }
 
