@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ class _IdTabState extends State<IdTab> {
   final _decCtrl = TextEditingController();
   final _hexCtrl = TextEditingController();
   final _keysCtrl = TextEditingController();
+  Timer? _keysSaveTimer;
 
   int _slotPage = 0;
 
@@ -45,6 +47,7 @@ class _IdTabState extends State<IdTab> {
 
   @override
   void dispose() {
+    _keysSaveTimer?.cancel();
     _decCtrl.dispose();
     _hexCtrl.dispose();
     _keysCtrl.dispose();
@@ -497,6 +500,11 @@ class _IdTabState extends State<IdTab> {
                             .toList();
                         _keysValid = lines.every(
                             (e) => RegExp(r'^[0-9a-f]{8}$').hasMatch(e.toLowerCase()));
+                        // 防抖自动保存（编辑密钥弹窗已移除，此处为唯一持久化入口）
+                        _keysSaveTimer?.cancel();
+                        _keysSaveTimer = Timer(
+                            const Duration(milliseconds: 500),
+                            () => _app.storage.saveIdCardKeys(_keysCtrl.text));
                       }),
                     ),
                   ),
