@@ -39,6 +39,7 @@ class BleService {
   final _rxController = StreamController<Uint8List>.broadcast();
   StreamSubscription<List<int>>? _notifySub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
+  bool _autoReconnect = false;
 
   /// 是否 ChameleonUltra（非 CU- 系列）
   bool get isChameleonUltra => !_isCu;
@@ -86,16 +87,73 @@ class BleService {
     if (isConnected) await disconnect();
     _device = device;
     status.value = BleStatus(BleState.connecting);
+    try {
+      await _establish();
+      _autoReconnect = true;
+    } catch (_) {
+      status.value = BleStatus(BleState.disconnected);
+      rethrow;
+    }
+  }
 
-    _connSub = device.connectionState.listen((s) {
+  /// 建立连接：连接重试 + 服务/特征发现重试（对齐小程序 adapter 层）
+  Future<void> _establish() async {
+    final device = _device!;
+
+    // 断连监听：订阅一次，断开时广播状态并自动重连（对齐小程序 need_reconnect）
+    _connSub ??= device.connectionState.listen((s) {
       if (s == BluetoothConnectionState.disconnected) {
         _rxController.add(Uint8List(0));
         status.value = BleStatus(BleState.disconnected);
+        if (_autoReconnect && _device != null) {
+          _reconnect();
+        }
       }
     });
 
-    await device.connect(license: License.nonprofit, timeout: const Duration(seconds: 15));
+    // 连接重试 5 次，每次 2s（对齐小程序 createBLEConnection 5×2000ms）
+    Object? lastErr;
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        await device.connect(
+            license: License.nonprofit, timeout: const Duration(seconds: 2));
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        try {
+          await device.disconnect();
+        } catch (_) {}
+      }
+    }
+    if (lastErr != null) {
+      throw Exception('连接失败（已重试 5 次）: $lastErr');
+    }
 
+    // 服务/特征发现重试 5 次，间隔 400ms（对齐小程序 getBLEDeviceServices/Characteristics）
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        await _discoverChars(device);
+        break;
+      } catch (e) {
+        if (attempt == 4) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    }
+
+    await _notifyChar!.setNotifyValue(true);
+    await _notifySub?.cancel();
+    _notifySub = _notifyChar!.lastValueStream.listen((value) {
+      if (value.isNotEmpty) {
+        _rxController.add(Uint8List.fromList(value));
+      }
+    });
+
+    status.value = BleStatus(BleState.connected);
+  }
+
+  /// 发现服务并按设备分型确定特征（ChameleonUltra: NUS / CU-: fe59）
+  Future<void> _discoverChars(BluetoothDevice device) async {
     final services = await device.discoverServices();
     final name = device.platformName;
 
@@ -146,15 +204,34 @@ class BleService {
       } catch (_) {}
       _dfuWriteChar = dfu;
     }
+  }
 
-    await _notifyChar!.setNotifyValue(true);
-    _notifySub = _notifyChar!.lastValueStream.listen((value) {
-      if (value.isNotEmpty) {
-        _rxController.add(Uint8List.fromList(value));
-      }
-    });
+  /// 断连自动重连（对齐小程序 need_reconnect/btnAdapterCon）：最多尝试 5 次
+  Future<void> _reconnect() async {
+    for (var attempt = 0; attempt < 5; attempt++) {
+      if (!_autoReconnect || _device == null) return;
+      try {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        if (!_autoReconnect) return;
+        status.value = BleStatus(BleState.connecting);
+        await _establish();
+        return;
+      } catch (_) {}
+    }
+    // 重连失败：停止自动重连，等待用户手动连接
+    _autoReconnect = false;
+    status.value = BleStatus(BleState.disconnected);
+  }
 
-    status.value = BleStatus(BleState.connected);
+  /// 单块写入，失败等 50ms 重试一次（对齐小程序 write fail 回调）
+  Future<void> _writeWithRetry(BluetoothCharacteristic char, List<int> chunk,
+      {required bool withoutResponse}) async {
+    try {
+      await char.write(chunk, withoutResponse: withoutResponse);
+    } catch (_) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await char.write(chunk, withoutResponse: withoutResponse);
+    }
   }
 
   /// 发送数据（自动按 20B 分块，块间小间隔避免缓冲区溢出）
@@ -165,11 +242,7 @@ class BleService {
     for (var i = 0; i < data.length; i += _chunk) {
       final end = (i + _chunk < data.length) ? i + _chunk : data.length;
       final chunk = data.sublist(i, end);
-      if (_isCu) {
-        await _writeChar!.write(chunk, withoutResponse: false);
-      } else {
-        await _writeChar!.write(chunk, withoutResponse: true);
-      }
+      await _writeWithRetry(_writeChar!, chunk, withoutResponse: !_isCu);
       if (end < data.length) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
@@ -184,11 +257,13 @@ class BleService {
     for (var i = 0; i < data.length; i += _chunk) {
       final end = (i + _chunk < data.length) ? i + _chunk : data.length;
       final chunk = data.sublist(i, end);
-      await _dfuWriteChar!.write(chunk, withoutResponse: true);
+      await _writeWithRetry(_dfuWriteChar!, chunk, withoutResponse: true);
     }
   }
 
   Future<void> disconnect() async {
+    // 主动断开：取消自动重连，避免断连事件触发 _reconnect
+    _autoReconnect = false;
     await _notifySub?.cancel();
     _notifySub = null;
     await _connSub?.cancel();
