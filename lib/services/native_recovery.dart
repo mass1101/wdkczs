@@ -41,6 +41,19 @@ final class _StaticNested extends Struct {
   external int nt1Enc;
 }
 
+final class _StaticEncryptedNested extends Struct {
+  @Uint32()
+  external int uid;
+  @Uint32()
+  external int nt;
+  @Uint32()
+  external int ntEnc;
+  @Uint32()
+  external int ntParEnc;
+}
+
+typedef _StaticEncryptedNestedFn = Pointer<Uint64> Function(Pointer<_StaticEncryptedNested>, Pointer<Uint32>);
+
 typedef _NestedFn = Pointer<Uint64> Function(Pointer<_Nested>, Pointer<Uint32>);
 typedef _StaticNestedFn = Pointer<Uint64> Function(Pointer<_StaticNested>, Pointer<Uint32>);
 typedef _HardnestedFn = Uint64 Function(Pointer<_HardNested>);
@@ -169,6 +182,37 @@ class NativeRecovery {
   /// C 计算（Isolate.run 无法取消，长时间计算会卡住停止响应）
   static HardNestedJob hardNestedStart(Uint8List buf) {
     return HardNestedJob.start(buf);
+  }
+
+  /// 后门卡静态加密嵌套恢复（lfsr_recovery32，毫秒级）
+  /// [ntParEnc] 为密文域 parity 的千位编码（parityToInt 语义，bit3=最高字节）
+  /// 返回候选 key 列表（uint64 低 48 位），上限 8192
+  static List<int> staticEncryptedNested({
+    required int uid,
+    required int nt,
+    required int ntEnc,
+    required int ntParEnc,
+  }) {
+    final lib = _lib;
+    if (lib == null) return const [];
+    final f = lib
+        .lookupFunction<_StaticEncryptedNestedFn, _StaticEncryptedNestedFn>(
+            'static_encrypted_nested');
+    final data = malloc<_StaticEncryptedNested>();
+    final countP = malloc<Uint32>();
+    data.ref.uid = uid & 0xFFFFFFFF;
+    data.ref.nt = nt & 0xFFFFFFFF;
+    data.ref.ntEnc = ntEnc & 0xFFFFFFFF;
+    data.ref.ntParEnc = ntParEnc & 0xFFFFFFFF;
+    countP.value = 0;
+    try {
+      final keys = f(data, countP);
+      if (keys == nullptr) return const [];
+      return _readKeys(keys, countP.value);
+    } finally {
+      malloc.free(data);
+      malloc.free(countP);
+    }
   }
 }
 
