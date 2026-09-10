@@ -647,7 +647,7 @@ class _IcTabState extends State<IcTab> {
             crackStopRequested = true;
             progress.value = '停止中，等待当前步骤完成...';
           },
-          cancelText: '关闭',
+          cancelText: '停止',
           hardnested: hardnestedNotifier,
         ),
       );
