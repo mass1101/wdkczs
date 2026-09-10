@@ -119,6 +119,16 @@ class _IcTabState extends State<IcTab> {
   List<String> get _keys =>
       _keyCtrl.text.split('\n').map((e) => e.trim()).where((e) => e.length == 12).toList();
 
+  /// 字典检查用密钥表：用户密钥 + 扩展字典（Chameleon Ultra 内置表，
+  /// 仅用于检查/验证，不显示在编辑区）
+  List<String> get _dictKeys {
+    final merged = _keys.toList();
+    for (final k in kExtendedKeys) {
+      if (!merged.contains(k)) merged.add(k);
+    }
+    return merged;
+  }
+
   // ========== 扇区密钥状态（对齐小程序 sectors_Key） ==========
   /// 批量检查密钥，对齐小程序 checkCrackedKey：用 mf1CheckKeysOfSectors 掩码批量检测
   /// 返回 true 表示仍有未找到的密钥
@@ -180,7 +190,7 @@ class _IcTabState extends State<IcTab> {
         names.add(sk.keyB);
       }
     }
-    for (final k in _keys) {
+    for (final k in _dictKeys) {
       if (!names.contains(k)) names.add(k);
     }
     if (names.isEmpty) return;
@@ -267,8 +277,8 @@ class _IcTabState extends State<IcTab> {
       progress.value = '验证密钥：验证中...';
       await _loadKeys();
 
-      // 批量检测扇区密钥（对齐小程序 checkCrackedKey）
-      final allKeys = _keys.map(_hex).toList();
+      // 批量检测扇区密钥（对齐小程序 checkCrackedKey，含扩展字典）
+      final allKeys = _dictKeys.map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
       if (anyMissing) {
         _appendKeysFromSectors(sectorKeys);
@@ -659,8 +669,8 @@ class _IcTabState extends State<IcTab> {
       progress.value = '验证密钥：验证中...';
       await _loadKeys();
 
-      // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey）
-      final allKeys = _keys.map(_hex).toList();
+      // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey，含扩展字典）
+      final allKeys = _dictKeys.map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
       crackTick.value++;
       progress.value = '验证密钥：已标记扇区密钥信息.';

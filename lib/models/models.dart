@@ -9,6 +9,55 @@ const List<String> kDefaultKeys = [
   '000000000000',
 ];
 
+/// 扩展字典（Chameleon Ultra 内置表，源自 Proxmark3，各品牌常见密钥）
+/// 仅用于扇区密钥检查/验证，不显示在密钥编辑区
+const List<String> kExtendedKeys = [
+  'd3f7d3f7d3f7', // NDEF PUBLIC KEY
+  '4b791bea7bcc', // MFC EV1 SIGNATURE 17 B
+  '5c8ff9990da2', // MFC EV1 SIGNATURE 16 A
+  'd01afeeb890a', // MFC EV1 SIGNATURE 16 B
+  '75ccb59c9bed', // MFC EV1 SIGNATURE 17 A
+  '6471a5ef2d1a', // SIMONSVOSS
+  '4e3552426b32', // ID06
+  'ef1232ab18a0', // SCHLAGE
+  'b7bf0c13066e', // GALLAGHER
+  '135b88a94b8b', // SAFLOK
+  '2a2c13cc242a', // DORMA KABA
+  '5a7a52d5e20d', // BOSCH
+  '314b49474956', // VIGIK1 A
+  '564c505f4d41', // VIGIK1 B
+  '021209197591', // BTCINO
+  '484558414354', // INTRATONE
+  'ec0a9b1a9e06', // VINGCARD
+  '66b31e64ca4b', // VINGCARD
+  'e00000000000', // ICOPY
+  '199404281970', // NSP A
+  '199404281998', // NSP B
+  '6a1987c40a21', // SALTO
+  '7f33625bc129', // SALTO
+  '484944204953', // HID
+  '204752454154', // HID
+  '3b7e4fd575ad', // HID
+  '11496f97752a', // HID
+  'b0b1b2b3b4b5',
+  'aabbccddeeff',
+  '1a2b3c4d5e6f',
+  '123456789abc',
+  '010203040506',
+  '123456abcdef',
+  'abcdef123456',
+  '4d3a99c351dd',
+  '1a982c7e459a',
+  '714c5c886e97',
+  '587ee5f9350f',
+  'a0478cc39091',
+  '533cb6c723f6',
+  '8fd0a4f256e9',
+  '0000014b5c31',
+  'b578f38a5c61',
+  '96a301bce267',
+];
+
 /// 破解专用密钥表
 const List<String> kCrackKeys = [
   'a396efa4e24f',
