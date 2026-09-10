@@ -2666,6 +2666,18 @@ class _IcTabState extends State<IcTab> {
 
   // ========== 格式化 ==========
   Future<void> _formatCard() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('格式化卡片', style: TextStyle(fontSize: 16)),
+        content: const Text('将擦除全部扇区数据（保留 UID），操作不可恢复。确认执行？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+        ],
+      ),
+    );
+    if (ok != true) return;
     await _dev.assureDeviceMode(DeviceMode.reader);
     await _dev.formatCard();
   }
