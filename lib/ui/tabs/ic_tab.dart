@@ -615,7 +615,7 @@ class _IcTabState extends State<IcTab> {
   }
 
   // ========== 解卡（对齐小程序 btnCrack + Crack() 完整流程） ==========
-  Future<void> _crackCard() async {
+  Future<List<SectorKeyState>> _crackCard() async {
     final progress = ValueNotifier<String>('验证密钥：寻卡中...');
     final step = ValueNotifier<int>(0);
     final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
@@ -630,7 +630,7 @@ class _IcTabState extends State<IcTab> {
       final tag = tags.first;
       if (tag.sakHex != '08') {
         _toast('发现非标准M1卡，该卡无法破解');
-        return;
+        return sectorKeys;
       }
       final uid = tag.uid;
       final uidInt = _bytesInt(uid.sublist(0, 4));
@@ -646,10 +646,10 @@ class _IcTabState extends State<IcTab> {
 
       if (_dictKeys.isEmpty) {
         _toast('请先填写密钥');
-        return;
+        return sectorKeys;
       }
 
-      if (!mounted) return;
+      if (!mounted) return sectorKeys;
       // 对齐小程序 stop_flag + checkstop：关闭按钮请求停止，检查点终止流程
       var crackStopRequested = false;
       void checkStop() {
@@ -705,7 +705,7 @@ class _IcTabState extends State<IcTab> {
           progress.value = '破解密钥：破解成功';
           if (mounted) Navigator.of(context).pop();
           _toast(found.isEmpty ? '未发现可破解密钥' : '破解成功');
-          return;
+          return sectorKeys;
         }
       } catch (_) {}
 
@@ -905,7 +905,7 @@ class _IcTabState extends State<IcTab> {
             : '解卡片：第三代无漏洞卡破解完成，部分扇区密钥未恢复';
         if (mounted) Navigator.of(context).pop();
         _toast(allDone ? '第三代无漏洞卡破解成功' : '部分扇区密钥未恢复');
-        return;
+        return sectorKeys;
       }
 
       // 后门卡前置路由（对齐 CU recoverKeys 开头 mfClassicHasBackdoor）：
@@ -967,7 +967,7 @@ class _IcTabState extends State<IcTab> {
                   crackTick: crackTick,
                   checkStop: checkStop);
               if (mounted) Navigator.of(context).pop();
-              return;
+              return sectorKeys;
             }
           } else {
             LogService.instance.log(
@@ -979,7 +979,7 @@ class _IcTabState extends State<IcTab> {
                 crackTick: crackTick,
                 checkStop: checkStop);
             if (mounted) Navigator.of(context).pop();
-            return;
+            return sectorKeys;
           }
         }
       }
@@ -1048,7 +1048,7 @@ class _IcTabState extends State<IcTab> {
         progress.value = '解卡片：破解成功，已重新标记密钥信息.';
         if (mounted) Navigator.of(context).pop();
         _toast('破解成功！');
-        return;
+        return sectorKeys;
       }
 
       // 找到第一个已知密钥扇区作为 e_sector（对齐小程序 ss.e_sector）
@@ -1115,7 +1115,7 @@ class _IcTabState extends State<IcTab> {
           LogService.instance.log(
               '[解卡] 全加密卡解不开: Darkside攻击失败(卡片防Darkside), 全卡无已知密钥, 也无后门');
           _toast('全加密卡，Darkside攻击失败，请先通过其他方式获取至少一个密钥');
-          return;
+          return sectorKeys;
         }
       }
 
@@ -1138,7 +1138,7 @@ class _IcTabState extends State<IcTab> {
             crackTick: crackTick,
             checkStop: checkStop);
         if (mounted) Navigator.of(context).pop();
-        return;
+        return sectorKeys;
       }
 
       // WEAK 卡手动勾选 Hardnested 本地破解（对齐小程序 c_modal.Crack_hardnested）
@@ -1155,7 +1155,7 @@ class _IcTabState extends State<IcTab> {
             crackTick: crackTick,
             checkStop: checkStop);
         if (mounted) Navigator.of(context).pop();
-        return;
+        return sectorKeys;
       }
 
       // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
@@ -1270,6 +1270,7 @@ class _IcTabState extends State<IcTab> {
         await _autoSaveKeyFileForUid(crackUidHex);
       }
     }
+    return sectorKeys;
   }
 
   /// 对单个扇区恢复密钥（支持 keyA/keyB，对齐小程序 Crack() 逐扇区破解）
@@ -2687,26 +2688,56 @@ class _IcTabState extends State<IcTab> {
     } on DeviceException {
       // 非 UID 卡后门失败 → 解卡后常规认证写擦除
     }
-    // 解卡（内部自带进度弹窗，密钥最终写入编辑框）
-    await _crackCard();
-    // 从编辑框密钥逐扇区实测认证（解卡密钥不回填卡片模型，须实测）
-    final lines = _keyCtrl.text
-        .split('\n')
-        .map((l) => l.trim().toLowerCase())
-        .where((l) => l.length == 12 && RegExp(r'^[0-9a-f]+$').hasMatch(l))
-        .toSet()
-        .toList();
-    if (lines.isEmpty) {
-      _toast('解卡未获得密钥，无法格式化加密卡');
-      return;
-    }
-    // 每扇区实测出 keyA/keyB（可能各有一把，写块时按 ACL 灵活选用）
+    // 解卡（内部自带进度弹窗，密钥最终写入编辑框），直接取破解结果
+    final cracked = await _crackCard();
     final keys = <int, (Uint8List?, Uint8List?)>{};
-    final keyBytes = lines.map(_hex).toList();
-    for (var s = 0; s < 16; s++) {
-      final hit = await _dev.mf1CheckSectorKeys(s, keyBytes);
-      final pair = (hit[KeyType.keyA.value], hit[KeyType.keyB.value]);
-      if (pair.$1 != null || pair.$2 != null) keys[s] = pair;
+    for (final sk in cracked) {
+      final a = (sk.hasKeyA &&
+              sk.keyA.length == 12 &&
+              sk.keyA != 'ffffffffffff' &&
+              sk.keyA != '000000000000')
+          ? _hex(sk.keyA)
+          : null;
+      final b = (sk.hasKeyB &&
+              sk.keyB.length == 12 &&
+              sk.keyB != 'ffffffffffff' &&
+              sk.keyB != '000000000000')
+          ? _hex(sk.keyB)
+          : null;
+      if (a != null || b != null) keys[sk.sector] = (a, b);
+    }
+    if (keys.isEmpty) {
+      // 兜底：从编辑框密钥逐扇区实测认证（Gen1a 免密读路径等未填扇区状态）
+      final lines = _keyCtrl.text
+          .split('\n')
+          .map((l) => l.trim().toLowerCase())
+          .where((l) => l.length == 12 && RegExp(r'^[0-9a-f]+$').hasMatch(l))
+          .toSet()
+          .toList();
+      if (lines.isEmpty) {
+        _toast('解卡未获得密钥，无法格式化加密卡');
+        return;
+      }
+      final progress = ValueNotifier<String>('验证密钥：验证中...');
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => CrackProgressDialog(
+            title: '验证密钥...',
+            progress: progress,
+            onCancel: null,
+          ),
+        );
+      }
+      final keyBytes = lines.map(_hex).toList();
+      for (var s = 0; s < 16; s++) {
+        progress.value = '验证密钥：扇区$s/16...';
+        final hit = await _dev.mf1CheckSectorKeys(s, keyBytes);
+        final pair = (hit[KeyType.keyA.value], hit[KeyType.keyB.value]);
+        if (pair.$1 != null || pair.$2 != null) keys[s] = pair;
+      }
+      if (mounted) Navigator.of(context).pop();
     }
     if (keys.isEmpty) {
       _toast('解卡未获得密钥，无法格式化加密卡');
