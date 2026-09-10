@@ -1276,6 +1276,8 @@ class _IcTabState extends State<IcTab> {
       }
       // 解卡得到的密钥写入密钥编辑框（幂等去重，兜底各分支的实时回填）
       if (gainedKeys.isNotEmpty) _appendKeysFromSectors(sectorKeys);
+      // 命中密钥同时累积进 default_keys.txt（跨卡累积库，不参与验证集合）
+      await _appendKeysToDefaultFile(gainedKeys);
       // 仅当本次真正获得密钥时才保存该 UID 的密钥文件，且只存命中的密钥
       if (gainedKeys.isNotEmpty && crackUidHex.isNotEmpty) {
         await _autoSaveKeyFileForUid(crackUidHex, gainedKeys);
@@ -1978,6 +1980,33 @@ class _IcTabState extends State<IcTab> {
       if (merged.isEmpty) return;
       await _app.storage.saveKey(name, merged.join('\n'));
       LogService.instance.log('[密钥文件] 已自动保存 $name（${merged.length} 个密钥）');
+    } catch (_) {}
+  }
+
+  /// 解卡得到的密钥累积保存进 default_keys.txt：
+  /// 文件不存在则新建，已存在则合并追加，去重后写入
+  /// （default_keys.txt 不参与按 UID 隔离的验证集合，仅作为跨卡累积库供手动导出/查阅）
+  Future<void> _appendKeysToDefaultFile(List<String> keys) async {
+    try {
+      if (keys.isEmpty) return;
+      const name = 'default_keys.txt';
+      final all = await _app.storage.getKeyNames();
+      final merged = <String>[
+        ...(all[name] ?? '')
+            .split('\n')
+            .map((e) => e.trim())
+            .where((k) => k.length == 12)
+      ];
+      var added = 0;
+      for (final k in keys) {
+        if (!merged.contains(k)) {
+          merged.add(k);
+          added++;
+        }
+      }
+      if (added == 0) return;
+      await _app.storage.saveKey(name, merged.join('\n'));
+      LogService.instance.log('[密钥文件] default_keys.txt 新增 $added 个密钥（共 ${merged.length}）');
     } catch (_) {}
   }
 
