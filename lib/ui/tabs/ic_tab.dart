@@ -298,8 +298,10 @@ class _IcTabState extends State<IcTab> {
       progress.value = '验证密钥：验证中...';
       await _loadKeys();
 
-      // 批量检测扇区密钥（对齐小程序 checkCrackedKey，含扩展字典）
-      final allKeys = _dictKeys.map(_hex).toList();
+      // 批量检测扇区密钥（对齐小程序 checkCrackedKey）
+      // 读卡仅用用户密钥：扩展字典 44 把全 miss 时会跑满 1500+ 次失败认证（30-60s），
+      // 且部分命中后 anyMissing 仍提示去解卡，收益极低；扩展字典留给解卡第一步
+      final allKeys = _keys.map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
       if (anyMissing) {
         _appendKeysFromSectors(sectorKeys);
