@@ -1064,26 +1064,32 @@ class DeviceService {
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
-    int chunkSize = 20,
+    int chunkSize = 5,
   }) async {
     await assureDeviceMode(DeviceMode.reader);
     final foundAll = Uint8List(10);
     final sectorKeysAll = List<Uint8List?>.filled(80, null);
+    // 动态收缩的掩码副本：已命中槽位不再重复认证（字典/候选量大时单命令耗时可控）
+    final liveMask = Uint8List.fromList(mask);
     for (var off = 0; off < keys.length; off += chunkSize) {
       final end = (off + chunkSize > keys.length) ? keys.length : off + chunkSize;
       final chunk = keys.sublist(off, end);
       final n = Uint8List(10 + chunk.length * 6);
-      n.setRange(0, 10, mask);
+      n.setRange(0, 10, liveMask);
       for (var i = 0; i < chunk.length; i++) {
         n.setRange(10 + i * 6, 10 + i * 6 + 6, chunk[i]);
       }
       final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n,
-          timeout: 30000);
+          timeout: 60000);
       final found = Uint8List(10);
       found.setRange(0, 10, r.sublist(0, 10));
+      var allDone = true;
       for (var i = 0; i < 10; i++) {
         foundAll[i] |= found[i];
+        liveMask[i] &= ~found[i];
+        if (liveMask[i] != 0) allDone = false;
       }
+      if (allDone) break;
       for (var i = 0; i < 80; i++) {
         final bit = (found[i >> 3] >> (7 - (i & 7))) & 1;
         if (bit == 1 && sectorKeysAll[i] == null) {
