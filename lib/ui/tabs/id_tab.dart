@@ -390,43 +390,22 @@ class _IdTabState extends State<IdTab> {
       _toast('请输入有效的 10 位十六进制卡号');
       return;
     }
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => TextInputDialog(
+          title: '卡片名称',
+          hint: '请输入卡片名称',
+          initial: '卡${_cards.length + 1}'),
+    );
+    if (name == null) return;
     setState(() {
       _cards = [
         ..._cards,
-        IdCardItem(id: hex, name: '卡${_cards.length + 1}'),
+        IdCardItem(id: hex, name: name.trim().isEmpty ? '卡${_cards.length}' : name.trim()),
       ];
     });
     await _app.storage.saveIdCards(_cards);
     _toast('已保存到列表');
-  }
-
-  // ========== 编辑密钥 ==========
-  Future<void> _editKeys() async {
-    await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('编辑密钥', style: TextStyle(fontSize: 16)),
-        content: TextField(
-          controller: _keysCtrl,
-          maxLines: 4,
-          style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
-          decoration: const InputDecoration(
-            hintText: '每行一个密钥，8 位十六进制',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(
-              onPressed: () async {
-                await _app.storage.saveIdCardKeys(_keysCtrl.text);
-                if (ctx.mounted) Navigator.pop(ctx);
-                _toast('已保存');
-              },
-              child: const Text('确定')),
-        ],
-      ),
-    );
   }
 
   // ========== UI ==========
@@ -594,12 +573,6 @@ class _IdTabState extends State<IdTab> {
                       icon: Icons.add,
                       color: primary,
                       onTap: _addCard),
-                  const SizedBox(height: 8),
-                  ActionButton(
-                      label: '编辑密钥',
-                      icon: Icons.edit,
-                      color: primary,
-                      onTap: _editKeys),
                   const SizedBox(height: 16),
                 ],
               ),
