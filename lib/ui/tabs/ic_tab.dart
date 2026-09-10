@@ -2591,7 +2591,7 @@ class _IcTabState extends State<IcTab> {
                 subtitle: const Text('擦除全部扇区（UID 卡免密写）'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _runChip(_formatCard);
+                  _formatCard();
                 }),
             ListTile(
                 leading: const Icon(Icons.edit),
@@ -2687,19 +2687,30 @@ class _IcTabState extends State<IcTab> {
     } on DeviceException {
       // 非 UID 卡后门失败 → 解卡后常规认证写擦除
     }
-    // 解卡（内部自带进度弹窗，成功后密钥回填编辑区）
+    // 解卡（内部自带进度弹窗，密钥最终写入编辑框）
     await _crackCard();
+    // 从编辑框密钥逐扇区实测认证（解卡密钥不回填卡片模型，须实测）
+    final lines = _keyCtrl.text
+        .split('\n')
+        .map((l) => l.trim().toLowerCase())
+        .where((l) => l.length == 12 && RegExp(r'^[0-9a-f]+$').hasMatch(l))
+        .toSet()
+        .toList();
+    if (lines.isEmpty) {
+      _toast('解卡未获得密钥，无法格式化加密卡');
+      return;
+    }
     final keys = <int, (KeyType, Uint8List)>{};
+    final keyBytes = lines.map(_hex).toList();
     for (var s = 0; s < 16; s++) {
-      final b3 = _app.card.sectors[s].blocks[3].data;
-      if (b3.length < 32) continue;
-      final keyA = b3.substring(0, 12);
-      final keyB = b3.substring(20, 32);
-      if (keyA != '000000000000' && keyA != 'ffffffffffff') {
-        keys[s] = (KeyType.keyA, _hex(keyA));
-      } else if (keyB != '000000000000' && keyB != 'ffffffffffff') {
-        keys[s] = (KeyType.keyB, _hex(keyB));
+      final hit = await _dev.mf1CheckSectorKeys(s, keyBytes);
+      final a = hit[KeyType.keyA.value];
+      if (a != null) {
+        keys[s] = (KeyType.keyA, a);
+        continue;
       }
+      final b = hit[KeyType.keyB.value];
+      if (b != null) keys[s] = (KeyType.keyB, b);
     }
     if (keys.isEmpty) {
       _toast('解卡未获得密钥，无法格式化加密卡');
