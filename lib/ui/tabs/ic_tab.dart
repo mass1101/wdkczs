@@ -132,10 +132,10 @@ class _IcTabState extends State<IcTab> {
   // ========== 扇区密钥状态（对齐小程序 sectors_Key） ==========
   /// 批量检查密钥，对齐小程序 checkCrackedKey：用 mf1CheckKeysOfSectors 掩码批量检测
   /// 返回 true 表示仍有未找到的密钥
-  /// onProgress：每块（5 把）结果解析并合并后触发，用于 UI 逐块点亮
+  /// onProgress：每块（32 把）结果解析并合并后触发，参数为已处理的 key 数量游标（断点续破）
   Future<bool> _checkCrackedKeys(
       List<Uint8List> keys, List<SectorKeyState> sectorKeys,
-      {void Function()? onProgress}) async {
+      {void Function(int processedKeys)? onProgress}) async {
     final mask = Uint8List(10);
     mask.fillRange(0, 10, 0xFF);
     for (var s = 0; s < 16; s++) {
@@ -148,9 +148,9 @@ class _IcTabState extends State<IcTab> {
       mask: mask,
       onChunk: onProgress == null
           ? null
-          : (partial) {
+          : (partial, processed) {
               _mergeSectorKeys(partial, sectorKeys);
-              onProgress();
+              onProgress(processed);
             },
     );
     LogService.instance.log('[_checkCrackedKeys] found=${_hexStr(res.found)}, sectorKeys=${res.sectorKeys.map((k) => k == null ? 'null' : _hexStr(k)).join(',')}');
@@ -967,13 +967,53 @@ class _IcTabState extends State<IcTab> {
       progress.value = '验证密钥：验证中...';
       await _loadKeys();
 
+      // 断点续破（对齐小程序破解任务）：同 UID 且字典一致时恢复上次进度
+      final dictKeysHex = _dictKeys;
+      var dictStart = 0;
+      final resume = await _app.storage.getCrackResume();
+      if (resume != null &&
+          resume['uidHex'] == tag.uidHex &&
+          (resume['dictKeys'] as List?)?.join(',') == dictKeysHex.join(',')) {
+        final idx = (resume['dictIndex'] as int?) ?? 0;
+        if (idx > 0 && idx <= dictKeysHex.length) {
+          dictStart = idx;
+          final skList = (resume['sectorKeys'] as List?) ?? [];
+          for (var s = 0; s < 16 && s < skList.length; s++) {
+            final a = (skList[s] as List)[0] as String?;
+            final b = (skList[s] as List)[1] as String?;
+            if (a != null && a.isNotEmpty) {
+              sectorKeys[s].hasKeyA = true;
+              sectorKeys[s].keyA = a;
+            }
+            if (b != null && b.isNotEmpty) {
+              sectorKeys[s].hasKeyB = true;
+              sectorKeys[s].keyB = b;
+            }
+          }
+          LogService.instance.log(
+              '[解卡] 发现相同破解任务, 已恢复进度: 字典$dictStart/${dictKeysHex.length}');
+          progress.value = '验证密钥：已恢复上次破解进度...';
+        }
+      }
+      // 恢复即删（对齐小程序 removeStorage），之后逐块写回
+      await _app.storage.clearCrackResume();
+
       // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey，含扩展字典）
-      // 逐块（5 把）点亮：每块命中即标记扇区状态并回填编辑区，刷新网格
-      final allKeys = _dictKeys.map(_hex).toList();
+      // 逐块（32 把）点亮：每块命中即标记扇区状态并回填编辑区，刷新网格并保存断点
+      final allKeys = dictKeysHex.sublist(dictStart).map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
-          onProgress: () {
+          onProgress: (processed) {
         _appendKeysFromSectors(sectorKeys);
         crackTick.value++;
+        _app.storage.saveCrackResume({
+          'uidHex': tag.uidHex,
+          'dictIndex': dictStart + processed,
+          'dictKeys': dictKeysHex,
+          'sectorKeys': [
+            for (final sk in sectorKeys)
+              [sk.hasKeyA ? sk.keyA : null, sk.hasKeyB ? sk.keyB : null]
+          ],
+        });
       });
       crackTick.value++;
       progress.value = '验证密钥：已标记扇区密钥信息.';
@@ -981,6 +1021,7 @@ class _IcTabState extends State<IcTab> {
       // 检查是否全部已破解
       if (!anyMissing) {
         _appendKeysFromSectors(sectorKeys);
+        await _app.storage.clearCrackResume();
         step.value = 1;
         progress.value = '解卡片：破解成功，已重新标记密钥信息.';
         if (mounted) Navigator.of(context).pop();

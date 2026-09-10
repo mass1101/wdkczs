@@ -17,6 +17,7 @@ class StorageService {
   static const _kDefaultCloudEndpoint =
       'https://fc-mp-25581e18-9b6b-41d7-a1c9-69bb4c0020f7.next.bspapp.com';
   static const _kCrackTasks = 'nfctool_crack_tasks';
+  static const _kCrackResume = 'nfctool_crack_resume';
 
   SharedPreferences? _prefs;
 
@@ -172,6 +173,29 @@ class StorageService {
   Future<void> saveCrackTasks(List<CrackTask> tasks) async {
     final p = await _p;
     await p.setString(_kCrackTasks, jsonEncode(tasks.map((t) => t.toJson()).toList()));
+  }
+
+  // ========== 解卡断点续破（对齐小程序破解任务：恢复即删，逐块写回） ==========
+
+  Future<Map<String, dynamic>?> getCrackResume() async {
+    final p = await _p;
+    final raw = p.getString(_kCrackResume);
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveCrackResume(Map<String, dynamic> data) async {
+    final p = await _p;
+    await p.setString(_kCrackResume, jsonEncode(data));
+  }
+
+  Future<void> clearCrackResume() async {
+    final p = await _p;
+    await p.remove(_kCrackResume);
   }
 
   /// 追加破解任务

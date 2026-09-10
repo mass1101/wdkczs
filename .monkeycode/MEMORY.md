@@ -83,6 +83,6 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - C 库真值验证优先用 CU 官方测试样本对拍（chameleonultra-app/test/recovery_test.dart 有真机采集的 (uid, nt, ntEnc, ntParEnc)→候选断言，数量精确匹配如 34675/35256），优于自合成样本——合成 parity 语义（密文域/明文域、位序、千位编码）极易踩错，官方样本一次通过。验证脚本 `ffi_check4.dart`。
   - C `static_encrypted_nested`（lfsr_recovery32）单条输入候选约 3.5 万（KEY_SPACE_SIZE=1<<18），上卡验证必须分块（当前 500/块）防蓝牙包过大。
-  - 后门卡双路径设计：后门 key（A396EFA4E24F 等 3 个）普通认证命中 → 作为已知密钥走常规 nested/hardnested（精准）；认证未命中（真后门卡）→ 后门采集 + C static_encrypted_nested 恢复 + 批量验证兜底。CU 的 0x64 后门认证采集命令 nfctool 固件无对应，weak 后门卡依赖认证试探路径。
+  - 后门卡多路径设计（9307b2a 起对齐 CU 0x64 能力，用户确认 nfctool 与 CU 固件相同）：后门 key（A396EFA4E24F 等 3 个）普通认证命中 → 作为已知密钥走常规 nested/hardnested（精准）；认证未命中 + WEAK → 0x64 后门认证采集嵌套走 nested（authKeyType=KeyType.backdoor 透传，对齐 CU recovery.dart:314）；仍未恢复 → 后门采集 + C static_encrypted_nested 恢复 + 批量验证兜底。0x64 探测 = cmdHf14aRaw 发 [0x64,0x00]+CRC 原始帧（对齐 mfClassicHasBackdoor），后门卡响应 4 字节，普通卡无响应，作前置快筛。
   - 后门采集 nt 仅含高 16 位，明文 NT = reconstructFullNt = (nt16<<16) | prngSuccessor(nt16,16)；parity 千位编码（CU parityToInt）：bit3→千位，C 端 bin_to_uint8_arr 按十进制逐位拆回，bit3↔最高字节。
   - CU StaticEncryptedKeysFilterAsync.filterKeys（gen3NonceTag/cI 种子交叉）仅对静态加密卡有效（同 seed），weak/hard 卡跳过该过滤直接批量验证；nfctool 3gen 路径已覆盖静态卡，backdoor 兜底路径不做交叉。

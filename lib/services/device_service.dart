@@ -1075,15 +1075,14 @@ class DeviceService {
       .toList();
 
   /// 检查多扇区密钥
-  /// onChunk：每块响应解析完成后回调，参数为累积结果（已命中的 found 位与 sectorKeys），
-  /// 用于 UI 逐块点亮，不影响最终返回值
+  /// onChunk：每块响应解析完成后回调，参数为累积结果（已命中的 found 位与 sectorKeys）
+  /// 与已处理的 key 数量游标（断点续破），不影响最终返回值
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
-    // 20 把/块（9198c91 同款）：20×32 槽位×~30ms ≈ 19s < 60s 超时，
-    // 往返次数是 5 把/块的 1/4（每次 BLE 往返 50-100ms）
-    int chunkSize = 20,
-    void Function(Mf1CheckKeysOfSectorsRes partial)? onChunk,
+    // 32 把/块（对齐 CU BLE）：32×32 槽位×~30ms ≈ 31s < 60s 超时
+    int chunkSize = 32,
+    void Function(Mf1CheckKeysOfSectorsRes partial, int processedKeys)? onChunk,
   }) async {
     await assureDeviceMode(DeviceMode.reader);
     final foundAll = Uint8List(10);
@@ -1115,8 +1114,10 @@ class DeviceService {
         }
       }
       if (onChunk != null) {
-        onChunk(Mf1CheckKeysOfSectorsRes(
-            found: Uint8List.fromList(foundAll), sectorKeys: sectorKeysAll));
+        onChunk(
+            Mf1CheckKeysOfSectorsRes(
+                found: Uint8List.fromList(foundAll), sectorKeys: sectorKeysAll),
+            off + chunk.length);
       }
       if (allDone) break;
     }
