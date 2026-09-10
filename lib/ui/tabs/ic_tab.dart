@@ -1723,8 +1723,7 @@ class _IcTabState extends State<IcTab> {
       return content
           .split('\n')
           .map((e) => e.trim())
-          .where((k) =>
-              k.length == 12 && k != 'ffffffffffff' && k != '000000000000')
+          .where((k) => k.length == 12)
           .toList();
     } catch (_) {
       return [];
@@ -1743,7 +1742,7 @@ class _IcTabState extends State<IcTab> {
       final lines = [savedContent, ...keys];
       for (final line in lines) {
         final k = line.trim();
-        if (k.length == 12 && k != 'ffffffffffff' && k != '000000000000' && !merged.contains(k)) {
+        if (k.length == 12 && !merged.contains(k)) {
           merged.add(k);
         }
       }
