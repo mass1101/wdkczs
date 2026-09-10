@@ -148,7 +148,9 @@ enum TagType {
 /// 密钥类型 A/B（对应逆向 Ob）
 enum KeyType {
   keyA(0x60, 'A'),
-  keyB(0x61, 'B');
+  keyB(0x61, 'B'),
+  // 后门认证指令（CUID 等魔改卡响应 0x64，对齐 CU 0x64 用法）
+  backdoor(0x64, 'D');
 
   const KeyType(this.value, this.label);
   final int value;

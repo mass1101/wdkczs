@@ -818,6 +818,20 @@ class DeviceService {
     return _request(Cmd.hf14aRaw.value, u, timeout: UltraFrame.defaultTimeoutMs + timeout);
   }
 
+  /// 后门卡探测（对齐 CU mfClassicHasBackdoor：0x64 后门认证原始帧，
+  /// 后门卡响应 4 字节 nonce，普通卡无响应）
+  Future<bool> mf1HasBackdoor() async {
+    await assureDeviceMode(DeviceMode.reader);
+    final r = await cmdHf14aRaw(
+        data: Uint8List.fromList([0x64, 0x00]),
+        activateRfField: true,
+        autoSelect: true,
+        appendCrc: true,
+        checkResponseCrc: false,
+        timeout: 300);
+    return r.length == 4;
+  }
+
   /// MIFARE Halt 指令（对应逆向 mf1Halt：`xw.pack("!H", 20480)`）
   Future<void> mf1Halt() async {
     await cmdHf14aRaw(

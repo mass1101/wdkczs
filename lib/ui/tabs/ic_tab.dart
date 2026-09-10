@@ -688,27 +688,31 @@ class _IcTabState extends State<IcTab> {
       } catch (_) {}
 
       // 加密嵌套检测：判断是否为第三代无漏洞卡（对齐小程序）
-      // 后门采集成功但非 3gen（ntEnc 动态）→ 后门卡，留作 backdoor 恢复路径
+      // 先 0x64 后门认证快速初筛（对齐 CU mfClassicHasBackdoor）：
+      // 普通卡无响应直接跳过采集，命中再做采集区分 3gen（ntEnc 静态）/后门卡（动态）
       progress.value = '破解密钥：检测第三代无漏洞卡...';
       Mf1AcquireStaticEncryptedNestedDecoder? encNested;
       Mf1AcquireStaticEncryptedNestedDecoder? backdoorAcq;
-      for (final sk in _backdoorKeys) {
-        try {
-          final n1 = await _dev.cmdMf1AcquireStaticEncryptedNested(
-              key: _hex(sk));
-          final n2 = await _dev.cmdMf1AcquireStaticEncryptedNested(
-              key: _hex(sk));
-          if (n1.atks.isNotEmpty && n2.atks.isNotEmpty) {
-            if (n1.atks.first.$4 == n2.atks.first.$4) {
-              encNested = n1;
-            } else {
-              backdoorAcq = n1;
-              LogService.instance.log(
-                  '[解卡] 后门卡检测: 采集成功但ntEnc动态($sk), 走backdoor恢复路径');
+      final hasBackdoor = await _dev.mf1HasBackdoor();
+      if (hasBackdoor) {
+        for (final sk in _backdoorKeys) {
+          try {
+            final n1 = await _dev.cmdMf1AcquireStaticEncryptedNested(
+                key: _hex(sk));
+            final n2 = await _dev.cmdMf1AcquireStaticEncryptedNested(
+                key: _hex(sk));
+            if (n1.atks.isNotEmpty && n2.atks.isNotEmpty) {
+              if (n1.atks.first.$4 == n2.atks.first.$4) {
+                encNested = n1;
+              } else {
+                backdoorAcq = n1;
+                LogService.instance.log(
+                    '[解卡] 后门卡检测: 采集成功但ntEnc动态($sk), 走backdoor恢复路径');
+              }
             }
-          }
-          break;
-        } catch (_) {}
+            break;
+          } catch (_) {}
+        }
       }
       if (encNested != null && encNested.atks.isNotEmpty) {
         // 第三代无漏洞卡破解（对齐小程序 Crack_3gen：候选集 + 两两配对交集 + 种子恢复）
@@ -906,16 +910,55 @@ class _IcTabState extends State<IcTab> {
           crackTick.value++;
           // 不 return，落到下方字典检查与 PRNG 分型常规流程
         } else {
-          LogService.instance.log(
-              '[解卡] 后门key认证未命中, 走backdoor静态加密恢复');
-          await _crackBackdoorNested(
-              acq: backdoorAcq,
-              sectorKeys: sectorKeys,
-              progress: progress,
-              crackTick: crackTick,
-              checkStop: checkStop);
-          if (mounted) Navigator.of(context).pop();
-          return;
+          // 真加密后门卡（后门 key 非真 key）：对齐 CU recovery.dart:314，
+          // WEAK 时用 0x64 后门认证采集嵌套走 nested，比静态加密恢复精准
+          final uidInt = _bytesInt(backdoorAcq.uid.sublist(0, 4));
+          final prng = await _dev.cmdMf1TestPrngType();
+          if (prng == 1) {
+            LogService.instance.log(
+                '[解卡] 后门key认证未命中, WEAK卡走0x64后门认证nested(对齐CU backdoor nested)');
+            progress.value = '破解密钥：后门卡弱随机嵌套攻击...';
+            String? rec;
+            try {
+              rec = await _crackSectorKey(
+                  uidInt, 0, KeyType.keyA, 1,
+                  0, KeyType.keyA, _backdoorKeys.first,
+                  progress: progress, checkStop: checkStop,
+                  authKeyType: KeyType.backdoor);
+            } catch (_) {}
+            if (rec != null) {
+              LogService.instance.log(
+                  '[解卡] 0x64后门nested恢复扇区0 keyA=$rec, 走常规流程');
+              sectorKeys[0].hasKeyA = true;
+              sectorKeys[0].keyA = rec;
+              _appendKeysFromSectors(sectorKeys);
+              await _propagateKeys(sectorKeys);
+              crackTick.value++;
+              // 不 return，落到下方字典检查与 PRNG 分型常规流程
+            } else {
+              LogService.instance.log(
+                  '[解卡] 0x64后门nested未恢复, 走backdoor静态加密恢复');
+              await _crackBackdoorNested(
+                  acq: backdoorAcq,
+                  sectorKeys: sectorKeys,
+                  progress: progress,
+                  crackTick: crackTick,
+                  checkStop: checkStop);
+              if (mounted) Navigator.of(context).pop();
+              return;
+            }
+          } else {
+            LogService.instance.log(
+                '[解卡] 后门key认证未命中, 走backdoor静态加密恢复');
+            await _crackBackdoorNested(
+                acq: backdoorAcq,
+                sectorKeys: sectorKeys,
+                progress: progress,
+                crackTick: crackTick,
+                checkStop: checkStop);
+            if (mounted) Navigator.of(context).pop();
+            return;
+          }
         }
       }
 
@@ -1155,9 +1198,13 @@ class _IcTabState extends State<IcTab> {
   Future<String?> _crackSectorKey(
       int uidInt, int sector, KeyType targetKeyType, int prng,
       int eSector, KeyType eKeyType, String eKeyHex,
-      {ValueNotifier<String>? progress, void Function()? checkStop}) async {
+      {ValueNotifier<String>? progress, void Function()? checkStop,
+      KeyType? authKeyType}) async {
     void stop() => checkStop?.call();
     final eKey = _hex(eKeyHex);
+    // WEAK 采集认证用的 keyType：后门卡传 0x64（对齐 CU backdoor nested），
+    // 常规卡与 eKeyType 一致
+    final acquireKeyType = authKeyType ?? eKeyType;
     final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
     final keyTypeStr = targetKeyType == KeyType.keyA ? 'keyA' : 'keyB';
     LogService.instance.log(
@@ -1230,14 +1277,14 @@ class _IcTabState extends State<IcTab> {
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry START');
         try {
           final distRes = await _dev.cmdMf1TestNtDistance(
-              block: eSector * 4, keyType: eKeyType, key: eKey);
+              block: eSector * 4, keyType: acquireKeyType, key: eKey);
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry distRes.uid=${distRes.uid.length} dist=${distRes.dist.length}');
           final dist = _bytesInt(distRes.dist.sublist(0, 4));
           final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dist=$dist nestedUid=$nestedUid');
           final nested = await _dev.cmdMf1AcquireNested(
               block: eSector * 4,
-              keyType: eKeyType,
+              keyType: acquireKeyType,
               key: eKey,
               targetBlock: sector * 4,
               targetKeyType: targetKeyType);
