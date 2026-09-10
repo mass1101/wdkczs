@@ -1268,11 +1268,9 @@ class _IcTabState extends State<IcTab> {
         }
       }
       await _appendKeysToDefaultFile(gainedKeys);
-      // 仅当本次真正获得密钥时才保存该 UID 的密钥文件：
-      // 失败时编辑框已被 _loadKeys 合并成全库密钥，此时保存会让
-      // KeyFor_<UID>.txt 混入大量无关密钥（下次读卡导入拖慢验证）
+      // 仅当本次真正获得密钥时才保存该 UID 的密钥文件，且只存命中的密钥
       if (gainedKeys.isNotEmpty && crackUidHex.isNotEmpty) {
-        await _autoSaveKeyFileForUid(crackUidHex);
+        await _autoSaveKeyFileForUid(crackUidHex, gainedKeys);
       }
     }
     return sectorKeys;
@@ -1952,15 +1950,18 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 破解/读卡回填后自动保存该 UID 的密钥文件（合并去重，静默失败）
-  Future<void> _autoSaveKeyFileForUid(String uidHex) async {
+  /// 自动保存该 UID 的密钥文件：仅合并 [keys]（本次命中的密钥）与文件原有内容。
+  /// 编辑框在解卡过程中已被 _loadKeys 扩成全库密钥，直接取编辑框会把
+  /// 与本卡无关的密钥混入文件（下次读卡导入拖慢验证），故须显式传参
+  Future<void> _autoSaveKeyFileForUid(String uidHex, List<String> keys) async {
     try {
-      final keys = _keys.where((k) => k.length == 12).toList();
-      if (keys.isEmpty || !mounted) return;
+      final list = keys.where((k) => k.length == 12).toList();
+      if (list.isEmpty || !mounted) return;
       final name = 'KeyFor_${uidHex.substring(0, 8).toUpperCase()}.txt';
       final all = await _app.storage.getKeyNames();
       final savedContent = all[name] ?? '';
       final merged = <String>[];
-      final lines = [savedContent, ...keys];
+      final lines = [savedContent, ...list];
       for (final line in lines) {
         final k = line.trim();
         if (k.length == 12 && !merged.contains(k)) {
