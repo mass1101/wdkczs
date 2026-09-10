@@ -7,6 +7,7 @@ import '../../models/enums.dart';
 import '../../models/models.dart';
 import '../../services/device_service.dart';
 import '../../state/app_controller.dart';
+import '../dialogs/text_input_dialog.dart';
 import '../widgets/common.dart';
 
 /// ID 卡 Tab：4 密钥 / Hex+Dec 显示 / 卡列表 / 读卡与写卡槽
@@ -304,44 +305,80 @@ class _IdTabState extends State<IdTab> {
   // ========== 卡列表 ==========
   Future<void> _showCardList() async {
     if (!mounted) return;
-    showModalBottomSheet(
+    // sheet 是独立路由，外层 setState 不会重建其内容，须用 StatefulBuilder
+    await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-                title: Text('已保存 ID 卡', style: TextStyle(fontWeight: FontWeight.w600))),
-            Expanded(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _cards.length,
-                itemBuilder: (_, i) {
-                  final c = _cards[i];
-                  return ListTile(
-                    title: Text(c.id),
-                    subtitle: Text(c.name),
-                    onTap: () {
-                      setState(() {
-                        _hexCtrl.text = c.id;
-                        _syncDec(c.id);
-                        _app.idCard.setCard(c.id);
-                      });
-                      Navigator.pop(ctx);
-                    },
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Colors.grey),
-                      onPressed: () async {
-                        setState(() => _cards.removeAt(i));
-                        await _app.storage.saveIdCards(_cards);
-                      },
-                    ),
-                  );
-                },
+        child: StatefulBuilder(
+          builder: (ctx, setSheet) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                  title: Text('已保存 ID 卡',
+                      style: TextStyle(fontWeight: FontWeight.w600))),
+              Expanded(
+                child: _cards.isEmpty
+                    ? const ListTile(
+                        title: Text('暂无保存的卡片',
+                            style: TextStyle(color: Colors.grey)))
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _cards.length,
+                        itemBuilder: (_, i) {
+                          final c = _cards[i];
+                          return ListTile(
+                            title: Text(c.id),
+                            subtitle: Text(c.name),
+                            onTap: () {
+                              setState(() {
+                                _hexCtrl.text = c.id;
+                                _syncDec(c.id);
+                                _app.idCard.setCard(c.id);
+                              });
+                              Navigator.pop(ctx);
+                            },
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined,
+                                      color: Colors.grey),
+                                  tooltip: '重命名',
+                                  onPressed: () async {
+                                    final name = await showDialog<String>(
+                                      context: context,
+                                      builder: (dctx) => TextInputDialog(
+                                          title: '重命名',
+                                          hint: '卡片名称',
+                                          initial: c.name),
+                                    );
+                                    if (name == null || name.trim().isEmpty) {
+                                      return;
+                                    }
+                                    setState(() => c.name = name.trim());
+                                    await _app.storage.saveIdCards(_cards);
+                                    if (ctx.mounted) setSheet(() {});
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: Colors.grey),
+                                  onPressed: () async {
+                                    setState(() => _cards.removeAt(i));
+                                    await _app.storage.saveIdCards(_cards);
+                                    setSheet(() {});
+                                    _toast('已删除 ${c.id}');
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
