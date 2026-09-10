@@ -430,46 +430,6 @@ class IdCardItem {
   factory IdCardItem.fromJson(Map<String, dynamic> j) =>
       IdCardItem(id: j['id'] ?? '', name: j['name'] ?? '未命名');
 }
-
-/// 云端破解任务（对应逆向云功能任务模型）
-class CrackTask {
-  String id;
-  String cardId; // UID
-  int sector;
-  KeyType keyType;
-  String key; // 破解结果（空=进行中，error=失败）
-  bool saved;
-
-  CrackTask({
-    required this.id,
-    required this.cardId,
-    required this.sector,
-    required this.keyType,
-    this.key = '',
-    this.saved = false,
-  });
-
-  String get name => '${cardId}_${sector}_${keyType.label}';
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'cardId': cardId,
-        'sector': sector,
-        'keyType': keyType.value == 0x60 ? 'A' : 'B',
-        'key': key,
-        'saved': saved,
-      };
-
-  factory CrackTask.fromJson(Map<String, dynamic> j) => CrackTask(
-        id: j['id'] ?? '',
-        cardId: j['cardId'] ?? '',
-        sector: j['sector'] ?? 0,
-        keyType: j['keyType'] == 'B' ? KeyType.keyB : KeyType.keyA,
-        key: j['key'] ?? '',
-        saved: j['saved'] ?? false,
-      );
-}
-
 /// 检测日志条目（Darkside 采集）
 class DetectLog {
   int uid; // 4 字节 uid 前 4

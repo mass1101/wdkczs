@@ -16,7 +16,6 @@ class StorageService {
   static const _kCloudEndpoint = 'nfctool_cloud_endpoint';
   static const _kDefaultCloudEndpoint =
       'https://fc-mp-25581e18-9b6b-41d7-a1c9-69bb4c0020f7.next.bspapp.com';
-  static const _kCrackTasks = 'nfctool_crack_tasks';
   static const _kCrackResume = 'nfctool_crack_resume';
 
   SharedPreferences? _prefs;
@@ -160,21 +159,6 @@ class StorageService {
     await p.setString(_kCloudEndpoint, endpoint);
   }
 
-  // ========== 云破解任务 ==========
-
-  Future<List<CrackTask>> getCrackTasks() async {
-    final p = await _p;
-    final raw = p.getString(_kCrackTasks);
-    if (raw == null) return [];
-    final list = jsonDecode(raw) as List;
-    return list.map((e) => CrackTask.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<void> saveCrackTasks(List<CrackTask> tasks) async {
-    final p = await _p;
-    await p.setString(_kCrackTasks, jsonEncode(tasks.map((t) => t.toJson()).toList()));
-  }
-
   // ========== 解卡断点续破（对齐小程序破解任务：恢复即删，逐块写回） ==========
 
   Future<Map<String, dynamic>?> getCrackResume() async {
@@ -196,30 +180,6 @@ class StorageService {
   Future<void> clearCrackResume() async {
     final p = await _p;
     await p.remove(_kCrackResume);
-  }
-
-  /// 追加破解任务
-  Future<void> addCrackTask(CrackTask task) async {
-    final tasks = await getCrackTasks();
-    tasks.add(task);
-    await saveCrackTasks(tasks);
-  }
-
-  Future<void> removeCrackTask(String id) async {
-    final tasks = await getCrackTasks();
-    tasks.removeWhere((t) => t.id == id);
-    await saveCrackTasks(tasks);
-  }
-
-  /// 更新任务密钥（破解完成）
-  Future<void> updateCrackTaskKey(String id, String key) async {
-    final tasks = await getCrackTasks();
-    for (final t in tasks) {
-      if (t.id == id) {
-        t.key = key;
-      }
-    }
-    await saveCrackTasks(tasks);
   }
 
   /// 解析 16 进制字符串为字节

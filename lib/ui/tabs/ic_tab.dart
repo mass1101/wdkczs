@@ -2259,14 +2259,6 @@ class _IcTabState extends State<IcTab> {
                   Navigator.pop(ctx);
                   _dualCrack();
                 }),
-            ListTile(
-                leading: const Icon(Icons.cloud_upload),
-                title: const Text('云端破解'),
-                subtitle: const Text('手动提交卡片数据到云端计算'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _cloudCrack();
-                }),
             const Divider(height: 1),
             ListTile(
                 leading: const Icon(Icons.analytics_outlined),
@@ -2275,22 +2267,6 @@ class _IcTabState extends State<IcTab> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _liftAnalyze();
-                }),
-            ListTile(
-                leading: const Icon(Icons.cloud_outlined),
-                title: const Text('云破解任务'),
-                subtitle: const Text('查看云端破解进度并导入密钥'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _cloudJobs();
-                }),
-            ListTile(
-                leading: const Icon(Icons.share),
-                title: const Text('在线分享'),
-                subtitle: const Text('生成 Dump 分享链接'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _shareCard();
                 }),
             const SizedBox(height: 8),
           ],
@@ -2449,84 +2425,6 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 云端破解（国产兼容卡 hardnested） ==========
-  Future<void> _cloudCrack() async {
-    if (_keys.isEmpty) {
-      _toast('请先填写密钥');
-      return;
-    }
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('云端破解', style: TextStyle(fontSize: 16)),
-        content: const Text('绝大部分普通卡使用解卡片功能可以秒解，极少部分识别为普通卡却无法破解的卡才需要云端破解，确定要继续吗？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await _dev.assureDeviceMode(DeviceMode.reader);
-      final key = _hex(_keys.first);
-      final tags = await _dev.cmdHf14aScan();
-      if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
-      final uidHex = tags.first.uidHex.substring(0, 8);
-
-      // 扇区 0 采集 256 个有效 hardnested 数据
-      final userId = '01';
-      final nonceBuf = StringBuffer();
-      final seen = <int>{};
-      var collected = 0;
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => CrackProgressDialog(
-          title: '云端破解中：采集 256/0 数据...',
-          onCancel: () {},
-        ),
-      );
-      try {
-        while (collected < 256) {
-          final data = await _dev.cmdMf1AcquireHardNested(
-              block: 0,
-              keyType: KeyType.keyA,
-              key: key,
-              targetBlock: 0,
-              targetKeyType: KeyType.keyA);
-          for (final d in data) {
-            final nt = _bytesInt(d.nt);
-            if (seen.add(nt)) {
-              nonceBuf.write('$nt|${d.par >> 4}\n');
-              collected++;
-            }
-            final ntEnc = _bytesInt(d.ntEnc);
-            if (seen.add(ntEnc)) {
-              nonceBuf.write('$ntEnc|${d.par & 15}\n');
-              collected++;
-            }
-            if (collected >= 256) break;
-          }
-        }
-      } finally {
-        if (mounted) Navigator.of(context).pop();
-      }
-      await _app.cloud.addJob(
-          userId: userId,
-          openid: uidHex,
-          cardId: uidHex,
-          sector: 0,
-          keyType: KeyType.keyA,
-          nonceData: nonceBuf.toString());
-      _toast('已提交云端破解任务，可在 云破解任务 中查看进度');
-    } catch (e) {
-      _toast('云端破解失败: $e');
-    }
-  }
-
   // ========== 电梯卡分析 ==========
   Future<void> _liftAnalyze() async {
     if (!mounted) return;
@@ -2555,136 +2453,6 @@ class _IcTabState extends State<IcTab> {
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _toast('分析失败: $e');
-    }
-  }
-
-  // ========== 云破解任务 ==========
-  Future<void> _cloudJobs() async {
-    final userId = '01';
-    try {
-      final jobs = await _app.cloud.queryJobs(userId);
-      if (!mounted) return;
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: Colors.white,
-        isScrollControlled: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('云破解任务',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-              ),
-              const Divider(height: 1),
-              if (jobs.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('暂无云端破解任务'),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: jobs.length,
-                    itemBuilder: (_, i) {
-                      final job = jobs[i];
-                      final statusText = job.key.isEmpty
-                          ? '拼命计算中...'
-                          : job.key == 'error'
-                              ? '计算出错，请重试破解'
-                              : '计算完成，密钥已下载';
-                      return ListTile(
-                        leading: Icon(
-                          job.key.isEmpty
-                              ? Icons.play_circle_fill
-                              : job.key == 'error'
-                                  ? Icons.cancel
-                                  : Icons.check_circle,
-                          color: job.key.isEmpty
-                              ? Colors.orange
-                              : job.key == 'error'
-                                  ? Colors.red
-                                  : Colors.green,
-                        ),
-                        title: Text(
-                            '${job.cardId}_${job.sector}_${job.keyType.label}'),
-                        subtitle: Text(statusText),
-                        trailing: job.key.isNotEmpty && job.key != 'error'
-                            ? IconButton(
-                                icon: const Icon(Icons.download, size: 18),
-                                onPressed: () async {
-                                  await _saveKeyFromCloud(job.key, job.cardId);
-                                },
-                              )
-                            : IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 18),
-                                onPressed: () async {
-                                  await _app.cloud.deleteJob(job.id);
-                                  if (ctx.mounted) Navigator.pop(ctx);
-                                  _cloudJobs();
-                                },
-                              ),
-                      );
-                    },
-                  ),
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      );
-    } catch (e) {
-      _toast('查询任务失败: $e');
-    }
-  }
-
-  Future<void> _saveKeyFromCloud(String key, String cardId) async {
-    try {
-      final name = 'KeyFor_${cardId.toUpperCase()}.txt';
-      final all = await _app.storage.getKeyNames();
-      final existing = all[name] ?? '';
-      final lines = existing.trim().split('\n').where((e) => e.isNotEmpty).toList();
-      if (!lines.contains(key)) {
-        lines.add(key);
-      }
-      await _app.storage.saveKey(name, lines.join('\n'));
-      setState(() {
-        _keyCtrl.text = lines.join('\n');
-        _validateKeys(_keyCtrl.text);
-      });
-      _toast('密钥已导入：$name');
-    } catch (e) {
-      _toast('导入失败: $e');
-    }
-  }
-
-  // ========== 在线分享 ==========
-  Future<void> _shareCard() async {
-    try {
-      final dump = _app.card.toDumpText();
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const CrackProgressDialog(title: '生成分享链接中...', onCancel: null),
-      );
-      final link = await _app.cloud.saveSharedData(dump);
-      if (mounted) Navigator.of(context).pop();
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('分享链接', style: TextStyle(fontSize: 16)),
-          content: SelectableText(link, style: const TextStyle(fontSize: 13)),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (mounted) Navigator.of(context).pop();
-      _toast('分享失败: $e');
     }
   }
 
