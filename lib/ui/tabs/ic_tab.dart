@@ -2758,7 +2758,10 @@ class _IcTabState extends State<IcTab> {
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       await _dev.writeUid(
-          uid: uid.trim(), sak: _sakCtrl.text.trim(), atqa: _atqaCtrl.text.trim());
+          uid: uid.trim(),
+          sak: _sakCtrl.text.trim(),
+          atqa: _atqaCtrl.text.trim(),
+          keysText: _keyCtrl.text);
       _toast('卡号写入完成');
       // 刷新当前卡号
       await _readCard();

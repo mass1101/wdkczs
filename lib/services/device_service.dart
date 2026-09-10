@@ -986,6 +986,7 @@ class DeviceService {
     required String uid,
     required String sak,
     required String atqa,
+    String keysText = '',
   }) async {
     if (!RegExp(r'^([\dA-Fa-f]{8}\s*)+$').hasMatch(uid)) {
       throw DeviceException(96, '卡号有误，IC卡号应为8位16进制数');
@@ -1016,8 +1017,14 @@ class DeviceService {
         if (body.isEmpty || body[0] != 10) throw DeviceException(-1, 'Gen1a write failed 2');
       });
     } catch (e) {
-      // 普通卡：使用密钥写 block0
-      final keys = _keyList(_defaultKeysText.join('\n'));
+      // 普通卡：使用密钥写 block0（默认密钥 + 编辑框密钥，去重截 40 上限）
+      final seen = <String>{};
+      final merged = <String>[];
+      for (final k in [..._defaultKeysText, ...keysText.split('\n')]) {
+        final t = k.trim().toLowerCase();
+        if (t.length == 12 && seen.add(t)) merged.add(t);
+      }
+      final keys = merged.take(40).map(_hexToBytes).toList();
       final found = await mf1CheckSectorKeys(0, keys);
       if (found.isEmpty) {
         throw DeviceException(6, '卡片有加密，请先使用 解卡片 功能获取密钥！');
@@ -1073,13 +1080,6 @@ class DeviceService {
     '000000000000',
     'FFFFFFFFFFFF',
   ];
-
-  List<Uint8List> _keyList(String text) => text
-      .split('\n')
-      .map((e) => e.trim())
-      .where((e) => e.length == 12)
-      .map(_hexToBytes)
-      .toList();
 
   /// 检查多扇区密钥
   /// onChunk：每块响应解析完成后回调，参数为累积结果（已命中的 found 位与 sectorKeys）
