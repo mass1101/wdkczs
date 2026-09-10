@@ -85,22 +85,16 @@ class _IcTabState extends State<IcTab> {
     _atsCtrl.text = _app.card.ats;
   }
 
-  /// 收集验证密钥集合：编辑框现有 + 所有密钥文件(default_keys.txt/KeyFor_*.txt)
-  /// 去重返回，不改动编辑框内容（对齐小程序 autoloadKeys 加载进内存 ss.ic_keys，
-  /// 避免解卡后编辑框被全库密钥污染）
-  Future<List<String>> _collectVerifyKeys() async {
+  /// 收集验证密钥集合：编辑框现有 + 本卡密钥文件(KeyFor_UID.txt，[uidHex]非空时)
+  /// 密钥体系隔离：不读 default_keys.txt 与其他卡的密钥文件（对齐小程序
+  /// 按卡号文件隔离的语义，避免无关密钥拖慢验证），编辑框内容保持不动
+  Future<List<String>> _collectVerifyKeys({String? uidHex}) async {
     final merged = _keys.toList();
-    try {
-      final names = await _app.storage.getKeyNames();
-      for (final v in names.values) {
-        for (final line in v
-            .split('\n')
-            .map((e) => e.trim())
-            .where((e) => e.length == 12)) {
-          if (!merged.contains(line)) merged.add(line);
-        }
+    if (uidHex != null && uidHex.length >= 8) {
+      for (final k in await _loadKeyFileForUid(uidHex)) {
+        if (!merged.contains(k)) merged.add(k);
       }
-    } catch (_) {}
+    }
     return merged;
   }
 
@@ -325,7 +319,7 @@ class _IcTabState extends State<IcTab> {
       // 批量检测扇区密钥（对齐小程序 checkCrackedKey）
       // 读卡仅用用户密钥：扩展字典 44 把全 miss 时会跑满 1500+ 次失败认证（30-60s），
       // 且部分命中后 anyMissing 仍提示去解卡，收益极低；扩展字典留给解卡第一步
-      final allKeys = (await _collectVerifyKeys()).map(_hex).toList();
+      final allKeys = (await _collectVerifyKeys(uidHex: uid)).map(_hex).toList();
       final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
           onProgress: (processed) {
         progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
@@ -503,7 +497,7 @@ class _IcTabState extends State<IcTab> {
       // 验证密钥：验证中...
       step.value = 0;
       progress.value = '验证密钥：验证中...';
-      final writeKeys = await _collectVerifyKeys();
+      final writeKeys = await _collectVerifyKeys(uidHex: _app.card.uid);
 
       // 写卡片：逐扇区写入（对齐小程序 btnGen2Write）
       step.value = 1;
@@ -996,8 +990,9 @@ class _IcTabState extends State<IcTab> {
       progress.value = '验证密钥：验证中...';
 
       // 断点续破（对齐小程序破解任务）：同 UID 且字典一致时恢复上次进度
-      // 验证集合=编辑框+全库密钥文件+扩展字典（编辑框内容保持不变，不灌全库密钥）
-      final dictKeysHex = await _collectVerifyKeys();
+      // 验证集合=编辑框+本卡密钥文件+扩展字典（不使用 default_keys.txt
+      // 与其他卡密钥文件，密钥体系按 UID 隔离）
+      final dictKeysHex = await _collectVerifyKeys(uidHex: tag.uidHex);
       for (final k in kExtendedKeys) {
         if (!dictKeysHex.contains(k)) dictKeysHex.add(k);
       }
@@ -1269,7 +1264,7 @@ class _IcTabState extends State<IcTab> {
         await _dev.cmdChangeDeviceMode(DeviceMode.tag);
       } catch (_) {}
       _grabKeys();
-      // 本次解卡得到的密钥（扇区状态中已破解的 keyA/keyB）累积存入 default_keys.txt
+      // 本次解卡得到的密钥（扇区状态中已破解的 keyA/keyB）
       final gainedKeys = <String>[];
       for (final sk in sectorKeys) {
         if (sk.hasKeyA && sk.keyA.length == 12 && !gainedKeys.contains(sk.keyA)) {
@@ -1279,7 +1274,8 @@ class _IcTabState extends State<IcTab> {
           gainedKeys.add(sk.keyB);
         }
       }
-      await _appendKeysToDefaultFile(gainedKeys);
+      // 解卡得到的密钥写入密钥编辑框（幂等去重，兜底各分支的实时回填）
+      if (gainedKeys.isNotEmpty) _appendKeysFromSectors(sectorKeys);
       // 仅当本次真正获得密钥时才保存该 UID 的密钥文件，且只存命中的密钥
       if (gainedKeys.isNotEmpty && crackUidHex.isNotEmpty) {
         await _autoSaveKeyFileForUid(crackUidHex, gainedKeys);
@@ -1982,32 +1978,6 @@ class _IcTabState extends State<IcTab> {
       if (merged.isEmpty) return;
       await _app.storage.saveKey(name, merged.join('\n'));
       LogService.instance.log('[密钥文件] 已自动保存 $name（${merged.length} 个密钥）');
-    } catch (_) {}
-  }
-
-  /// 解卡得到的密钥累积保存进 default_keys.txt：
-  /// 文件不存在则新建，已存在则合并追加，去重后写入
-  Future<void> _appendKeysToDefaultFile(List<String> keys) async {
-    try {
-      if (keys.isEmpty) return;
-      const name = 'default_keys.txt';
-      final all = await _app.storage.getKeyNames();
-      final merged = <String>[
-        ...(all[name] ?? '')
-            .split('\n')
-            .map((e) => e.trim())
-            .where((k) => k.length == 12)
-      ];
-      var added = 0;
-      for (final k in keys) {
-        if (!merged.contains(k)) {
-          merged.add(k);
-          added++;
-        }
-      }
-      if (added == 0) return;
-      await _app.storage.saveKey(name, merged.join('\n'));
-      LogService.instance.log('[密钥文件] default_keys.txt 新增 $added 个密钥（共 ${merged.length}）');
     } catch (_) {}
   }
 
