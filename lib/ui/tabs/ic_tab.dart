@@ -190,7 +190,9 @@ class _IcTabState extends State<IcTab> {
         names.add(sk.keyB);
       }
     }
-    for (final k in _dictKeys) {
+    // 传播验证只用已知密钥（用户密钥 + 已破出密钥），
+    // 不掺扩展字典：本函数在解卡中高频调用，47 把字典会放大出数千次多余认证
+    for (final k in _keys) {
       if (!names.contains(k)) names.add(k);
     }
     if (names.isEmpty) return;
