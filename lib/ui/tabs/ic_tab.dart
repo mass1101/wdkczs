@@ -1492,31 +1492,18 @@ class _IcTabState extends State<IcTab> {
     return result;
   }
 
-  /// 从加密嵌套数据生成候选密钥（对齐小程序 generate_keys：lfsrRecovery64 + rollback）
-  int _generateKeyFromEncryptedNested(
-      Uint8List uid, int nt, int ntEnc, int par) {
-    final state = Crypto1.lfsrRecovery64(ntEnc, par >> 4);
-    final uidInt = _bytesInt(uid.sublist(0, 4));
-    state.lfsrRollbackWord(uidInt ^ nt, 0);
-    return state.getLfsr();
-  }
+  /// parity 千位编码（CU parityToInt 语义）：bit3=最高字节 → 千位，
+  /// C 端 bin_to_uint8_arr 按十进制逐位拆回
+  int _parityToInt(int raw) =>
+      ((raw >> 3) & 1) * 1000 +
+      ((raw >> 2) & 1) * 100 +
+      ((raw >> 1) & 1) * 10 +
+      (raw & 1);
 
-  /// 变换加密嵌套 atks（对齐小程序：nt 前推16步，par 与 ntEnc 高位异或）
-  List<(int, int, int, int)> _transformEncNestedAtks(
-      List<(int, KeyType, int, int, int)> atks) {
-    return atks.map((a) {
-      final nt = Crypto1.prngSuccessor(a.$3, 16);
-      final p = a.$5;
-      final n = a.$4;
-      final par = ((p >> 3 & 1) ^ (n >> 24 & 1)) << 3 |
-          ((p >> 2 & 1) ^ (n >> 16 & 1)) << 2 |
-          ((p >> 1 & 1) ^ (n >> 8 & 1)) << 1 |
-          ((p & 1) ^ (n & 1));
-      return (a.$1, nt, n, par);
-    }).toList();
-  }
 
   /// 双卡破解（对齐小程序 Crack_with2cards：两张同系统不同UID的卡）
+  /// 候选生成用 NativeRecovery.staticEncryptedNested（对齐后门恢复：
+  /// nt16 补全 + lfsr_recovery32 多候选），双卡候选求交集后逐个验证
   Future<void> _crackWith2Cards() async {
     final progress = ValueNotifier<String>('双卡破解：正在读取第一张卡...');
     final step = ValueNotifier<int>(0);
@@ -1531,6 +1518,7 @@ class _IcTabState extends State<IcTab> {
         return;
       }
       final uid1 = tag1.uid;
+      final uid1Int = _bytesInt(uid1.sublist(0, 4));
 
       if (!mounted) return;
       showDialog(
@@ -1545,7 +1533,7 @@ class _IcTabState extends State<IcTab> {
         ),
       );
 
-      // 第一张卡：加密嵌套采集
+      // 第一张卡：加密嵌套采集（后门 key，对齐小程序）
       Mf1AcquireStaticEncryptedNestedDecoder? enc1;
       final specialKeys = ['A396EFA4E24F', 'A31667A8CEC1', '518B3354E760'];
       for (final sk in specialKeys) {
@@ -1584,6 +1572,7 @@ class _IcTabState extends State<IcTab> {
       if (uid2 == null) {
         throw DeviceException(1, '超时，未检测到第二张卡');
       }
+      final uid2Int = _bytesInt(uid2.sublist(0, 4));
 
       // 第二张卡：加密嵌套采集
       progress.value = '双卡破解：正在读取第二张卡...';
@@ -1603,7 +1592,7 @@ class _IcTabState extends State<IcTab> {
             '破解失败，第二张卡不支持双卡破解！');
       }
 
-      // 变换 atks 并生成候选密钥
+      // 逐扇区：双卡候选密钥求交集后验证（对齐小程序 generate_keys + intersection）
       step.value = 2;
       final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
       // 从当前卡片状态初始化已有密钥
@@ -1623,51 +1612,60 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
-      final atks1 = _transformEncNestedAtks(enc1.atks);
-      final atks2 = _transformEncNestedAtks(enc2.atks);
+      Future<void> crackSlot(int sector, KeyType keyType,
+          (int, KeyType, int, int, int) atk1,
+          (int, KeyType, int, int, int) atk2) async {
+        // nt16 补全为完整 32 位明文 nt（对齐 _crackBackdoorNested/CU general.dart:89）
+        int fullNt(int nt16) =>
+            ((nt16 << 16) | Crypto1.prngSuccessor(nt16, 16)) & 0xFFFFFFFF;
+        final (_, _, nt16a, ntEncA, parA) = atk1;
+        final (_, _, nt16b, ntEncB, parB) = atk2;
+        final nt1 = fullNt(nt16a);
+        final nt2 = fullNt(nt16b);
+        final cands1 = NativeRecovery.staticEncryptedNested(
+            uid: uid1Int,
+            nt: nt1,
+            ntEnc: ntEncA,
+            ntParEnc: _parityToInt(parA));
+        final cands2 = NativeRecovery.staticEncryptedNested(
+            uid: uid2Int,
+            nt: nt2,
+            ntEnc: ntEncB,
+            ntParEnc: _parityToInt(parB));
+        if (cands1.isEmpty || cands2.isEmpty) return;
+        final set2 = cands2.toSet();
+        final inter = cands1.where(set2.contains).toSet();
+        if (inter.isEmpty) return;
+        final block = sector * 4;
+        for (final k in inter) {
+          final keyHex = _int6Hex(k);
+          final valid = await _dev.cmdMf1CheckBlockKey(
+              block: block, keyType: keyType, key: _hex(keyHex));
+          if (valid) {
+            if (keyType == KeyType.keyA) {
+              sectorKeys[sector].hasKeyA = true;
+              sectorKeys[sector].keyA = keyHex;
+            } else {
+              sectorKeys[sector].hasKeyB = true;
+              sectorKeys[sector].keyB = keyHex;
+            }
+            progress.value = '双卡破解：扇区$sector ${keyType.label}=$keyHex';
+            break;
+          }
+        }
+      }
 
       for (var s = 0; s < 16; s++) {
         if (sectorKeys[s].hasKeyA && sectorKeys[s].hasKeyB) continue;
-        if (s * 2 + 1 >= atks1.length || s * 2 + 1 >= atks2.length) break;
-
-        // keyA：索引 2*s
-        if (!sectorKeys[s].hasKeyA &&
-            s * 2 < atks1.length && s * 2 < atks2.length) {
-          final a1 = atks1[s * 2];
-          final a2 = atks2[s * 2];
-          final key1 = _generateKeyFromEncryptedNested(uid1, a1.$2, a1.$3, a1.$4);
-          final key2 = _generateKeyFromEncryptedNested(uid2, a2.$2, a2.$3, a2.$4);
-          if (key1 == key2) {
-            final keyHex = _int6Hex(key1);
-            final valid = await _dev.cmdMf1CheckBlockKey(
-                block: s * 4, keyType: KeyType.keyA, key: _hex(keyHex));
-            if (valid) {
-              sectorKeys[s].hasKeyA = true;
-              sectorKeys[s].keyA = keyHex;
-              progress.value =
-                  '双卡破解：扇区$s keyA=$keyHex';
-            }
-          }
+        if (s * 2 + 1 >= enc1.atks.length || s * 2 + 1 >= enc2.atks.length) {
+          break;
         }
-
-        // keyB：索引 2*s+1
-        if (!sectorKeys[s].hasKeyB &&
-            s * 2 + 1 < atks1.length && s * 2 + 1 < atks2.length) {
-          final a1 = atks1[s * 2 + 1];
-          final a2 = atks2[s * 2 + 1];
-          final key1 = _generateKeyFromEncryptedNested(uid1, a1.$2, a1.$3, a1.$4);
-          final key2 = _generateKeyFromEncryptedNested(uid2, a2.$2, a2.$3, a2.$4);
-          if (key1 == key2) {
-            final keyHex = _int6Hex(key1);
-            final valid = await _dev.cmdMf1CheckBlockKey(
-                block: s * 4, keyType: KeyType.keyB, key: _hex(keyHex));
-            if (valid) {
-              sectorKeys[s].hasKeyB = true;
-              sectorKeys[s].keyB = keyHex;
-              progress.value =
-                  '双卡破解：扇区$s keyB=$keyHex';
-            }
-          }
+        if (!sectorKeys[s].hasKeyA) {
+          await crackSlot(s, KeyType.keyA, enc1.atks[s * 2], enc2.atks[s * 2]);
+        }
+        if (!sectorKeys[s].hasKeyB) {
+          await crackSlot(
+              s, KeyType.keyB, enc1.atks[s * 2 + 1], enc2.atks[s * 2 + 1]);
         }
       }
 
@@ -1917,13 +1915,6 @@ class _IcTabState extends State<IcTab> {
       return;
     }
     final uidInt = _bytesInt(acq.uid.sublist(0, 4));
-    // parity 千位编码（CU parityToInt 语义）：bit3=最高字节 → 千位，
-    // C 端 bin_to_uint8_arr 按十进制逐位拆回
-    int parToInt(int raw) =>
-        ((raw >> 3) & 1) * 1000 +
-        ((raw >> 2) & 1) * 100 +
-        ((raw >> 1) & 1) * 10 +
-        (raw & 1);
 
     for (final a in acq.atks) {
       checkStop();
@@ -1937,7 +1928,7 @@ class _IcTabState extends State<IcTab> {
       // 低 16 位由 PRNG 线性特性补全（CU general.dart:89 同公式）
       final nt = ((nt16 << 16) | Crypto1.prngSuccessor(nt16, 16)) & 0xFFFFFFFF;
       final cands = NativeRecovery.staticEncryptedNested(
-          uid: uidInt, nt: nt, ntEnc: ntEnc, ntParEnc: parToInt(rawPar));
+          uid: uidInt, nt: nt, ntEnc: ntEnc, ntParEnc: _parityToInt(rawPar));
       LogService.instance.log(
           '[解卡] 后门恢复 扇区$sector ${keyType.label}: nt=${nt.toRadixString(16)} 候选=${cands.length}');
       if (cands.isEmpty) continue;
