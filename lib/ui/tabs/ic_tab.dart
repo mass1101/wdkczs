@@ -1254,6 +1254,17 @@ class _IcTabState extends State<IcTab> {
         await _dev.cmdChangeDeviceMode(DeviceMode.tag);
       } catch (_) {}
       _grabKeys();
+      // 本次解卡得到的密钥（扇区状态中已破解的 keyA/keyB）累积存入 default_keys.txt
+      final gainedKeys = <String>[];
+      for (final sk in sectorKeys) {
+        if (sk.hasKeyA && sk.keyA.length == 12 && !gainedKeys.contains(sk.keyA)) {
+          gainedKeys.add(sk.keyA);
+        }
+        if (sk.hasKeyB && sk.keyB.length == 12 && !gainedKeys.contains(sk.keyB)) {
+          gainedKeys.add(sk.keyB);
+        }
+      }
+      await _appendKeysToDefaultFile(gainedKeys);
       // 破解结束（成功/停止/失败）回填密钥后，自动保存该 UID 的密钥文件
       if (crackUidHex.isNotEmpty) {
         await _autoSaveKeyFileForUid(crackUidHex);
@@ -1749,6 +1760,32 @@ class _IcTabState extends State<IcTab> {
       if (merged.isEmpty) return;
       await _app.storage.saveKey(name, merged.join('\n'));
       LogService.instance.log('[密钥文件] 已自动保存 $name（${merged.length} 个密钥）');
+    } catch (_) {}
+  }
+
+  /// 解卡得到的密钥累积保存进 default_keys.txt：
+  /// 文件不存在则新建，已存在则合并追加，去重后写入
+  Future<void> _appendKeysToDefaultFile(List<String> keys) async {
+    try {
+      if (keys.isEmpty) return;
+      const name = 'default_keys.txt';
+      final all = await _app.storage.getKeyNames();
+      final merged = <String>[
+        ...(all[name] ?? '')
+            .split('\n')
+            .map((e) => e.trim())
+            .where((k) => k.length == 12)
+      ];
+      var added = 0;
+      for (final k in keys) {
+        if (!merged.contains(k)) {
+          merged.add(k);
+          added++;
+        }
+      }
+      if (added == 0) return;
+      await _app.storage.saveKey(name, merged.join('\n'));
+      LogService.instance.log('[密钥文件] default_keys.txt 新增 $added 个密钥（共 ${merged.length}）');
     } catch (_) {}
   }
 
