@@ -838,8 +838,10 @@ class DeviceService {
         appendCrc: true, data: Uint8List.fromList([0x50, 0x00]), waitResponse: false);
   }
 
-  /// Gen1a 免密认证包裹：halt → 0x40(7bit) → 0x43 → 执行回调 → halt
+  /// Gen1a 免密认证包裹：切回读写器模式 → halt → 0x40(7bit) → 0x43 → 执行回调 → halt
   Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
+    // 解卡流程结束后设备停在 TAG 模式，RAW 透传须先回 reader
+    await assureDeviceMode(DeviceMode.reader);
     await mf1Halt();
     try {
       final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
@@ -1047,6 +1049,7 @@ class DeviceService {
 
   /// 锁 UFUID 卡（对应逆向 lockUFUID：固定 5 段指令流）
   Future<void> lockUfuid() async {
+    await assureDeviceMode(DeviceMode.reader);
     await cmdHf14aScan();
     try {
       await mf1Halt();

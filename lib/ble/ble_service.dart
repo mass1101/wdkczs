@@ -230,7 +230,16 @@ class BleService {
       await char.write(chunk, withoutResponse: withoutResponse);
     } catch (_) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      await char.write(chunk, withoutResponse: withoutResponse);
+      try {
+        await char.write(chunk, withoutResponse: withoutResponse);
+      } catch (e) {
+        // BLE 断连原始 PlatformException 透传不友好，转译提示（自动重连已在后台进行）
+        final msg = e.toString().toLowerCase();
+        if (msg.contains('disconnected')) {
+          throw Exception('设备已断开连接，正在自动重连，请稍后重试');
+        }
+        rethrow;
+      }
     }
   }
 
