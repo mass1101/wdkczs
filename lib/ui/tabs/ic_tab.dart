@@ -234,6 +234,26 @@ class _IcTabState extends State<IcTab> {
         return;
       }
       final uid = tag.uidHex;
+
+      // 第一步：立即更新 uid/sak 等信息到卡片信息
+      if (mounted) {
+        setState(() {
+          _app.card.uid = uid;
+          _app.card.atqa = _hexStrRev(tag.atqa);
+          _app.card.sak = tag.sakHex;
+          _app.card.ats = tag.atsHex;
+        });
+        _syncCardInfo();
+      }
+
+      // 第二步：该 UID 保存过密钥文件则导入编辑区
+      final savedKeys = await _loadKeyFileForUid(uid);
+      if (savedKeys.isNotEmpty) {
+        _appendKeys(savedKeys);
+        _toast('已导入该卡片的历史密钥 ${savedKeys.length} 个');
+      }
+
+      // 第三步：继续原本流程（Gen1a 免密读卡 -> 密钥验证 -> 逐扇区读取）
       final found = <String>[];
       var gen1aDone = false;
 
@@ -601,6 +621,7 @@ class _IcTabState extends State<IcTab> {
     final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
     final crackTick = ValueNotifier<int>(0);
     final hardnestedNotifier = ValueNotifier<bool>(false);
+    var crackUidHex = '';
     NativeRecovery.init();
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
@@ -621,6 +642,7 @@ class _IcTabState extends State<IcTab> {
         _app.card.ats = tag.atsHex;
       });
       _syncCardInfo();
+      crackUidHex = tag.uidHex;
 
       if (_dictKeys.isEmpty) {
         _toast('请先填写密钥');
@@ -1232,6 +1254,10 @@ class _IcTabState extends State<IcTab> {
         await _dev.cmdChangeDeviceMode(DeviceMode.tag);
       } catch (_) {}
       _grabKeys();
+      // 破解结束（成功/停止/失败）回填密钥后，自动保存该 UID 的密钥文件
+      if (crackUidHex.isNotEmpty) {
+        await _autoSaveKeyFileForUid(crackUidHex);
+      }
     }
   }
 
@@ -1685,6 +1711,46 @@ class _IcTabState extends State<IcTab> {
       _app.card.keys = _keyCtrl.text;
       _validateKeys(_keyCtrl.text);
     });
+  }
+
+  /// 读取该 UID 的历史密钥文件（KeyFor_XXXX.txt），无则返回空列表
+  Future<List<String>> _loadKeyFileForUid(String uidHex) async {
+    try {
+      final all = await _app.storage.getKeyNames();
+      final name = 'KeyFor_${uidHex.substring(0, 8).toUpperCase()}.txt';
+      final content = all[name];
+      if (content == null || content.isEmpty) return [];
+      return content
+          .split('\n')
+          .map((e) => e.trim())
+          .where((k) =>
+              k.length == 12 && k != 'ffffffffffff' && k != '000000000000')
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// 破解/读卡回填后自动保存该 UID 的密钥文件（合并去重，静默失败）
+  Future<void> _autoSaveKeyFileForUid(String uidHex) async {
+    try {
+      final keys = _keys.where((k) => k.length == 12).toList();
+      if (keys.isEmpty || !mounted) return;
+      final name = 'KeyFor_${uidHex.substring(0, 8).toUpperCase()}.txt';
+      final all = await _app.storage.getKeyNames();
+      final savedContent = all[name] ?? '';
+      final merged = <String>[];
+      final lines = [savedContent, ...keys];
+      for (final line in lines) {
+        final k = line.trim();
+        if (k.length == 12 && k != 'ffffffffffff' && k != '000000000000' && !merged.contains(k)) {
+          merged.add(k);
+        }
+      }
+      if (merged.isEmpty) return;
+      await _app.storage.saveKey(name, merged.join('\n'));
+      LogService.instance.log('[密钥文件] 已自动保存 $name（${merged.length} 个密钥）');
+    } catch (_) {}
   }
 
   /// 从扇区块3提取密钥（对齐小程序 btnKeysGrab）
