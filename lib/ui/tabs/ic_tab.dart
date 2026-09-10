@@ -322,7 +322,10 @@ class _IcTabState extends State<IcTab> {
       // 读卡仅用用户密钥：扩展字典 44 把全 miss 时会跑满 1500+ 次失败认证（30-60s），
       // 且部分命中后 anyMissing 仍提示去解卡，收益极低；扩展字典留给解卡第一步
       final allKeys = _keys.map(_hex).toList();
-      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
+      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
+          onProgress: (processed) {
+        progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
+      });
       if (anyMissing) {
         _appendKeysFromSectors(sectorKeys);
         progress.value = '读卡片：卡片有加密，请先使用解卡片功能获取密钥';
