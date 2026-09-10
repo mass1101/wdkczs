@@ -132,8 +132,10 @@ class _IcTabState extends State<IcTab> {
   // ========== 扇区密钥状态（对齐小程序 sectors_Key） ==========
   /// 批量检查密钥，对齐小程序 checkCrackedKey：用 mf1CheckKeysOfSectors 掩码批量检测
   /// 返回 true 表示仍有未找到的密钥
+  /// onProgress：每块（5 把）结果解析并合并后触发，用于 UI 逐块点亮
   Future<bool> _checkCrackedKeys(
-      List<Uint8List> keys, List<SectorKeyState> sectorKeys) async {
+      List<Uint8List> keys, List<SectorKeyState> sectorKeys,
+      {void Function()? onProgress}) async {
     final mask = Uint8List(10);
     mask.fillRange(0, 10, 0xFF);
     for (var s = 0; s < 16; s++) {
@@ -141,8 +143,26 @@ class _IcTabState extends State<IcTab> {
       if (!sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
     }
     LogService.instance.log('[_checkCrackedKeys] keys=${keys.length}, mask=${_hexStr(mask)}');
-    final res = await _dev.cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
+    final res = await _dev.cmdMf1CheckKeysOfSectors(
+      keys: keys,
+      mask: mask,
+      onChunk: onProgress == null
+          ? null
+          : (partial) {
+              _mergeSectorKeys(partial, sectorKeys);
+              onProgress();
+            },
+    );
     LogService.instance.log('[_checkCrackedKeys] found=${_hexStr(res.found)}, sectorKeys=${res.sectorKeys.map((k) => k == null ? 'null' : _hexStr(k)).join(',')}');
+    final anyMissing = _mergeSectorKeys(res, sectorKeys);
+    LogService.instance.log('[_checkCrackedKeys] anyMissing=$anyMissing');
+    return anyMissing;
+  }
+
+  /// 将批量检查结果合并进扇区密钥状态（幂等，可对累积 partial 重复调用）
+  /// 返回 true 表示仍有未找到的密钥
+  bool _mergeSectorKeys(
+      Mf1CheckKeysOfSectorsRes res, List<SectorKeyState> sectorKeys) {
     var anyMissing = false;
     for (var s = 0; s < 16; s++) {
       if (!sectorKeys[s].hasKeyA) {
@@ -164,7 +184,6 @@ class _IcTabState extends State<IcTab> {
         }
       }
     }
-    LogService.instance.log('[_checkCrackedKeys] anyMissing=$anyMissing');
     return anyMissing;
   }
 
@@ -672,8 +691,13 @@ class _IcTabState extends State<IcTab> {
       await _loadKeys();
 
       // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey，含扩展字典）
+      // 逐块（5 把）点亮：每块命中即标记扇区状态并回填编辑区，刷新网格
       final allKeys = _dictKeys.map(_hex).toList();
-      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys);
+      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
+          onProgress: () {
+        _appendKeysFromSectors(sectorKeys);
+        crackTick.value++;
+      });
       crackTick.value++;
       progress.value = '验证密钥：已标记扇区密钥信息.';
 

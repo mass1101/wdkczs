@@ -1061,10 +1061,13 @@ class DeviceService {
       .toList();
 
   /// 检查多扇区密钥
+  /// onChunk：每块响应解析完成后回调，参数为累积结果（已命中的 found 位与 sectorKeys），
+  /// 用于 UI 逐块点亮，不影响最终返回值
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
     int chunkSize = 5,
+    void Function(Mf1CheckKeysOfSectorsRes partial)? onChunk,
   }) async {
     await assureDeviceMode(DeviceMode.reader);
     final foundAll = Uint8List(10);
@@ -1089,13 +1092,17 @@ class DeviceService {
         liveMask[i] &= ~found[i];
         if (liveMask[i] != 0) allDone = false;
       }
-      if (allDone) break;
       for (var i = 0; i < 80; i++) {
         final bit = (found[i >> 3] >> (7 - (i & 7))) & 1;
         if (bit == 1 && sectorKeysAll[i] == null) {
           sectorKeysAll[i] = r.sublist(10 + i * 6, 10 + i * 6 + 6);
         }
       }
+      if (onChunk != null) {
+        onChunk(Mf1CheckKeysOfSectorsRes(
+            found: Uint8List.fromList(foundAll), sectorKeys: sectorKeysAll));
+      }
+      if (allDone) break;
     }
     return Mf1CheckKeysOfSectorsRes(found: foundAll, sectorKeys: sectorKeysAll);
   }
