@@ -22,6 +22,7 @@ class KeyFileSheet extends StatefulWidget {
 class _KeyFileSheetState extends State<KeyFileSheet> {
   Map<String, String> _files = {};
   bool _loading = true;
+  String? _selected;
 
   @override
   void initState() {
@@ -47,6 +48,18 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
 
   void _pick(String name, String content) {
     Navigator.pop(context, (name, content));
+  }
+
+  /// 点击密钥文件：选中/取消选中，由底部「导入」按钮确认导入
+  void _select(String name) {
+    setState(() => _selected = _selected == name ? null : name);
+  }
+
+  /// 将选中的密钥文件内容返回给调用方（导入到密钥编辑框）
+  void _importSelected() {
+    final name = _selected;
+    if (name == null || !_files.containsKey(name)) return;
+    Navigator.pop(context, (name, _files[name] ?? ''));
   }
 
   void _toast(String msg) {
@@ -161,6 +174,8 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
                   else
                     ..._files.entries.map((e) => ListTile(
                           dense: true,
+                          selected: _selected == e.key,
+                          selectedTileColor: primary.withValues(alpha: 0.08),
                           leading: const Icon(Icons.folder, size: 18),
                           title: Text(e.key, style: const TextStyle(fontSize: 13)),
                           subtitle: Text('${_keyCount(e.value)} 个密钥',
@@ -188,7 +203,7 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
                               ),
                             ],
                           ),
-                          onTap: () => _pick(e.key, e.value),
+                          onTap: () => _select(e.key),
                         )),
                 ],
               ),
@@ -203,6 +218,15 @@ class _KeyFileSheetState extends State<KeyFileSheet> {
                     icon: Icon(Icons.folder_open, size: 16, color: primary),
                     label: const Text('导入文件', style: TextStyle(fontSize: 12)),
                   ),
+                  if (_selected != null) ...[
+                    const SizedBox(width: 4),
+                    TextButton.icon(
+                      onPressed: _importSelected,
+                      icon: Icon(Icons.input, size: 16, color: primary),
+                      label: Text('导入「$_selected」',
+                          style: const TextStyle(fontSize: 12)),
+                    ),
+                  ],
                   const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
