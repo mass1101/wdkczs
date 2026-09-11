@@ -922,19 +922,20 @@ class DeviceService {
   }
 
   /// 检查扇区密钥，返回命中的密钥（对应逆向 mf1CheckSectorKeys）
+  /// 用 mf1CheckKeysOnBlock 单扇区批量（绕开 mf1CheckKeysOfSectors(2012) 真机不返回）
   Future<Map<int, Uint8List>> mf1CheckSectorKeys(int sector, List<Uint8List> keys) async {
-    final mask = Uint8List(10);
-    for (var i = 0; i < 10; i++) {
-      mask[i] = 0xFF;
-    }
-    mask[sector >> 2] ^= (3 << (6 - (sector % 4) * 2));
-    final res = await cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
     final out = <int, Uint8List>{};
-    // 扇区 sector 的 keyA（块 4*sector）与 keyB（块 4*sector+1）
-    final a = res.sectorKeys[sector * 2];
-    final b = res.sectorKeys[sector * 2 + 1];
-    if (a != null) out[KeyType.keyA.value] = a;
-    if (b != null) out[KeyType.keyB.value] = b;
+    for (final kt in [KeyType.keyA, KeyType.keyB]) {
+      for (var i = 0; i < keys.length; i += 32) {
+        final end = i + 32 < keys.length ? i + 32 : keys.length;
+        final found = await cmdMf1CheckKeysOfBlock(
+            block: 4 * sector + 3, keyType: kt, keys: keys.sublist(i, end));
+        if (found != null && found.length == 6) {
+          out[kt.value] = found;
+          break;
+        }
+      }
+    }
     return out;
   }
 
