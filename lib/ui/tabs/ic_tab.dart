@@ -688,11 +688,15 @@ class _IcTabState extends State<IcTab> {
           final Uint8List data;
           try {
             data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
-          } catch (_) {
+          } catch (e) {
+            LogService.instance.log(
+                '[解卡] Gen1a后门读扇区$s 失败: $e, 已读${found.length}把密钥, 落常规流程');
             allRead = false;
             break;
           }
           if (data.length < 64) {
+            LogService.instance.log(
+                '[解卡] Gen1a后门读扇区$s 数据不足(${data.length}B), 已读${found.length}把密钥, 落常规流程');
             allRead = false;
             break;
           }
@@ -701,8 +705,12 @@ class _IcTabState extends State<IcTab> {
           if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
           if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
         }
-        if (allRead) {
+        if (found.isNotEmpty) {
+          // 部分读成功也保留：CUID 等卡仅部分扇区支持后门读，
+          // 密钥进编辑框由批量验证上卡确认真伪，假数据无法通过认证
           _appendKeys(found);
+        }
+        if (allRead) {
           progress.value = '破解密钥：破解成功';
           if (mounted) Navigator.of(context).pop();
           _toast(found.isEmpty ? '未发现可破解密钥' : '破解成功');
