@@ -824,9 +824,13 @@ class DeviceService {
   /// 后门卡响应 4 字节 nonce，普通卡无响应）
   Future<bool> mf1HasBackdoor() async {
     await assureDeviceMode(DeviceMode.reader);
+    // 对齐 CU mfClassicHasBackdoor：纯 autoSelect 选中已在场卡，
+    // 不重新激活 RF 场（Gen1a 失败后卡刚被 halt，activateRfField 新建场
+    // 与旧场衔接失败致 0x64 无响应）。先 scan 唤醒再探测更稳妥。
+    final tags = await cmdHf14aScan();
+    if (tags.isEmpty) return false;
     final r = await cmdHf14aRaw(
         data: Uint8List.fromList([0x64, 0x00]),
-        activateRfField: true,
         autoSelect: true,
         appendCrc: true,
         checkResponseCrc: false,
