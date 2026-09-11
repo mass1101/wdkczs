@@ -844,8 +844,10 @@ class DeviceService {
   /// 对齐小程序 lockUFUID 序列：先 scan 唤醒，HALT 深睡态的部分芯片（批量认证后）
   /// 对 0x40 后门命令无响应，直接 halt 会报 HF tag not found
   Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
-    // 对齐 CU 库（Kk 类）：仅 halt → 0x40(7bit) → 0x43，
-    // 无 scan、无射频复位（小程序同序列可解，复位/scan 假说已证伪）
+    // 对齐小程序写UID序列：scan 唤醒 HALT 深睡态卡，否则 0x40 后门命令
+    // 无响应报 HF tag not found。仅 scan，不做 TAG→reader 强制复位
+    //（强制复位对 CUID 卡 Darkside 反致失败，已证伪，勿复加）
+    await cmdHf14aScan();
     await mf1Halt();
     try {
       final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
