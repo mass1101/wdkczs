@@ -96,5 +96,6 @@ Entries discovered by the Agent during task execution should follow this format:
   - 小程序（2.8.3 APK）的解卡引擎是纯 JS 层 CU 库类（app-service.js 内 `ZT=new Kk`，Kk 即 ChameleonUltra JS SDK），原生层 `cn.dxl.common.util.*`（MyUniUtils/Paths/FileUtils）只做文件存储与语音，BLE 与卡操作全在 JS——排查差异直接搜 app-service.js 的 Kk 类即可，无需反编译 dex。
   - CU 库标准 Gen1a 授权仅两步：halt → 0x40(7bit) → 0x43，**无 e100e1ee**——e100e1ee 只出现在 lockUFUID 锁卡专用序列；曾错误给 _mf1Gen1aAuth 补 e100e1ee（19197b2），已在 0408ec5 回退。库内也无 scan（小程序 UI 层 btnCrack 才 scan）。
   - 小程序 btnCrack Gen1a 读卡模式：单次授权内连续发 16 条 `0x30(4s+3)` 只读各扇区 b3（keepRfField 维持会话），读到即标记扇区恢复并把 keyA/keyB 收入字典，全成功直接结束（不验证）；app 对齐实现为 mf1Gen1aReadAllTrailerKeys + 读到即标 sectorKeys。
-  - 卡「认证失败锁死」假说（未最终验证）：被测 CUID 卡在多次认证失败后连 0x40 后门都无响应（HF tag not found status=1），强制 RF 复位（TAG→reader）也无效，疑似需卡离场断电复位；app 操作顺序「先读卡（批量验证轰炸）再解卡」与小程序「直接点解卡」的差异可能是同卡不同结果的原因。Gen1a 无响应时 UI 提示用户拿开卡 5 秒重放。
+  - 卡「认证失败锁死」假说已被对照实验证伪（e4e6f1e）：同张 CUID 卡小程序无任何复位走完 WEAK 全流程（Darkside 破首把 + nested 逐扇区），app 加 TAG→reader 强制复位反而 HF tag not found——**复位是干扰源，勿再给 Gen1a/Darkside 加射频复位**；_mf1Gen1aAuth 严格对齐 Kk 库（halt→0x40→0x43），cmdMf1AcquireDarkside 直接 assureDeviceMode(reader) 后采集。小程序识别为「普通加密卡」说明该卡 0x40 后门无响应（Gen1a 探测失败是卡的稳定特性）。
+  - Darkside 采集 cb 语义（f3af8fe 对齐）：固件 status 枚举 OK=0/CANT_FIX_NT=1/LUCKY_AUTH_OK=2/NO_NAK_SENT=3/TAG_CHANGED=4，非 OK 单轮即 throw「该卡片为无漏洞全加密卡」，LUCKY_AUTH_OK 单独抛；catch 透传原始错误到进度框。
   - 小程序 checkCrackedKey chunkSize=20，app 用 32（cmdMf1CheckKeysOfSectors 支持动态收窄），语义等价。
