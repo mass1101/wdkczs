@@ -675,45 +675,48 @@ class _IcTabState extends State<IcTab> {
         ),
       );
 
-      // 验证密钥：尝试 Gen1a 免密读卡
+      // 验证密钥：尝试 Gen1a 免密读卡（对齐小程序 btnCrack：单次授权连续读 16 个 b3，读到即标记）
       try {
         progress.value = '验证密钥：发现UID卡，可免密读卡...';
         LogService.instance.log(
             '[解卡] Gen1a免密读卡可用(UID魔改卡, 无漏洞限制, 直接读全部密钥)');
         final found = <String>[];
-        var allRead = true;
+        final trailers = List<Uint8List?>.filled(16, null);
+        var allRead = false;
+        try {
+          await _dev.mf1Gen1aReadAllTrailerKeys(trailers,
+              onSector: (s) => progress.value = '破解密钥：正在解密扇区$s...');
+          allRead = true;
+        } catch (e) {
+          final readCount = trailers.where((t) => t != null).length;
+          LogService.instance.log(
+              '[解卡] Gen1a后门读卡中断: $e, 已读$readCount/16扇区, 落常规流程');
+          if (readCount == 0 && '$e'.contains('failed 1')) {
+            progress.value = '验证密钥：Gen1a后门无响应, 若反复失败请将卡离开读卡器5秒后重放';
+          }
+        }
         for (var s = 0; s < 16; s++) {
           checkStop();
-          progress.value = '破解密钥：正在解密扇区$s...';
-          final Uint8List data;
-          try {
-            data = await _dev.mf1Gen1aReadBlocks(4 * s, 4);
-          } catch (e) {
-            LogService.instance.log(
-                '[解卡] Gen1a后门读扇区$s 失败: $e, 已读${found.length}把密钥, 落常规流程');
-            allRead = false;
-            break;
-          }
-          if (data.length < 64) {
-            LogService.instance.log(
-                '[解卡] Gen1a后门读扇区$s 数据不足(${data.length}B), 已读${found.length}把密钥, 落常规流程');
-            allRead = false;
-            break;
-          }
-          final kA = _hexStr(data.sublist(48, 54));
-          final kB = _hexStr(data.sublist(58, 64));
-          if (kA != 'ffffffffffff' && kA != '000000000000') found.add(kA);
-          if (kB != 'ffffffffffff' && kB != '000000000000') found.add(kB);
+          final t = trailers[s];
+          if (t == null) continue;
+          // 对齐小程序：b3 读出的即为卡上真实密钥，读到直接标记扇区恢复
+          final kA = _hexStr(t.sublist(0, 6));
+          final kB = _hexStr(t.sublist(10, 16));
+          sectorKeys[s].hasKeyA = true;
+          sectorKeys[s].keyA = kA;
+          sectorKeys[s].hasKeyB = true;
+          sectorKeys[s].keyB = kB;
+          found.add(kA);
+          found.add(kB);
+          LogService.instance.log('[解卡] Gen1a后门读扇区$s: A=$kA B=$kB');
         }
         if (found.isNotEmpty) {
-          // 部分读成功也保留：CUID 等卡仅部分扇区支持后门读，
-          // 密钥进编辑框由批量验证上卡确认真伪，假数据无法通过认证
           _appendKeys(found);
         }
         if (allRead) {
           progress.value = '破解密钥：破解成功';
           if (mounted) Navigator.of(context).pop();
-          _toast(found.isEmpty ? '未发现可破解密钥' : '破解成功');
+          _toast('破解成功');
           return sectorKeys;
         }
       } catch (_) {}

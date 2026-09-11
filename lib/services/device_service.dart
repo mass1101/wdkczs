@@ -864,11 +864,7 @@ class DeviceService {
       final r2 = await cmdHf14aRaw(data: Uint8List.fromList([0x43]), keepRfField: true)
           .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 2: $e'));
       if (r2.isEmpty || r2[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 2');
-      // e100e1ee 写授权：Gen1a 标准 third step（对齐小程序/CU lockUFUID 序列），
-      // 缺此步 CUID 卡读块失败且卡停留在异常授权态，污染后续 Darkside 采集
-      final r3 = await cmdHf14aRaw(data: _hexToBytes('e100e1ee'), keepRfField: true)
-          .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 3: $e'));
-      if (r3.isEmpty || r3[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 3');
+      // 对齐 CU 库（小程序 Kk 类）：授权仅两步 0x40+0x43，e100e1ee 只用于 lockUFUID 锁卡序列
       return await cb();
     } finally {
       if (isConnected()) {
@@ -895,9 +891,30 @@ class DeviceService {
     });
   }
 
+  /// 单次 Gen1a 授权内连续读 16 个扇区的 b3（对齐小程序 btnCrack 读卡循环）
+  /// out[s] 填充已成功读取的 b3（16 字节：keyA+access+keyB）；
+  /// 中途失败抛异常，已读部分保留在 out 中由调用方容错处理
+  Future<void> mf1Gen1aReadAllTrailerKeys(
+      List<Uint8List?> out, {void Function(int sector)? onSector}) async {
+    if (out.length < 16) throw ArgumentError('out requires 16 slots');
+    await _mf1Gen1aAuth(() async {
+      for (var s = 0; s < 16; s++) {
+        final r = await cmdHf14aRaw(
+            appendCrc: true,
+            checkResponseCrc: true,
+            data: Uint8List.fromList([0x30, 4 * s + 3]),
+            keepRfField: true);
+        if (r.length < 16) {
+          throw DeviceException(-1, 'Gen1a read sector $s: short data ${r.length}');
+        }
+        out[s] = Uint8List.sublistView(r, 0, 16);
+        if (onSector != null) onSector(s);
+      }
+    });
+  }
+
   /// Gen1a 免密写块（对应逆向 mf1Gen1aWriteBlocks）
-  Future<void> mf1Gen1aWriteBlocks(int offset, Uint8List data) async {
-    if (data.length % 16 != 0) throw DeviceException(96, 'data must be multiples of 16');
+  Future<void> mf1Gen1aWriteBlocks(int offset, Uint8List data) async {    if (data.length % 16 != 0) throw DeviceException(96, 'data must be multiples of 16');
     await _mf1Gen1aAuth(() async {
       for (var i = 0; i < data.length ~/ 16; i++) {
         final cmd = await cmdHf14aRaw(
