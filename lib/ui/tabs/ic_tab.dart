@@ -132,61 +132,62 @@ class _IcTabState extends State<IcTab> {
   /// 批量检查密钥，对齐小程序 checkCrackedKey：用 mf1CheckKeysOfSectors 掩码批量检测
   /// 返回 true 表示仍有未找到的密钥
   /// onProgress：每块（32 把）结果解析并合并后触发，参数为已处理的 key 数量游标（断点续破）
-  /// 单扇区批量密钥检查（对齐 CU mf1AuthMultipleKeys：cmd mf1CheckKeysOnBlock，
-  /// 目标为 trailer 块，chunkSize=32 对齐 CU BLE），返回命中的密钥 hex
-  Future<String?> _checkKeysBatch(
-      int block, KeyType keyType, List<Uint8List> keys,
-      {void Function(int processed)? onChecked}) async {
-    var processed = 0;
-    for (var i = 0; i < keys.length; i += 32) {
-      final end = i + 32 < keys.length ? i + 32 : keys.length;
-      final found = await _dev.cmdMf1CheckKeysOfBlock(
-          block: block, keyType: keyType, keys: keys.sublist(i, end));
-      processed += end - i;
-      onChecked?.call(processed);
-      if (found != null && found.length == 6) {
-        return _hexStr(found);
-      }
-    }
-    return null;
-  }
-
-  /// 逐扇区批量检测（对齐 CU checkKeysOnSector：16 扇区 x A/B 逐个用
-  /// mf1CheckKeysOnBlock 批量验证，绕开固件 mf1CheckKeysOfSectors(2012)
-  /// 在真机上不返回/超时的问题）
+  /// 全卡单次批量检测（cmd mf1CheckKeysOfSectors），普通 M1 卡一次命令扫全部
+  /// 未标记槽位，比对逐扇区批量快且稳定（1849ff3 实测正常）
   Future<bool> _checkCrackedKeys(
       List<Uint8List> keys, List<SectorKeyState> sectorKeys,
       {void Function(int processedKeys)? onProgress}) async {
     if (keys.isEmpty) {
       return sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
     }
-    var checked = 0;
+    final mask = Uint8List(10);
+    mask.fillRange(0, 10, 0xFF);
+    for (var s = 0; s < 16; s++) {
+      if (!sectorKeys[s].hasKeyA) mask[s >> 2] ^= 2 << (6 - s % 4 * 2);
+      if (!sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
+    }
+    LogService.instance.log('[_checkCrackedKeys] keys=${keys.length}, mask=${_hexStr(mask)}');
+    final res = await _dev.cmdMf1CheckKeysOfSectors(
+      keys: keys,
+      mask: mask,
+      onChunk: onProgress == null
+          ? null
+          : (partial, processed) {
+              _mergeSectorKeys(partial, sectorKeys);
+              onProgress(processed);
+            },
+    );
+    LogService.instance.log('[_checkCrackedKeys] found=${_hexStr(res.found)}, sectorKeys=${res.sectorKeys.map((k) => k == null ? 'null' : _hexStr(k)).join(',')}');
+    final anyMissing = _mergeSectorKeys(res, sectorKeys);
+    LogService.instance.log('[_checkCrackedKeys] anyMissing=$anyMissing');
+    return anyMissing;
+  }
+
+  /// 将批量检查结果合并进扇区密钥状态（幂等，可对累积 partial 重复调用）
+  /// 返回 true 表示仍有未找到的密钥
+  bool _mergeSectorKeys(
+      Mf1CheckKeysOfSectorsRes res, List<SectorKeyState> sectorKeys) {
     var anyMissing = false;
     for (var s = 0; s < 16; s++) {
-      for (final kt in [KeyType.keyA, KeyType.keyB]) {
-        if (kt == KeyType.keyA ? sectorKeys[s].hasKeyA : sectorKeys[s].hasKeyB) {
-          continue;
-        }
-        final hit = await _checkKeysBatch(4 * s + 3, kt, keys,
-            onChecked: (n) {
-          checked += n;
-          onProgress?.call(checked);
-        });
-        if (hit != null) {
-          if (kt == KeyType.keyA) {
-            sectorKeys[s].hasKeyA = true;
-            sectorKeys[s].keyA = hit;
-          } else {
-            sectorKeys[s].hasKeyB = true;
-            sectorKeys[s].keyB = hit;
-          }
-        } else {
+      if (!sectorKeys[s].hasKeyA) {
+        final a = res.sectorKeys[s * 2];
+        if (a == null) {
           anyMissing = true;
+        } else {
+          sectorKeys[s].hasKeyA = true;
+          sectorKeys[s].keyA = _hexStr(a);
+        }
+      }
+      if (!sectorKeys[s].hasKeyB) {
+        final b = res.sectorKeys[s * 2 + 1];
+        if (b == null) {
+          anyMissing = true;
+        } else {
+          sectorKeys[s].hasKeyB = true;
+          sectorKeys[s].keyB = _hexStr(b);
         }
       }
     }
-    LogService.instance.log(
-        '[_checkCrackedKeys] done keys=${keys.length} anyMissing=$anyMissing');
     return anyMissing;
   }
 
@@ -202,10 +203,10 @@ class _IcTabState extends State<IcTab> {
 
   /// 新破出密钥后立即用已知密钥复查全扇区：
   /// M1 卡常多扇区共用密钥，能认证通过的槽位直接标记，跳过后续破解
-  /// 传播验证：对每把已知密钥逐扇区 x A/B 用 mf1CheckKeysOnBlock 批量验证
-  /// （绕开固件 mf1CheckKeysOfSectors(2012) 真机不返回/超时的问题）；
-  /// keyA 命中后读 trailer 的 b3，keyB 位置非全 0 即免费推导并验证
-  /// （保留 CU checkKeysOnSector 尾部增强）。
+  /// 传播验证：全卡批量 cmdMf1CheckKeysOfSectors（单次命令扫全部未标记槽位，
+  /// 动态收缩掩码自动跳过已命中项，比逐把 recheckKey 快 1-2 个数量级）；
+  /// 批量返回 keyA 命中后，对「A 新命中且 B 未标记」的扇区读 trailer 的 b3，
+  /// keyB 位置非全 0 即免费推导并验证（保留 CU checkKeysOnSector 尾部增强）。
   Future<void> _propagateKeys(List<SectorKeyState> sectorKeys) async {
     final names = <String>[];
     for (final sk in sectorKeys) {
@@ -222,29 +223,20 @@ class _IcTabState extends State<IcTab> {
       if (!names.contains(k)) names.add(k);
     }
     if (names.isEmpty) return;
-    LogService.instance.log(
-        '[_propagateKeys] ${names.length} known keys (逐扇区批量 mf1CheckKeysOnBlock)');
-    final keys = names.map(_hex).toList();
+    // 构造只开未标记槽位的掩码；全标记则无需传播
+    final mask = Uint8List(10);
     for (var s = 0; s < 16; s++) {
-      if (!sectorKeys[s].hasKeyA) {
-        final hit = await _checkKeysBatch(4 * s + 3, KeyType.keyA, keys);
-        if (hit != null) {
-          sectorKeys[s].hasKeyA = true;
-          sectorKeys[s].keyA = hit;
-          LogService.instance.log(
-              '[_propagateKeys] sector=$s keyA=$hit FOUND (传播)');
-        }
-      }
-      if (!sectorKeys[s].hasKeyB) {
-        final hit = await _checkKeysBatch(4 * s + 3, KeyType.keyB, keys);
-        if (hit != null) {
-          sectorKeys[s].hasKeyB = true;
-          sectorKeys[s].keyB = hit;
-          LogService.instance.log(
-              '[_propagateKeys] sector=$s keyB=$hit FOUND (传播)');
-        }
-      }
+      if (!sectorKeys[s].hasKeyA) mask[s >> 2] |= 2 << (6 - s % 4 * 2);
+      if (!sectorKeys[s].hasKeyB) mask[s >> 2] |= 1 << (6 - s % 4 * 2);
     }
+    if (mask.every((m) => m == 0)) return;
+    LogService.instance.log(
+        '[_propagateKeys] ${names.length} known keys, mask=${_hexStr(mask)} (全卡批量)');
+    final res = await _dev.cmdMf1CheckKeysOfSectors(
+        keys: names.map(_hex).toList(), mask: mask);
+    final anyMissing = _mergeSectorKeys(res, sectorKeys);
+    LogService.instance.log(
+        '[_propagateKeys] found=${_hexStr(res.found)} anyMissing=$anyMissing');
     // 对齐 CU checkKeysOnSector 尾部：A 命中读 trailer 免费推导 keyB
     for (var s = 0; s < 16; s++) {
       if (!sectorKeys[s].hasKeyA || sectorKeys[s].hasKeyB) continue;

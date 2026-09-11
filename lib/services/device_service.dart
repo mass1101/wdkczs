@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../ble/ble_service.dart';
+import 'log_service.dart';
 import '../models/enums.dart';
 import '../models/models.dart';
 import '../protocol/frame.dart';
@@ -829,13 +830,19 @@ class DeviceService {
     // 与旧场衔接失败致 0x64 无响应）。先 scan 唤醒再探测更稳妥。
     final tags = await cmdHf14aScan();
     if (tags.isEmpty) return false;
-    final r = await cmdHf14aRaw(
-        data: Uint8List.fromList([0x64, 0x00]),
-        autoSelect: true,
-        appendCrc: true,
-        checkResponseCrc: false,
-        timeout: 300);
-    return r.length == 4;
+    try {
+      final r = await cmdHf14aRaw(
+          data: Uint8List.fromList([0x64, 0x00]),
+          autoSelect: true,
+          appendCrc: true,
+          checkResponseCrc: false,
+          timeout: 300);
+      return r.length == 4;
+    } catch (e) {
+      // 0x64 探测失败不应中断解卡主流程，返回 false 继续走字典/nested
+      LogService.instance.log('[解卡] mf1HasBackdoor 探测异常: $e');
+      return false;
+    }
   }
 
   /// MIFARE Halt 指令（对应逆向 mf1Halt：`xw.pack("!H", 20480)`）
@@ -928,20 +935,20 @@ class DeviceService {
   }
 
   /// 检查扇区密钥，返回命中的密钥（对应逆向 mf1CheckSectorKeys）
-  /// 用 mf1CheckKeysOnBlock 单扇区批量（绕开 mf1CheckKeysOfSectors(2012) 真机不返回）
+  /// 用 mf1CheckKeysOfSectors 掩码批量（单命令扫该扇区 A/B，对比逐扇区更快更稳）
   Future<Map<int, Uint8List>> mf1CheckSectorKeys(int sector, List<Uint8List> keys) async {
-    final out = <int, Uint8List>{};
-    for (final kt in [KeyType.keyA, KeyType.keyB]) {
-      for (var i = 0; i < keys.length; i += 32) {
-        final end = i + 32 < keys.length ? i + 32 : keys.length;
-        final found = await cmdMf1CheckKeysOfBlock(
-            block: 4 * sector + 3, keyType: kt, keys: keys.sublist(i, end));
-        if (found != null && found.length == 6) {
-          out[kt.value] = found;
-          break;
-        }
-      }
+    final mask = Uint8List(10);
+    for (var i = 0; i < 10; i++) {
+      mask[i] = 0xFF;
     }
+    mask[sector >> 2] ^= (3 << (6 - (sector % 4) * 2));
+    final res = await cmdMf1CheckKeysOfSectors(keys: keys, mask: mask);
+    final out = <int, Uint8List>{};
+    // 扇区 sector 的 keyA（块 4*sector）与 keyB（块 4*sector+1）
+    final a = res.sectorKeys[sector * 2];
+    final b = res.sectorKeys[sector * 2 + 1];
+    if (a != null) out[KeyType.keyA.value] = a;
+    if (b != null) out[KeyType.keyB.value] = b;
     return out;
   }
 
