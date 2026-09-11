@@ -86,3 +86,15 @@ Entries discovered by the Agent during task execution should follow this format:
   - 后门卡多路径设计（9307b2a 起对齐 CU 0x64 能力，用户确认 nfctool 与 CU 固件相同）：后门 key（A396EFA4E24F 等 3 个）普通认证命中 → 作为已知密钥走常规 nested/hardnested（精准）；认证未命中 + WEAK → 0x64 后门认证采集嵌套走 nested（authKeyType=KeyType.backdoor 透传，对齐 CU recovery.dart:314）；仍未恢复 → 后门采集 + C static_encrypted_nested 恢复 + 批量验证兜底。0x64 探测 = cmdHf14aRaw 发 [0x64,0x00]+CRC 原始帧（对齐 mfClassicHasBackdoor），后门卡响应 4 字节，普通卡无响应，作前置快筛。
   - 后门采集 nt 仅含高 16 位，明文 NT = reconstructFullNt = (nt16<<16) | prngSuccessor(nt16,16)；parity 千位编码（CU parityToInt）：bit3→千位，C 端 bin_to_uint8_arr 按十进制逐位拆回，bit3↔最高字节。
   - CU StaticEncryptedKeysFilterAsync.filterKeys（gen3NonceTag/cI 种子交叉）仅对静态加密卡有效（同 seed），weak/hard 卡跳过该过滤直接批量验证；nfctool 3gen 路径已覆盖静态卡，backdoor 兜底路径不做交叉。
+  - 密钥体系按 UID 隔离（204ed5a 终版，用户明确要求）：验证集合由 _collectVerifyKeys(uidHex) 临时构造=编辑框+本卡 KeyFor_UID.txt（解卡额外加扩展字典），编辑框是用户自管内容严禁扩库污染；KeyFor 文件仅存解卡命中密钥（_autoSaveKeyFileForUid 显式传参）；default_keys.txt=跨卡累积库——解卡 finally 自动累积命中密钥（用户要求保留），但按 UID 隔离的验证集合不读它，仅供手动导出/查阅。历史废弃方案：_loadKeys 灌全库进编辑框（用户质疑）、验证集合含全部密钥文件（用户要求隔离）。
+
+[Project Knowledge Summary]
+- Date: 2026-09-11
+- Context: 排查 CUID 卡 app Gen1a/Darkside 全失败而小程序可解（0408ec5 对齐修复）时逆向确认
+- Category: Troubleshooting & Debugging | Environment Configuration
+- Instructions:
+  - 小程序（2.8.3 APK）的解卡引擎是纯 JS 层 CU 库类（app-service.js 内 `ZT=new Kk`，Kk 即 ChameleonUltra JS SDK），原生层 `cn.dxl.common.util.*`（MyUniUtils/Paths/FileUtils）只做文件存储与语音，BLE 与卡操作全在 JS——排查差异直接搜 app-service.js 的 Kk 类即可，无需反编译 dex。
+  - CU 库标准 Gen1a 授权仅两步：halt → 0x40(7bit) → 0x43，**无 e100e1ee**——e100e1ee 只出现在 lockUFUID 锁卡专用序列；曾错误给 _mf1Gen1aAuth 补 e100e1ee（19197b2），已在 0408ec5 回退。库内也无 scan（小程序 UI 层 btnCrack 才 scan）。
+  - 小程序 btnCrack Gen1a 读卡模式：单次授权内连续发 16 条 `0x30(4s+3)` 只读各扇区 b3（keepRfField 维持会话），读到即标记扇区恢复并把 keyA/keyB 收入字典，全成功直接结束（不验证）；app 对齐实现为 mf1Gen1aReadAllTrailerKeys + 读到即标 sectorKeys。
+  - 卡「认证失败锁死」假说（未最终验证）：被测 CUID 卡在多次认证失败后连 0x40 后门都无响应（HF tag not found status=1），强制 RF 复位（TAG→reader）也无效，疑似需卡离场断电复位；app 操作顺序「先读卡（批量验证轰炸）再解卡」与小程序「直接点解卡」的差异可能是同卡不同结果的原因。Gen1a 无响应时 UI 提示用户拿开卡 5 秒重放。
+  - 小程序 checkCrackedKey chunkSize=20，app 用 32（cmdMf1CheckKeysOfSectors 支持动态收窄），语义等价。
