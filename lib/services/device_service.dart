@@ -838,10 +838,13 @@ class DeviceService {
         appendCrc: true, data: Uint8List.fromList([0x50, 0x00]), waitResponse: false);
   }
 
-  /// Gen1a 免密认证包裹：切回读写器模式 → halt → 0x40(7bit) → 0x43 → 执行回调 → halt
+  /// Gen1a 免密认证包裹：切回读写器模式 → scan(WUPA唤醒HALT卡) → halt → 0x40(7bit) → 0x43 → e100e1ee → 执行回调 → halt
+  /// 对齐小程序 lockUFUID 序列：先 scan 唤醒，HALT 深睡态的部分芯片（批量认证后）
+  /// 对 0x40 后门命令无响应，直接 halt 会报 HF tag not found
   Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
     // 解卡流程结束后设备停在 TAG 模式，RAW 透传须先回 reader
     await assureDeviceMode(DeviceMode.reader);
+    await cmdHf14aScan();
     await mf1Halt();
     try {
       final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
