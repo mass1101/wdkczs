@@ -1116,9 +1116,16 @@ class _IcTabState extends State<IcTab> {
                   'ar': res.ar!,
                 };
               }
+              // 对齐小程序采集cb：status枚举 OK=0/CANT_FIX_NT=1/LUCKY_AUTH_OK=2/
+              // NO_NAK_SENT=3/TAG_CHANGED=4，非OK单轮即终止（单轮失败即无漏洞卡，
+              // 重试无意义），LUCKY_AUTH_OK 幸运碰撞数据同样不可用
               LogService.instance.log(
-                  '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 非0含卡无响应/防Darkside)');
-              return null;
+                  '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 2=LUCKY_AUTH_OK)');
+              if (res.status == 2) {
+                throw DeviceException(-1, 'LUCKY_AUTH_OK');
+              }
+              throw DeviceException(
+                  -1, '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥 (status=${res.status})');
             },
             (key) async {
               final ok = await _dev.cmdMf1CheckBlockKey(
@@ -1139,19 +1146,18 @@ class _IcTabState extends State<IcTab> {
           _appendKeysFromSectors(sectorKeys);
           await _propagateKeys(sectorKeys);
           crackTick.value++;
-          progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
+          progress.value = '破解密钥：破解出一个密钥，进入半加密卡破解流程...';
           LogService.instance.log(
               '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyA=$darkHex, 进入半加密流程');
         } catch (e) {
-          // 区分真实失败原因：首轮采集无响应(TypeError) vs 256轮恢复穷尽(StateError)
+          // 透传具体失败原因（对齐小程序 catch 显示采集cb的报错）：
+          // 无漏洞卡/卡无响应/LUCKY_AUTH_OK/256轮穷尽各自可见
           LogService.instance.log('[解卡] Darkside异常: $e');
           _appendKeysFromSectors(sectorKeys);
           // 后门卡已在开头前置路由（对齐 CU recoverKeys），此处仅剩无后门的全加密卡
-          progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
+          progress.value = '解卡片：$e';
           if (mounted) Navigator.of(context).pop();
-          LogService.instance.log(
-              '[解卡] 全加密卡解不开: Darkside攻击失败(卡片防Darkside), 全卡无已知密钥, 也无后门');
-          _toast('全加密卡，Darkside攻击失败，请先通过其他方式获取至少一个密钥');
+          _toast('Darkside攻击失败: $e');
           return sectorKeys;
         }
       }
