@@ -665,16 +665,9 @@ class DeviceService {
     required bool isFirst,
     int syncMax = 30,
   }) async {
-    if (isFirst) {
-      // 首轮强制 RF 复位：长时间批量认证轰炸后卡进入无法唤醒态
-      //（批量验证刚结束卡仍可认证，Darkside 却报 HF tag not found，
-      // 同卡小程序可解——其 API 层模式处理带来隐式射频复位），
-      // 切 TAG 再切回 reader 重建射频场，唤醒异常态的卡
-      await cmdChangeDeviceMode(DeviceMode.tag);
-      await cmdChangeDeviceMode(DeviceMode.reader);
-    } else {
-      await assureDeviceMode(DeviceMode.reader);
-    }
+    // 对齐小程序：无前置射频复位，直接采集（实测强制复位反致
+    // HF tag not found，同卡小程序无复位可解，复位假说已证伪）
+    await assureDeviceMode(DeviceMode.reader);
     final b = Uint8List(4);
     b[0] = keyType.value;
     b[1] = block;
@@ -851,11 +844,8 @@ class DeviceService {
   /// 对齐小程序 lockUFUID 序列：先 scan 唤醒，HALT 深睡态的部分芯片（批量认证后）
   /// 对 0x40 后门命令无响应，直接 halt 会报 HF tag not found
   Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
-    // 强制 RF 复位（对齐 Darkside 首轮）：批量认证轰炸后卡进入半死态，
-    // scan 可唤醒但 halt 后 0x40 无响应，须重建射频场（TAG→reader）
-    await cmdChangeDeviceMode(DeviceMode.tag);
-    await cmdChangeDeviceMode(DeviceMode.reader);
-    await cmdHf14aScan();
+    // 对齐 CU 库（Kk 类）：仅 halt → 0x40(7bit) → 0x43，
+    // 无 scan、无射频复位（小程序同序列可解，复位/scan 假说已证伪）
     await mf1Halt();
     try {
       final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
