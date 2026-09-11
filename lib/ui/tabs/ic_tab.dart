@@ -1039,25 +1039,32 @@ class _IcTabState extends State<IcTab> {
       // 验证密钥：批量检测扇区密钥（对齐小程序 checkCrackedKey，含扩展字典）
       // 逐块（32 把）点亮：每块命中即标记扇区状态并回填编辑区，刷新网格并保存断点
       final allKeys = dictKeysHex.sublist(dictStart).map(_hex).toList();
-      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
-          onProgress: (processed) {
-        // 批量验证按 32 把/块(约31s)推进，块返回即检查停止，
-        // 停止请求后最多再等一个块即可中断，而非跑完全部字典
-        checkStop();
-        // 大字典逐块验证，实时反馈进度并点亮已恢复扇区
-        progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
-        _appendKeysFromSectors(sectorKeys);
-        crackTick.value++;
-        _app.storage.saveCrackResume({
-          'uidHex': tag.uidHex,
-          'dictIndex': dictStart + processed,
-          'dictKeys': dictKeysHex,
-          'sectorKeys': [
-            for (final sk in sectorKeys)
-              [sk.hasKeyA ? sk.keyA : null, sk.hasKeyB ? sk.keyB : null]
-          ],
+      bool anyMissing;
+      if (allKeys.isEmpty) {
+        // 断点已恢复到字典末尾（上轮跑完）：无密钥可验，跳过空转的固件命令
+        LogService.instance.log('[解卡] 字典断点已在末尾, 跳过批量验证');
+        anyMissing = sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
+      } else {
+        anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
+            onProgress: (processed) {
+          // 批量验证按 32 把/块(约31s)推进，块返回即检查停止，
+          // 停止请求后最多再等一个块即可中断，而非跑完全部字典
+          checkStop();
+          // 大字典逐块验证，实时反馈进度并点亮已恢复扇区
+          progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
+          _appendKeysFromSectors(sectorKeys);
+          crackTick.value++;
+          _app.storage.saveCrackResume({
+            'uidHex': tag.uidHex,
+            'dictIndex': dictStart + processed,
+            'dictKeys': dictKeysHex,
+            'sectorKeys': [
+              for (final sk in sectorKeys)
+                [sk.hasKeyA ? sk.keyA : null, sk.hasKeyB ? sk.keyB : null]
+            ],
+          });
         });
-      });
+      }
       crackTick.value++;
       progress.value = '验证密钥：已标记扇区密钥信息.';
 
@@ -1157,7 +1164,9 @@ class _IcTabState extends State<IcTab> {
           // 后门卡已在开头前置路由（对齐 CU recoverKeys），此处仅剩无后门的全加密卡
           progress.value = '解卡片：$e';
           if (mounted) Navigator.of(context).pop();
-          _toast('Darkside攻击失败: $e');
+          // 卡无响应类失败多为反复认证后的锁死态（RF复位无法替代物理断电），
+          // 提示用户离场重置后再试
+          _toast('Darkside攻击失败: $e\n若卡曾被反复认证, 请离开读卡器10秒后重放再试');
           return sectorKeys;
         }
       }
