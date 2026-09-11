@@ -1095,7 +1095,12 @@ class _IcTabState extends State<IcTab> {
           final darkKey = await Crypto1.darkside(
             (isFirst) async {
               checkStop();
-              progress.value = '破解密钥：发现全加密卡，破解密钥中';
+              // isFirst 实为轮次索引(l)，0 时为首轮(isFirst=true)
+              progress.value =
+                  '破解密钥：Darkside攻击中 第${isFirst + 1}/256轮...';
+              if (isFirst % 16 == 0) {
+                LogService.instance.log('[解卡] Darkside采集轮${isFirst + 1}');
+              }
               final res = await _dev.cmdMf1AcquireDarkside(
                   block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
               if (res.status == 0) {
@@ -1109,11 +1114,18 @@ class _IcTabState extends State<IcTab> {
                 };
               }
               LogService.instance.log(
-                  '[解卡] Darkside采集失败 status=${res.status} (0=OK, 非0含卡无响应/防Darkside)');
+                  '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 非0含卡无响应/防Darkside)');
               return null;
             },
-            (key) async => await _dev.cmdMf1CheckBlockKey(
-                block: 0, keyType: KeyType.keyA, key: key),
+            (key) async {
+              final ok = await _dev.cmdMf1CheckBlockKey(
+                  block: 0, keyType: KeyType.keyA, key: key);
+              if (ok) {
+                LogService.instance.log(
+                    '[解卡] Darkside候选验证命中 key=${_hexStr(key)}');
+              }
+              return ok;
+            },
           );
           final darkHex = _int6Hex(darkKey!);
           sectorKeys[0].hasKeyA = true;
@@ -1127,7 +1139,9 @@ class _IcTabState extends State<IcTab> {
           progress.value = '破解密钥：Darkside成功，进入半加密卡破解流程...';
           LogService.instance.log(
               '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyA=$darkHex, 进入半加密流程');
-        } catch (_) {
+        } catch (e) {
+          // 区分真实失败原因：首轮采集无响应(TypeError) vs 256轮恢复穷尽(StateError)
+          LogService.instance.log('[解卡] Darkside异常: $e');
           _appendKeysFromSectors(sectorKeys);
           // 后门卡已在开头前置路由（对齐 CU recoverKeys），此处仅剩无后门的全加密卡
           progress.value = '解卡片：发现全加密卡，无法破解（密钥区为空，需至少一个已知密钥）';
