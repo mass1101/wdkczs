@@ -198,6 +198,10 @@ class _IcTabState extends State<IcTab> {
 
   /// 新破出密钥后立即用已知密钥复查全扇区：
   /// M1 卡常多扇区共用密钥，能认证通过的槽位直接标记，跳过后续破解
+  /// 传播验证：全卡批量 cmdMf1CheckKeysOfSectors（单次命令扫全部未标记槽位，
+  /// 动态收缩掩码自动跳过已命中项，比逐把 recheckKey 快 1-2 个数量级）；
+  /// 批量返回 keyA 命中后，对「A 新命中且 B 未标记」的扇区读 trailer 的 b3，
+  /// keyB 位置非全 0 即免费推导并验证（保留 CU checkKeysOnSector 尾部增强）。
   Future<void> _propagateKeys(List<SectorKeyState> sectorKeys) async {
     final names = <String>[];
     for (final sk in sectorKeys) {
@@ -214,8 +218,43 @@ class _IcTabState extends State<IcTab> {
       if (!names.contains(k)) names.add(k);
     }
     if (names.isEmpty) return;
-    LogService.instance.log('[_propagateKeys] checking ${names.length} known keys against all sectors');
-    await _checkCrackedKeys(names.map(_hex).toList(), sectorKeys);
+    // 构造只开未标记槽位的掩码；全标记则无需传播
+    final mask = Uint8List(10);
+    for (var s = 0; s < 16; s++) {
+      if (!sectorKeys[s].hasKeyA) mask[s >> 2] |= 2 << (6 - s % 4 * 2);
+      if (!sectorKeys[s].hasKeyB) mask[s >> 2] |= 1 << (6 - s % 4 * 2);
+    }
+    if (mask.every((m) => m == 0)) return;
+    LogService.instance.log(
+        '[_propagateKeys] ${names.length} known keys, mask=${_hexStr(mask)} (全卡批量)');
+    final res = await _dev.cmdMf1CheckKeysOfSectors(
+        keys: names.map(_hex).toList(), mask: mask);
+    final anyMissing = _mergeSectorKeys(res, sectorKeys);
+    LogService.instance.log(
+        '[_propagateKeys] found=${_hexStr(res.found)} anyMissing=$anyMissing');
+    // 对齐 CU checkKeysOnSector 尾部：A 命中读 trailer 免费推导 keyB
+    for (var s = 0; s < 16; s++) {
+      if (!sectorKeys[s].hasKeyA || sectorKeys[s].hasKeyB) continue;
+      final kname = sectorKeys[s].keyA;
+      if (kname.isEmpty) continue;
+      try {
+        final b3 = await _dev.cmdMf1ReadBlock(
+            block: 4 * s + 3, keyType: KeyType.keyA, key: _hex(kname));
+        if (b3.length == 16) {
+          final bkey = _hexStr(b3.sublist(10, 16));
+          if (bkey != '000000000000') {
+            final okB = await _dev.cmdMf1CheckBlockKey(
+                block: 4 * s, keyType: KeyType.keyB, key: _hex(bkey));
+            if (okB) {
+              sectorKeys[s].hasKeyB = true;
+              sectorKeys[s].keyB = bkey;
+              LogService.instance.log(
+                  '[_propagateKeys] sector=$s keyB=$bkey FOUND (读b3推导)');
+            }
+          }
+        }
+      } catch (_) {}
+    }
   }
 
   // ========== 读卡（对齐小程序 btnRead + btnGen2Read 完整流程） ==========
@@ -780,21 +819,28 @@ class _IcTabState extends State<IcTab> {
         }
 
         int hex6Int(String hex) => int.parse(hex, radix: 16);
-        Uint8List int6Bytes(int k) {
-          final b = Uint8List(6);
-          for (var i = 5; i >= 0; i--) {
-            b[i] = k & 0xFF;
-            k >>= 8;
-          }
-          return b;
-        }
 
-        // 候选批量验证（对齐小程序 checkCrackedKey）
+        // 候选验证（对齐 CU checkKeysOnSector：逐扇区 x A/B 批量验证）
         Future<void> verifyKeys(List<int> cands) async {
           if (cands.isEmpty) return;
-          final keys = cands.map(int6Bytes).toList();
-          LogService.instance.log('[_crackCard] 3gen verify candidates=${keys.length}');
-          await _checkCrackedKeys(keys, sectorKeys);
+          LogService.instance.log('[_crackCard] 3gen verify candidates=${cands.length}');
+          for (var s = 0; s < 16; s++) {
+            checkStop();
+            if (!sectorKeys[s].hasKeyA) {
+              final f = await _verifyCandidates(s, 2, cands);
+              if (f != null) {
+                sectorKeys[s].hasKeyA = true;
+                sectorKeys[s].keyA = f;
+              }
+            }
+            if (!sectorKeys[s].hasKeyB) {
+              final f = await _verifyCandidates(s, 1, cands);
+              if (f != null) {
+                sectorKeys[s].hasKeyB = true;
+                sectorKeys[s].keyB = f;
+              }
+            }
+          }
           crackTick.value++;
           _appendKeysFromSectors(sectorKeys);
         }
@@ -1458,7 +1504,7 @@ class _IcTabState extends State<IcTab> {
           LogService.instance.log(
               '[解卡] 扇区$sector $keyTypeStr 解不开: staticnested恢复候选为0(采集数据质量差)');
         }
-        return _verifyCandidates(sector, keyTypeBit, recovered, chunkSize: 40);
+        return _verifyCandidates(sector, keyTypeBit, recovered);
       }
       // 1代卡：nt2 一致，HardNested + 暴力验证
       final hardRes = await _dev.cmdMf1AcquireHardNested(
@@ -1476,7 +1522,7 @@ class _IcTabState extends State<IcTab> {
         LogService.instance.log(
             '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested候选为0(parity校验全部失败, 采集数据质量差)');
       }
-      return _verifyCandidates(sector, keyTypeBit, candidates, chunkSize: 40);
+      return _verifyCandidates(sector, keyTypeBit, candidates);
     }
     if (prng == 1) {
       // WEAK 嵌套：重试5次 + 暴力验证
@@ -1569,17 +1615,18 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 暴力验证候选密钥（对齐小程序 bruteforce_Crack + mf1CheckKeysOfSectors）
+  /// 候选集验证单扇区（对齐 CU checkKeysOnSector：mf1CheckKeysOnBlock 单扇区
+  /// 批量认证，chunkSize 对齐 CU BLE=32，目标为扇区 trailer 块）
   Future<String?> _verifyCandidates(
       int sector, int keyTypeBit, List<int> candidates,
-      {int chunkSize = 20}) async {
+      {int chunkSize = 32}) async {
     if (candidates.isEmpty) {
       LogService.instance.log('[_verifyCandidates] sector=$sector candidates empty');
       return null;
     }
-    LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length}');
-    final mask = Uint8List(10);
-    mask.fillRange(0, 10, 0xFF);
-    mask[sector >> 2] ^= keyTypeBit << (6 - sector % 4 * 2);
+    LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length} chunkSize=$chunkSize');
+    final keyType = keyTypeBit == 2 ? KeyType.keyA : KeyType.keyB;
+    final block = 4 * sector + 3; // trailer 块（对齐 CU mfClassicGetSectorTrailerBlockBySector）
     final keys = candidates
         .map((k) {
           final buf = Uint8List(6);
@@ -1589,13 +1636,14 @@ class _IcTabState extends State<IcTab> {
           return buf;
         })
         .toList();
-    final res = await _dev.cmdMf1CheckKeysOfSectors(
-        keys: keys, mask: mask, chunkSize: chunkSize);
-    final idx = keyTypeBit == 2 ? sector * 2 : sector * 2 + 1;
-    final found = res.sectorKeys[idx];
-    if (found != null) {
-      LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(found)}');
-      return _hexStr(found);
+    for (var i = 0; i < keys.length; i += chunkSize) {
+      final end = i + chunkSize < keys.length ? i + chunkSize : keys.length;
+      final found = await _dev.cmdMf1CheckKeysOfBlock(
+          block: block, keyType: keyType, keys: keys.sublist(i, end));
+      if (found != null && found.length == 6) {
+        LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(found)}');
+        return _hexStr(found);
+      }
     }
     LogService.instance.log('[_verifyCandidates] sector=$sector NOT FOUND (found bit=0)');
     return null;
