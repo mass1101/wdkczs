@@ -1243,7 +1243,9 @@ class DeviceService {
     for (var i = 0; i < keys.length; i++) {
       n.setRange(3 + i * 6, 3 + i * 6 + 6, keys[i]);
     }
-    final r = await _request(Cmd.mf1CheckKeysOnBlock.value, n);
+    final r = await _request(Cmd.mf1CheckKeysOnBlock.value, n,
+        // 对齐小程序动态超时公式 Vk + i*(keys+1)*100：单扇区单类型 i=1
+        timeout: 5 + keys.length * 100);
     return r.length > 1 ? r.sublist(1) : null;
   }
 
