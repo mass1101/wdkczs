@@ -65,6 +65,29 @@ final class _HardNested extends Struct {
   external int length;
 }
 
+final class _DarksideItem extends Struct {
+  @Uint32()
+  external int nt1;
+  @Uint64()
+  external int ks1;
+  @Uint64()
+  external int par;
+  @Uint32()
+  external int nr;
+  @Uint32()
+  external int ar;
+}
+
+final class _Darkside extends Struct {
+  @Uint32()
+  external int uid;
+  external Pointer<_DarksideItem> items;
+  @Uint32()
+  external int count;
+}
+
+typedef _DarksideFn = Pointer<Uint64> Function(Pointer<_Darkside>, Pointer<Uint32>);
+
 class NativeRecovery {
   static DynamicLibrary? _lib;
   static bool get available => _lib != null;
@@ -85,6 +108,51 @@ class NativeRecovery {
     }
     malloc.free(keys);
     return out;
+  }
+
+  /// Darkside 攻击（PM3 nonce2key，C 库同源 CU librecovery）：
+  /// 多条样本累积恢复，par==0（lucky 轮）候选与上轮交集收窄。
+  /// 计算耗时可能上百毫秒，内部 Isolate.run 防阻塞 UI。
+  /// items 每条 = 一次固件采集 (nt1, ks1, par, nr, ar)，ks1/par 为大端 u64。
+  static Future<List<int>> darkside({
+    required int uid,
+    required List<({int nt1, int ks1, int par, int nr, int ar})> items,
+  }) {
+    return Isolate.run(() => _darksideSync(uid: uid, items: items));
+  }
+
+  static List<int> _darksideSync({
+    required int uid,
+    required List<({int nt1, int ks1, int par, int nr, int ar})> items,
+  }) {
+    init();
+    final lib = _lib;
+    if (lib == null) return const [];
+    final f = lib.lookupFunction<_DarksideFn, _DarksideFn>('darkside');
+    final data = malloc<_Darkside>();
+    final itemsP = malloc<_DarksideItem>(items.length);
+    final countP = malloc<Uint32>();
+    data.ref.uid = uid & 0xFFFFFFFF;
+    data.ref.items = itemsP;
+    data.ref.count = items.length;
+    for (var i = 0; i < items.length; i++) {
+      final it = items[i];
+      itemsP[i].nt1 = it.nt1 & 0xFFFFFFFF;
+      itemsP[i].ks1 = it.ks1;
+      itemsP[i].par = it.par;
+      itemsP[i].nr = it.nr & 0xFFFFFFFF;
+      itemsP[i].ar = it.ar & 0xFFFFFFFF;
+    }
+    countP.value = 0;
+    try {
+      final keys = f(data, countP);
+      if (keys == nullptr) return const [];
+      return _readKeys(keys, countP.value);
+    } finally {
+      malloc.free(data);
+      malloc.free(itemsP);
+      malloc.free(countP);
+    }
   }
 
   /// 弱随机卡嵌套攻击（PM3 mfnested，毫秒级）

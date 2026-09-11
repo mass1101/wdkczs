@@ -1098,52 +1098,126 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
-      // 全加密卡：尝试 Darkside 攻击块0 keyA（对齐小程序 hS.darkside）
+      // 全加密卡：Darkside 攻击块0 keyA
+      // C 库可用（对齐 CU 官方）：前置探测(syncMax=2) → 5次样本累积(syncMax=15)
+      // → PM3 nonce2key C 恢复 → 候选上卡验证
+      // C 库不可用（回退小程序 hS.darkside 移植算法）：256轮逐条采集+JS式恢复
       if (eSector == -1) {
-        progress.value = '破解密钥：发现全加密卡，尝试Darkside攻击...';
+        progress.value = '破解密钥：发现全加密卡，检测Darkside漏洞...';
         try {
-          final darkKey = await Crypto1.darkside(
-            (isFirst) async {
-              checkStop();
-              // isFirst 实为轮次索引(l)，0 时为首轮(isFirst=true)
-              progress.value =
-                  '破解密钥：Darkside攻击中 第${isFirst + 1}/256轮...';
-              if (isFirst % 16 == 0) {
-                LogService.instance.log('[解卡] Darkside采集轮${isFirst + 1}');
-              }
-              final res = await _dev.cmdMf1AcquireDarkside(
-                  block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
-              if (res.status == 0) {
-                return {
-                  'uid': res.uid!,
-                  'nt': res.nt!,
-                  'par': res.par!,
-                  'ks': res.ks!,
-                  'nr': res.nr!,
-                  'ar': res.ar!,
-                };
-              }
-              // 对齐小程序采集cb：status枚举 OK=0/CANT_FIX_NT=1/LUCKY_AUTH_OK=2/
-              // NO_NAK_SENT=3/TAG_CHANGED=4，非OK单轮即终止（单轮失败即无漏洞卡，
-              // 重试无意义），LUCKY_AUTH_OK 幸运碰撞数据同样不可用
+          int? darkKey;
+          if (NativeRecovery.available) {
+            // 前置探测（对齐 CU checkMf1Darkside）：同命令 syncMax=2 快探
+            final probe = await _dev.cmdMf1AcquireDarkside(
+                block: 0, keyType: KeyType.keyA, isFirst: true, syncMax: 2);
+            // status 枚举（对齐 CU DarksideResult）：
+            // 0=vulnerable 1=cantFixNT 2=luckyAuthOK 3=notSendingNACK 4=tagChanged
+            if (probe.status != 0) {
               LogService.instance.log(
-                  '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 2=LUCKY_AUTH_OK)');
-              if (res.status == 2) {
-                throw DeviceException(-1, 'LUCKY_AUTH_OK');
-              }
+                  '[解卡] Darkside探测 status=${probe.status} (0=vulnerable)');
               throw DeviceException(
-                  -1, '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥 (status=${res.status})');
-            },
-            (key) async {
-              final ok = await _dev.cmdMf1CheckBlockKey(
-                  block: 0, keyType: KeyType.keyA, key: key);
-              if (ok) {
-                LogService.instance.log(
-                    '[解卡] Darkside候选验证命中 key=${_hexStr(key)}');
+                  -1,
+                  switch (probe.status) {
+                    1 => '该卡片无法固定NT(CANT_FIX_NT), Darkside不可用',
+                    2 => 'LUCKY_AUTH_OK',
+                    3 => '该卡片不发送NAK(NO_NAK_SENT), Darkside不可用',
+                    4 => '卡片响应变化(TAG_CHANGED)',
+                    _ => '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥',
+                  });
+            }
+            // 样本累积攻击（对齐 CU recovery.dart:281 tries<5，每条 syncMax=15）
+            final items = <({int nt1, int ks1, int par, int nr, int ar})>[];
+            int be(List<int> b) {
+              var v = 0;
+              for (final x in b) {
+                v = (v << 8) | (x & 0xFF);
               }
-              return ok;
-            },
-          );
+              return v;
+            }
+            for (var t = 0; t < 5 && darkKey == null; t++) {
+              checkStop();
+              progress.value = '破解密钥：Darkside攻击中 采集样本${t + 1}/5...';
+              final res = await _dev.cmdMf1AcquireDarkside(
+                  block: 0, keyType: KeyType.keyA, isFirst: t == 0, syncMax: 15);
+              if (res.status != 0 || res.uid == null) {
+                LogService.instance.log(
+                    '[解卡] Darkside采集失败样本${t + 1} status=${res.status}');
+                throw DeviceException(
+                    -1, 'Darkside采集失败 (status=${res.status})');
+              }
+              // 大端组装（对齐 CU bytesToU32/bytesToU64 字段序 uid/nt1/par/ks1/nr/ar）
+              items.add((
+                nt1: be(res.nt!),
+                ks1: be(res.ks!),
+                par: be(res.par!),
+                nr: be(res.nr!),
+                ar: be(res.ar!),
+              ));
+              final keys = await NativeRecovery.darkside(
+                  uid: uidInt, items: items);
+              LogService.instance.log(
+                  '[解卡] Darkside C库恢复 ${items.length}条样本, 候选${keys.length}个');
+              for (final k in keys) {
+                checkStop();
+                final khex = _int6Hex(k);
+                final ok = await _dev.cmdMf1CheckBlockKey(
+                    block: 0, keyType: KeyType.keyA, key: _hex(khex));
+                if (ok) {
+                  darkKey = k;
+                  LogService.instance.log(
+                      '[解卡] Darkside候选验证命中 key=$khex (样本${items.length}条)');
+                  break;
+                }
+              }
+            }
+            if (darkKey == null) {
+              throw DeviceException(-1,
+                  'Darkside攻击穷尽5条样本未破出密钥, 卡片可能防Darkside');
+            }
+          } else {
+            darkKey = await Crypto1.darkside(
+              (isFirst) async {
+                checkStop();
+                // isFirst 实为轮次索引(l)，0 时为首轮(isFirst=true)
+                progress.value =
+                    '破解密钥：Darkside攻击中 第${isFirst + 1}/256轮...';
+                if (isFirst % 16 == 0) {
+                  LogService.instance.log('[解卡] Darkside采集轮${isFirst + 1}');
+                }
+                final res = await _dev.cmdMf1AcquireDarkside(
+                    block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
+                if (res.status == 0) {
+                  return {
+                    'uid': res.uid!,
+                    'nt': res.nt!,
+                    'par': res.par!,
+                    'ks': res.ks!,
+                    'nr': res.nr!,
+                    'ar': res.ar!,
+                  };
+                }
+                // 对齐小程序采集cb：status枚举 OK=0/CANT_FIX_NT=1/LUCKY_AUTH_OK=2/
+                // NO_NAK_SENT=3/TAG_CHANGED=4，非OK单轮即终止（单轮失败即无漏洞卡，
+                // 重试无意义），LUCKY_AUTH_OK 幸运碰撞数据同样不可用
+                LogService.instance.log(
+                    '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 2=LUCKY_AUTH_OK)');
+                if (res.status == 2) {
+                  throw DeviceException(-1, 'LUCKY_AUTH_OK');
+                }
+                throw DeviceException(
+                    -1, '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥 (status=${res.status})');
+              },
+              (key) async {
+                final ok = await _dev.cmdMf1CheckBlockKey(
+                    block: 0, keyType: KeyType.keyA, key: key);
+                if (ok) {
+                  LogService.instance.log(
+                      '[解卡] Darkside候选验证命中 key=${_hexStr(key)}');
+                }
+                return ok;
+              },
+            );
+          }
           final darkHex = _int6Hex(darkKey!);
           sectorKeys[0].hasKeyA = true;
           sectorKeys[0].keyA = darkHex;
