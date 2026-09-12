@@ -2480,8 +2480,8 @@ class _IcTabState extends State<IcTab> {
         LogService.instance.log(
             '[解卡] 后门恢复 扇区$sector: filterKeys后 A=${keysA.length} B=${keysB.length}');
       }
-      // 上卡批量验证（对齐 CU checkKeysOnSector）；缺对侧/已解一侧时单侧验证
-      const chunk = 500;
+      // 上卡验证（严格对齐 CU checkKeysOnSector：按目标扇区 2015 mf1CheckKeysOnBlock
+      // 单块逐chunk，status!=0->null 不中断，命中返回；缺对侧/已解一侧单侧验证）
       for (final entry in [(0, hasA, keysA), (1, hasB, keysB)]) {
         checkStop();
         final pair = entry;
@@ -2490,20 +2490,18 @@ class _IcTabState extends State<IcTab> {
         if (cands.isEmpty) continue;
         progress.value =
             '解卡片：后门恢复扇区$sector ${pair.$1 == 0 ? 'keyA' : 'keyB'}...';
-        final keys = <Uint8List>[];
-        for (final k in cands) {
-          final b = Uint8List(6);
-          var v = k;
-          for (var i = 5; i >= 0; i--) {
-            b[i] = v & 0xFF;
-            v >>= 8;
+        final hit = await _verifyCandidates(
+            sector, pair.$1 == 0 ? 2 : 1, cands, use2015: true);
+        if (hit != null) {
+          if (pair.$1 == 0) {
+            sectorKeys[sector].hasKeyA = true;
+            sectorKeys[sector].keyA = hit;
+          } else {
+            sectorKeys[sector].hasKeyB = true;
+            sectorKeys[sector].keyB = hit;
           }
-          keys.add(b);
-        }
-        for (var i = 0; i < keys.length; i += chunk) {
-          checkStop();
-          await _checkCrackedKeys(
-              keys.sublist(i, (i + chunk).clamp(0, keys.length)), sectorKeys);
+          LogService.instance.log(
+              '[解卡] 后门恢复 扇区$sector ${pair.$1 == 0 ? 'keyA' : 'keyB'} 命中 key=$hit');
         }
         crackTick.value++;
         _appendKeysFromSectors(sectorKeys);
