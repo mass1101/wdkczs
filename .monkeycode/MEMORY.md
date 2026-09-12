@@ -109,3 +109,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - 算法等价性：CU `_computeSeednt16Nt32(nt32,key)` 与 nfctool `Crypto1.gen3NonceTag(nt,key)` **逐字等价**（同 a/b 表、同前退 14 步+每 8 步、同 key 48 位两半字节展开；nfctool 的 d==32/40 中间截断表达只是等价改写，产出相同 seednt16）。filterKeys 依赖此等价，勿改 gen3NonceTag 内部。
   - filterKeys 原理：同扇区 keyA/keyB 加密嵌套来自同一 LFSR 序号，二者 seednt16 必须相等；用此约束把 A、B 各自候选里的错 key 交叉剔除，保留下来的交集两侧才上卡验证。
   - nfctool `cmdMf1AcquireStaticEncryptedNested` 每 14 字节 chunk 同时含该扇区 keyA+keyB 的 (nt,ntEnc,par)，天然支撑按扇区做 A/B 交叉过滤，无需额外采集。
+
+[Project Knowledge Summary]
+- Date: 2026-09-12
+- Context: 修 WEAK 卡 nested 恢复候选验证全 fail（HF tag auth failed status=6）时定位到两个叠加 bug
+- Category: Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - **`_verifyCandidates` 只能用 2012 `cmdMf1CheckKeysOfSectors` 单扇区槽位 mask 验证候选**，勿再用 2015 `cmdMf1CheckKeysOfBlock`：2015 该命令对**未命中候选 key 返回 status=6（认证失败）→ `_request` 抛异常中断验证**，导致候选里即使有真 key 也首把错 key 就 abort。2012 容忍错 key 逐候选扫描命中返回。mask 布局 = 10 字节 80 槽，byte=sector>>2，keyA 位 `2<<(6-s%4*2)`、keyB 位 `1<<(6-s%4*2)`，命中读 `res.sectorKeys[sector*2 + (keyA?0:1)]`。
+  - **WEAK native 恢复务必只取 C 库 `nested_run` 前 topK(top50) 高频候选**，对齐小程序 nestedMerge：C 库返回已按出现频次排序（真 key 频次最高靠前），而旧代码 `merged.addAll(...)`(Set) 把 42 万候选全量保留且丢弃排序，既让候选验证不可行（上卡扫 42 万）又丢精度。每对恢复结果按序取前 50 去重保序即可。
+  - `_verifyCandidates` 是 3gen/STATIC/WEAK/hardnested 全部候选验证的公共入口，此修复一处覆盖全部。
+  - 判据：日志出现 `native recovered=425113/558730` 且随后的 `_verifyCandidates ... status=6`，即同时命中上述两个 bug。
