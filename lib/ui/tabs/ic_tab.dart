@@ -1585,9 +1585,11 @@ class _IcTabState extends State<IcTab> {
           if (NativeRecovery.available && samples.length >= 2) {
             // native C 路径（PM3 mfnested，毫秒级）：每对用各自 dist 恢复，
             // C 库 nested_run 结果按出现频次排序（真 key 多条恢复时频次最高靠前）。
-            // 对齐小程序 nestedMerge top50：只取前 topK 高频候选上卡，
-            // 勿 Set.addAll 全量（丢弃频次排序且 42 万级候选上卡无法接受）
-            const topK = 50;
+            // 勿取值过小：5c662ca 曾用 topK=50，会把真 key(排第>50 名)截断丢失，
+            // 使 80c4a4d 全量(merged.addAll)可解的卡解不开(日志 native recovered=50
+            // 恰打满 topK 即信号)。改用较大上限 cap，既保留排序靠前的真 key，
+            // 又避免 42 万级候选全量上卡的极端耗时；验证器已按 chunk=32 分批扫。
+            const topK = 5000;
             final merged = <int>[];
             void mergeTop(List<int> cands) {
               for (var i = 0; i < cands.length && i < topK; i++) {
@@ -1642,7 +1644,7 @@ class _IcTabState extends State<IcTab> {
                 keysPerPair.add(keys);
               }
             }
-            recovered = Crypto1.nestedMerge(keysPerPair);
+            recovered = Crypto1.nestedMerge(keysPerPair, top: 5000);
             LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry samples=${samples.length} recovered=${recovered.length}');
           }
           if (recovered.isEmpty) {
@@ -1678,7 +1680,7 @@ class _IcTabState extends State<IcTab> {
                       samples.last.uid, pair));
                 }
               }
-              final dartKeys = Crypto1.nestedMerge(keysPerPair);
+              final dartKeys = Crypto1.nestedMerge(keysPerPair, top: 5000);
               if (dartKeys.isNotEmpty) {
                 LogService.instance.log(
                     '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dart fallback recovered=${dartKeys.length}');

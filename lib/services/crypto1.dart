@@ -793,8 +793,10 @@ class Crypto1 {
     return keys;
   }
 
-  /// nested 第三步：合并各采样对候选密钥，按出现次数排序取 top50（快速）
-  static List<int> nestedMerge(List<List<int>> keysPerPair) {
+  /// nested 第三步：合并各采样对候选密钥，按出现次数排序取 top（默认 50）
+  /// WEAK 采集/兜底传较大 top（如 5000），避免真 key 排序靠后被截断丢失，
+  /// 与 native 侧 mergeTop 上限一致（5c662ca 曾 topK=50 丢失真 key 致可解卡解不开）。
+  static List<int> nestedMerge(List<List<int>> keysPerPair, {int top = 50}) {
     final counts = <int, int>{};
     for (final keys in keysPerPair) {
       for (final k in keys) {
@@ -803,7 +805,7 @@ class Crypto1 {
     }
     final sorted = counts.entries.toList()
       ..sort((x, y) => y.value.compareTo(x.value));
-    return sorted.take(50).map((e) => e.key).toList();
+    return sorted.take(top).map((e) => e.key).toList();
   }
 
   /// nested：非静态随机数嵌套攻击
