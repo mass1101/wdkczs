@@ -139,4 +139,16 @@ Entries discovered by the Agent during task execution should follow this format:
   - **WEAK 多对采集必须每对重测 dist**：677523a 曾"测一次 dist 连续采多对"→ 后续采集对 PRNG 已前移与 dist 不对齐、污染候选致回归。正解 = 每对独立「`cmdMf1TestNtDistance`+`cmdMf1AcquireNested`」带当轮 dist，对齐 CU 的 NtDistance+Acquire 成对绑定；native 候选全验证失败且<50 时追加 Dart `recoverKeysInIsolate` 兜底(读全32bit par 已对拍正确)。
   - **Darkside 严格对齐 CU**：探测 `cmdMf1AcquireDarkside(block:3, keyType:keyB(0x61), syncMax:2)`、采集块3 keyB syncMax=15、候选验证 `cmdMf1CheckBlockKey(block:3,keyB)`、成功后产出**扇区0 keyB**(非 keyA，对齐 CU `getMf1Darkside(0x03,0x61)`+`checkKeysOnSector(keys,1,0)`)。
   - **backdoor 验证对齐 CU**：`_crackBackdoorNested` 候选验证从 `_checkCrackedKeys`(2012 多槽全卡) 改按目标扇区 `_verifyCandidates(use2015=true)`，filterKeys 交集过滤沿用。
-  - 采集协议已确认全部字节对齐 CU：weak=`[keyType,block,key6,targetKeyType,targetBlock]`响应每9字节(nt4+ntEnc4+par1)；static=`mf1StaticNestedAcquire`+uid(4)+每8字节对、从i=4起；hard=`[slow,keyType,block,key6,targetKeyType,targetBlock]`。
+   - 采集协议已确认全部字节对齐 CU：weak=`[keyType,block,key6,targetKeyType,targetBlock]`响应每9字节(nt4+ntEnc4+par1)；static=`mf1StaticNestedAcquire`+uid(4)+每8字节对、从i=4起；hard=`[slow,keyType,block,key6,targetKeyType,targetBlock]`。
+
+[Project Knowledge Summary]
+- Date: 2026-09-13
+- Context: 修 Gen1a 后门读卡失败（5a1aedd→ac4ab63，三方授权序列对比+真机日志）时确认
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - `_mf1Gen1aAuth` 内 scan/halt 曾放在 try 块外：scan 报 HF tag not found 即整体异常退出，0x40/0x43 根本没发出。已改为 scan 容错（失败仅告警，继续 halt→0x40→0x43），halt 移入 try 内（对齐小程序 try{halt...}finally{halt}）。
+  - **真机验证（2026-09-13 日志）：scan 容错后 0x40 仍报 auth failed 1**——仅 scan 唤醒对部分芯片不足。小程序 btnCrack Gen1a 前完整前置 = `cmdHf14aScan → hf14aInfo(内部再 scan + cmdMf1IsSupport + cmdMf1TestPrngType) → _mf1Gen1aAuth`；PRNG 检测与卡的多轮完整认证交互（autoSelect+auth 采集 nonce）让部分芯片进入稳定态后 0x40 才有响应。已补齐 IsSupport+PrngType 前置（容错 catch，失败照试 Gen1a），仅解卡路径加（mf1Gen1aReadBlocks 单次授权多块读不加，否则逐扇区调用被拖慢）。scan 成功/失败均记日志（`[Gen1a] scan唤醒: N张卡`）便于诊断。
+  - 参照实现授权序列本身无 scan：小程序 Kk 库 `try{mf1Halt→0x40(7bit,keepRfField)→0x43(keepRfField)→cb}finally{halt}`；CU gen1.dart 是 `0x00 reset帧→0x40→0x43`。0x40 后门命令不依赖选卡。
+  - 固件 rc522.c `pcd_14a_reader_raw_cmd`：带数据的 raw 帧 openRFField 被强制置 true，场关则 reset+antenna_on+8ms 重开场（卡掉电回 IDLE）——0x40 在 IDLE/HALT 任意态都有响应机会；固件 scan（`pcd_14a_reader_atqa_request`）用 WUPA(0x52) 重试 10 次可唤醒 HALT 卡。
+  - Gen1a 三方参数已逐字节核对一致：0x40/0x43 均 appendCrc=false、autoSelect=false、keepRfField=true，响应校验 r[0]==0x0A；读块 0x30 appendCrc+checkResponseCrc+keepRfField。所有 Gen1a 路径（读卡/解卡/写卡/格式化/UID）共用 _mf1Gen1aAuth。
+  - nfctool `_crackCard` 对所有 SAK=08 卡先试 Gen1a 免密读再落常规流程，与小程序 btnCrack 一致；日志「Gen1a免密读卡可用」仅表示开始尝试，真实判定 = 0x40 是否响应 0x0A。
