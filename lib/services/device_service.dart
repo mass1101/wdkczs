@@ -1151,7 +1151,8 @@ class DeviceService {
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
-    // 32 把/块（对齐 CU BLE）：32×32 槽位×~30ms ≈ 31s < 60s 超时
+    // 32 把/块（对齐 CU BLE）。全加密卡（CUID 等）单卡认证慢，单 chunk
+    // 扫描可能远超 60s（m1 卡 47 把实测 ~90s），故超时放宽到 180s 防边界超时
     int chunkSize = 32,
     void Function(Mf1CheckKeysOfSectorsRes partial, int processedKeys)? onChunk,
   }) async {
@@ -1169,7 +1170,7 @@ class DeviceService {
         n.setRange(10 + i * 6, 10 + i * 6 + 6, chunk[i]);
       }
       final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n,
-          timeout: 60000);
+          timeout: 180000);
       final found = Uint8List(10);
       found.setRange(0, 10, r.sublist(0, 10));
       var allDone = true;
