@@ -851,16 +851,18 @@ class DeviceService {
         appendCrc: true, data: Uint8List.fromList([0x50, 0x00]), waitResponse: false);
   }
 
-  /// Gen1a 免密认证包裹：切回读写器模式 → scan(WUPA唤醒HALT卡) → halt → 0x40(7bit) → 0x43 → e100e1ee → 执行回调 → halt
-  /// 对齐小程序 lockUFUID 序列：先 scan 唤醒，HALT 深睡态的部分芯片（批量认证后）
-  /// 对 0x40 后门命令无响应，直接 halt 会报 HF tag not found
+  /// Gen1a 免密认证包裹：scan(唤醒HALT深睡卡, 容错) → halt → 0x40(7bit) → 0x43 → 执行回调 → halt
+  /// scan 唤醒 HALT 深睡态的部分芯片（批量认证后对 0x40 后门命令无响应的场景）。
+  /// 参照实现（小程序 Kk 库/CU）授权序列本身无 scan：0x40 后门命令不依赖选卡，
+  /// 固件对带数据的 raw 帧强制重开场（卡掉电回 IDLE），故 scan 失败仅告警、继续本流程
   Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
-    // 对齐小程序写UID序列：scan 唤醒 HALT 深睡态卡，否则 0x40 后门命令
-    // 无响应报 HF tag not found。仅 scan，不做 TAG→reader 强制复位
-    //（强制复位对 CUID 卡 Darkside 反致失败，已证伪，勿复加）
-    await cmdHf14aScan();
-    await mf1Halt();
     try {
+      try {
+        await cmdHf14aScan();
+      } catch (e) {
+        LogService.instance.log('[Gen1a] scan唤醒失败, 继续halt+0x40流程: $e');
+      }
+      await mf1Halt();
       final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
           .catchError((e) => throw DeviceException(-1, 'Gen1a auth failed 1: $e'));
       if (r1.isEmpty || r1[0] != 10) throw DeviceException(-1, 'Gen1a auth failed 1');
