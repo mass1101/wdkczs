@@ -721,6 +721,14 @@ class _IcTabState extends State<IcTab> {
 
       // 验证密钥：尝试 Gen1a 免密读卡（对齐小程序 btnCrack：单次授权连续读 16 个 b3，读到即标记）
       try {
+        // 对齐小程序 hf14aInfo 前置（scan→IsSupport→PrngType 检测）：
+        // PRNG 检测与卡的多轮认证交互让部分芯片进入稳定态，仅 scan 唤醒后
+        // 0x40 后门命令可能无响应（真机 2026-09-13 日志 auth failed 1）
+        try {
+          if (await _dev.cmdMf1IsSupport()) {
+            await _dev.cmdMf1TestPrngType();
+          }
+        } catch (_) {}
         progress.value = '验证密钥：发现UID卡，可免密读卡...';
         LogService.instance.log(
             '[解卡] Gen1a免密读卡可用(UID魔改卡, 无漏洞限制, 直接读全部密钥)');

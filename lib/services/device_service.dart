@@ -858,7 +858,8 @@ class DeviceService {
   Future<T> _mf1Gen1aAuth<T>(Future<T> Function() cb) async {
     try {
       try {
-        await cmdHf14aScan();
+        final tags = await cmdHf14aScan();
+        LogService.instance.log('[Gen1a] scan唤醒: ${tags.length}张卡');
       } catch (e) {
         LogService.instance.log('[Gen1a] scan唤醒失败, 继续halt+0x40流程: $e');
       }
