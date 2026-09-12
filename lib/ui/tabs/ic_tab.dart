@@ -1543,36 +1543,47 @@ class _IcTabState extends State<IcTab> {
         stop();
         LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry START');
         try {
-          final distRes = await _dev.cmdMf1TestNtDistance(
-              block: eSector * 4, keyType: acquireKeyType, key: eKey);
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry distRes.uid=${distRes.uid.length} dist=${distRes.dist.length}');
-          final dist = _bytesInt(distRes.dist.sublist(0, 4));
-          final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dist=$dist nestedUid=$nestedUid');
-          // 单次采集（对齐 80c4a4d 等历史可解版本）。多对采集（acqRounds=4）在
-          // 部分卡上引入回归：连续多次 cmdMf1AcquireNested 用同一测得的 dist，
-          // 后续采集对与 dist 不对齐且污染候选，导致原本可解的卡恢复含真 key
-          // 却被噪声淹没。恢复单次采集，验证提速另有路径。
-          final nested = await _dev.cmdMf1AcquireNested(
-              block: eSector * 4,
-              keyType: acquireKeyType,
-              key: eKey,
-              targetBlock: sector * 4,
-              targetKeyType: targetKeyType);
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry nested.length=${nested.length}');
-          final atks = nested
-              .map((a) => {
+          // 对齐小程序：每对采集独立「测 dist + acquire」，各自用当轮 dist 恢复后合并。
+          // 多次采样提供不同 (nt,par) 约束，能收窄单对的 keystream 歧义到真 key；
+          // 每对重测 dist 保证偏移量对齐，避免「测一次 dist 采多对」的污染回归
+          // （连续 acquire 而不重测时 PRNG 已前移，后续对与 dist 不对齐）。
+          const acqRounds = 4;
+          final samples = <({int dist, int uid, Map<String, int> atk})>[];
+          for (var r = 0; r < acqRounds; r++) {
+            stop();
+            final distRes = await _dev.cmdMf1TestNtDistance(
+                block: eSector * 4, keyType: acquireKeyType, key: eKey);
+            final dist = _bytesInt(distRes.dist.sublist(0, 4));
+            final uid = _bytesInt(distRes.uid.sublist(0, 4));
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry round=$r dist=$dist nestedUid=$uid');
+            final nested = await _dev.cmdMf1AcquireNested(
+                block: eSector * 4,
+                keyType: acquireKeyType,
+                key: eKey,
+                targetBlock: sector * 4,
+                targetKeyType: targetKeyType);
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry round=$r nested.length=${nested.length}');
+            if (nested.length >= 2) {
+              // 每对采集含 2 条(1 对)，各自携带当轮 dist
+              for (final a in nested) {
+                samples.add((
+                  dist: dist,
+                  uid: uid,
+                  atk: {
                     'nt1': _bytesInt(a.nt1),
                     'nt2': _bytesInt(a.nt2),
                     'par': a.par,
-                  })
-              .toList();
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
+                  },
+                ));
+              }
+            }
+          }
           // 对齐小程序：每轮重试追加进度点
           progress?.value = '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
           List<int> recovered;
-          if (NativeRecovery.available && atks.length >= 2) {
-            // native C 路径（PM3 mfnested，毫秒级）：采集对两两配对恢复，
+          var nativePath = false;
+          if (NativeRecovery.available && samples.length >= 2) {
+            // native C 路径（PM3 mfnested，毫秒级）：每对用各自 dist 恢复，
             // C 库 nested_run 结果按出现频次排序（真 key 多条恢复时频次最高靠前）。
             // 对齐小程序 nestedMerge top50：只取前 topK 高频候选上卡，
             // 勿 Set.addAll 全量（丢弃频次排序且 42 万级候选上卡无法接受）
@@ -1583,48 +1594,98 @@ class _IcTabState extends State<IcTab> {
                 if (!merged.contains(cands[i])) merged.add(cands[i]);
               }
             }
-            for (var i = 0; i + 1 < atks.length; i += 2) {
+            for (var i = 0; i + 1 < samples.length; i += 2) {
               stop();
+              final s0 = samples[i];
+              final s1 = samples[i + 1];
               mergeTop(NativeRecovery.nested(
-                  uid: nestedUid,
-                  dist: dist,
-                  nt0: atks[i]['nt1']!, nt0Enc: atks[i]['nt2']!, par0: atks[i]['par']!,
-                  nt1: atks[i + 1]['nt1']!, nt1Enc: atks[i + 1]['nt2']!, par1: atks[i + 1]['par']!));
+                  uid: s0.uid,
+                  dist: s0.dist,
+                  nt0: s0.atk['nt1']!, nt0Enc: s0.atk['nt2']!, par0: s0.atk['par']!,
+                  nt1: s1.atk['nt1']!, nt1Enc: s1.atk['nt2']!, par1: s1.atk['par']!));
             }
-            if (atks.length.isOdd) {
+            if (samples.length.isOdd) {
               stop();
+              final s0 = samples.last;
+              final s1 = samples.first;
               mergeTop(NativeRecovery.nested(
-                  uid: nestedUid,
-                  dist: dist,
-                  nt0: atks.last['nt1']!, nt0Enc: atks.last['nt2']!, par0: atks.last['par']!,
-                  nt1: atks.first['nt1']!, nt1Enc: atks.first['nt2']!, par1: atks.first['par']!));
+                  uid: s0.uid,
+                  dist: s0.dist,
+                  nt0: s0.atk['nt1']!, nt0Enc: s0.atk['nt2']!, par0: s0.atk['par']!,
+                  nt1: s1.atk['nt1']!, nt1Enc: s1.atk['nt2']!, par1: s1.atk['par']!));
             }
             recovered = merged;
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native recovered=${recovered.length}');
+            nativePath = true;
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native samples=${samples.length} recovered=${recovered.length}');
           } else {
-            // Dart 路径（native 不可用时回退）
-            // 第一步：奇偶过滤得到有效采样对（快速）
-            final collected = Crypto1.nestedCollect(dist: dist, atks: atks);
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry collected=${collected.length}');
-            // 第二步：逐对状态恢复（每对数十秒，放入后台 isolate 并回报进度）
+            // Dart 路径（native 不可用时回退）。Dart 需要每对独立恢复，
+            // 逐对用各自 dist 采集过滤后状态恢复
             final keysPerPair = <List<int>>[];
-            for (var i = 0; i < collected.length; i++) {
+            for (var i = 0; i + 1 < samples.length; i += 2) {
               stop();
-              progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i + 1}/${collected.length} 对（每对约半分钟）...';
-              final pair = collected[i];
-              final keys = await Crypto1.recoverKeysInIsolate(nestedUid, pair);
-              keysPerPair.add(keys);
+              progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i ~/ 2 + 1}/${(samples.length / 2).ceil()} 对（每对约半分钟）...';
+              final collected = Crypto1.nestedCollect(
+                  dist: samples[i].dist,
+                  atks: [samples[i].atk, samples[i + 1].atk]);
+              for (final pair in collected) {
+                final keys = await Crypto1.recoverKeysInIsolate(samples[i].uid, pair);
+                keysPerPair.add(keys);
+              }
             }
-            // 第三步：合并候选取 top50（快速）
+            if (samples.length.isOdd) {
+              stop();
+              final collected = Crypto1.nestedCollect(
+                  dist: samples.last.dist,
+                  atks: [samples.last.atk, samples.first.atk]);
+              for (final pair in collected) {
+                final keys = await Crypto1.recoverKeysInIsolate(samples.last.uid, pair);
+                keysPerPair.add(keys);
+              }
+            }
             recovered = Crypto1.nestedMerge(keysPerPair);
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry recovered=${recovered.length}');
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry samples=${samples.length} recovered=${recovered.length}');
           }
           if (recovered.isEmpty) {
             LogService.instance.log(
                 '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选交集为空(采集样本质量差), 重试');
           } else {
-            final found = await _verifyCandidates(sector, keyTypeBit, recovered,
+            var found = await _verifyCandidates(sector, keyTypeBit, recovered,
                 sectorKeys: verifySectorKeys);
+            // native C 恢复候选全验证失败时，追加一次 Dart 恢复兜底(读全32bit par，
+            // 已对拍过正确)。C nested 对部分卡(如 dist 抖动偏大)恢复出的单候选
+            // 是 keystream 歧义解而非真 key，Dart 同一批 samples 收敛结果不同，
+            // 可作为真 key 的二次来源。仅 native 候选较少(<topK)时触发避免耗时。
+            if (found == null && nativePath && recovered.length < 50) {
+              final keysPerPair = <List<int>>[];
+              for (var i = 0; i + 1 < samples.length; i += 2) {
+                stop();
+                progress?.value = '破解密钥：弱随机卡，Dart 兜底恢复扇区$sector ${i ~/ 2 + 1}/${(samples.length / 2).ceil()} 对...';
+                final collected = Crypto1.nestedCollect(
+                    dist: samples[i].dist,
+                    atks: [samples[i].atk, samples[i + 1].atk]);
+                for (final pair in collected) {
+                  keysPerPair.add(
+                      await Crypto1.recoverKeysInIsolate(samples[i].uid, pair));
+                }
+              }
+              if (samples.length.isOdd) {
+                stop();
+                final collected = Crypto1.nestedCollect(
+                    dist: samples.last.dist,
+                    atks: [samples.last.atk, samples.first.atk]);
+                for (final pair in collected) {
+                  keysPerPair.add(await Crypto1.recoverKeysInIsolate(
+                      samples.last.uid, pair));
+                }
+              }
+              final dartKeys = Crypto1.nestedMerge(keysPerPair);
+              if (dartKeys.isNotEmpty) {
+                LogService.instance.log(
+                    '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dart fallback recovered=${dartKeys.length}');
+                found = await _verifyCandidates(sector, keyTypeBit, dartKeys,
+                    sectorKeys: verifySectorKeys);
+              }
+            }
             // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
             if (found != null) return found;
             LogService.instance.log(
