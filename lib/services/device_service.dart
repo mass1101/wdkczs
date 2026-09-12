@@ -1244,6 +1244,10 @@ class DeviceService {
   }
 
   /// 批量校验块密钥
+  /// 对齐 CU mf1AuthMultipleKeys(mf1CheckKeysOnBlock)：
+  ///   请求 [block, keyType(0x60/61), count, keys...]，status==0 时取 data[1:] 为命中 key，
+  ///   非 0 status(如未命中候选的 status=6)视作未命中返回 null，**不抛异常**，
+  ///   以免中断整批候选验证（CU: resp.status==0 ? resp.data.sublist(1) : null）。
   Future<Uint8List?> cmdMf1CheckKeysOfBlock({
     required int block,
     required KeyType keyType,
@@ -1257,10 +1261,15 @@ class DeviceService {
     for (var i = 0; i < keys.length; i++) {
       n.setRange(3 + i * 6, 3 + i * 6 + 6, keys[i]);
     }
-    final r = await _request(Cmd.mf1CheckKeysOnBlock.value, n,
-        // 对齐小程序动态超时公式 Vk + i*(keys+1)*100：单扇区单类型 i=1
-        timeout: 5 + keys.length * 100);
-    return r.length > 1 ? r.sublist(1) : null;
+    try {
+      final r = await _request(Cmd.mf1CheckKeysOnBlock.value, n,
+          // 对齐小程序动态超时公式 Vk + i*(keys+1)*100：单扇区单类型 i=1
+          timeout: 5 + keys.length * 100);
+      return r.length > 1 ? r.sublist(1) : null;
+    } on DeviceException {
+      // 非 0 status(常见未命中的 status=6)：对齐 CU 视作未命中返回 null，不中断
+      return null;
+    }
   }
 
   // ========== 模拟命令（cmd 4000-4039） ==========

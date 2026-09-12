@@ -1652,7 +1652,7 @@ class _IcTabState extends State<IcTab> {
                 '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选交集为空(采集样本质量差), 重试');
           } else {
             var found = await _verifyCandidates(sector, keyTypeBit, recovered,
-                sectorKeys: verifySectorKeys);
+                sectorKeys: verifySectorKeys, use2015: true);
             // native C 恢复候选全验证失败时，追加一次 Dart 恢复兜底(读全32bit par，
             // 已对拍过正确)。C nested 对部分卡(如 dist 抖动偏大)恢复出的单候选
             // 是 keystream 歧义解而非真 key，Dart 同一批 samples 收敛结果不同，
@@ -1685,7 +1685,7 @@ class _IcTabState extends State<IcTab> {
                 LogService.instance.log(
                     '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dart fallback recovered=${dartKeys.length}');
                 found = await _verifyCandidates(sector, keyTypeBit, dartKeys,
-                    sectorKeys: verifySectorKeys);
+                    sectorKeys: verifySectorKeys, use2015: true);
               }
             }
             // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
@@ -1707,24 +1707,20 @@ class _IcTabState extends State<IcTab> {
   /// 暴力验证候选密钥（对齐小程序 bruteforce_Crack + mf1CheckKeysOfSectors）
   /// 候选集验证单扇区槽位：2012 mf1CheckKeysOfSectors + 单扇区 mask，容忍错 key
   /// 逐候选扫描返回命中（2015 mf1CheckKeysOnBlock 对未命中回 status=6 已弃用）
+  /// use2015=true 时对齐 CU checkKeysOnSector：仅用 2015 mf1CheckKeysOnBlock
+  /// 单块逐 chunk 全量候选扫描（命令侧已对齐 CU status!=0->null 语义，不中断），
+  /// 用于 WEAK 候选验证，消除 mask/多槽布局的不确定性。
   Future<String?> _verifyCandidates(
       int sector, int keyTypeBit, List<int> candidates,
-      {int chunkSize = 32, List<SectorKeyState>? sectorKeys}) async {
+      {int chunkSize = 32, List<SectorKeyState>? sectorKeys,
+      bool use2015 = false}) async {
     if (candidates.isEmpty) {
       LogService.instance.log('[_verifyCandidates] sector=$sector candidates empty');
       return null;
     }
-    LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length} chunkSize=$chunkSize');
+    LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length} chunkSize=$chunkSize use2015=$use2015');
     final isKeyA = keyTypeBit == 2;
     final slot = sector * 2 + (isKeyA ? 0 : 1);
-    // 对齐 2012 mf1CheckKeysOfSectors（容忍错 key，返回命中，不抛 status=6）。
-    // 2015 mf1CheckKeysOnBlock 对未命中候选回 status=6 被 _request 抛异常致验证中断。
-    // mask 布局（10 字节 80 槽，对齐 _checkCrackedKeys）：byte= sector>>2，
-    // keyA 位 2<<(6-s%4*2)，keyB 位 1<<(6-s%4*2)。
-    // 传入了全卡 sectorKeys 时复用全缺失槽 mask（多槽并行，实测远快于单槽串行，
-    // 与 _checkCrackedKeys 同样 30 秒级），命中后查目标槽；否则退化为单槽。
-    final byteIdx = sector >> 2;
-    final slotBit = isKeyA ? 2 << (6 - sector % 4 * 2) : 1 << (6 - sector % 4 * 2);
     final keys = candidates
         .map((k) {
           final buf = Uint8List(6);
@@ -1734,6 +1730,30 @@ class _IcTabState extends State<IcTab> {
           return buf;
         })
         .toList();
+    if (use2015) {
+      // 对齐 CU checkKeysOnSector：2015 mf1CheckKeysOnBlock 单块(trailer)逐 chunk，
+      // status!=0 视为未命中返回 null 继续，命中返回 mf1AuthMultipleKeys 数据[1:]
+      final keyType = isKeyA ? KeyType.keyA : KeyType.keyB;
+      final block = 4 * sector + 3;
+      for (var i = 0; i < keys.length; i += chunkSize) {
+        final end = (i + chunkSize > keys.length) ? keys.length : i + chunkSize;
+        final found = await _dev.cmdMf1CheckKeysOfBlock(
+            block: block, keyType: keyType, keys: keys.sublist(i, end));
+        if (found != null && found.length == 6) {
+          LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(found)} (2015)');
+          return _hexStr(found);
+        }
+      }
+      LogService.instance.log('[_verifyCandidates] sector=$sector NOT FOUND (2015)');
+      return null;
+    }
+    // 对齐 2012 mf1CheckKeysOfSectors（容忍错 key，返回命中，不抛 status=6）。
+    // mask 布局（10 字节 80 槽，对齐 _checkCrackedKeys）：byte= sector>>2，
+    // keyA 位 2<<(6-s%4*2)，keyB 位 1<<(6-s%4*2)。
+    // 传入了全卡 sectorKeys 时复用全缺失槽 mask（多槽并行，实测远快于单槽串行，
+    // 与 _checkCrackedKeys 同样 30 秒级），命中后查目标槽；否则退化为单槽。
+    final byteIdx = sector >> 2;
+    final slotBit = isKeyA ? 2 << (6 - sector % 4 * 2) : 1 << (6 - sector % 4 * 2);
     final mask = Uint8List(10);
     if (sectorKeys != null) {
       mask.fillRange(0, 10, 0xFF);
