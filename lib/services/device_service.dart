@@ -666,16 +666,8 @@ class DeviceService {
     required bool isFirst,
     int syncMax = 30,
   }) async {
-    // 首轮(isFirst)前 scan 唤醒卡：避免大量字典认证轰炸后卡短暂锁死
-    // 导致 Darkside 命令直接 HF tag not found（对齐 _mf1Gen1aAuth 的 scan 唤醒，
-    // 未使用 e4e6f1e 已证伪的 TAG→reader 强制复位）
-    if (isFirst) {
-      try {
-        await cmdHf14aScan();
-      } catch (_) {}
-    }
-    // 对齐小程序：无前置射频复位，直接采集（实测强制复位反致
-    // HF tag not found，同卡小程序无复位可解，复位假说已证伪）
+    // 对齐小程序：无前置射频复位/唤醒，直接采集（e4e6f1e 实测前置复位/scan
+    // 反致 HF tag not found 甚至设备 RF 异常，复位/唤醒假说已证伪）
     await assureDeviceMode(DeviceMode.reader);
     final b = Uint8List(4);
     b[0] = keyType.value;
