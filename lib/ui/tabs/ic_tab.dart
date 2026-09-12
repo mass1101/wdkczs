@@ -1160,10 +1160,43 @@ class _IcTabState extends State<IcTab> {
           int? darkKey;
           if (NativeRecovery.available) {
             // 前置探测（严格对齐 CU checkMf1Darkside：block 0x03 + keyB(0x61) + syncMax=2）
-            final probe = await _dev.cmdMf1AcquireDarkside(
-                block: 3, keyType: KeyType.keyB, isFirst: true, syncMax: 2);
-            // status 枚举（对齐 CU DarksideResult）：
-            // 0=vulnerable 1=cantFixNT 2=luckyAuthOK 3=notSendingNACK 4=tagChanged
+            // 固件 darkside_recover_key 探测时每次做天线断电重置 + fast_select，
+            // 瞬时选卡失败会返回 STATUS_HF_TAG_NO(1)，与 block/keyType/syncMax 无关。
+            // 因此探测失败需先重扫确认卡在场，再重试，避免误判为不可用。
+            // 固件 darkside_recover_key 探测时每次做天线断电重置 + fast_select，
+            // 瞬时选卡失败会返回命令错误 STATUS_HF_TAG_NO(status=1)，与
+            // block/keyType/syncMax 无关。因此探测命令报 HF tag not found 时
+            // 先重扫确认卡在场再重试，避免瞬时选卡失败被误判为漏洞不可用。
+            Mf1DarksideRes? probe;
+            var sawTagNotFound = false;
+            for (var attempt = 1; attempt <= 3; attempt++) {
+              try {
+                probe = await _dev.cmdMf1AcquireDarkside(
+                    block: 3, keyType: KeyType.keyB, isFirst: true, syncMax: 2);
+                break;
+              } on DeviceException catch (e) {
+                if (e.status != 1) {
+                  rethrow;
+                }
+                sawTagNotFound = true;
+                if (attempt < 3) {
+                  LogService.instance.log(
+                      '[解卡] Darkside探测 HF tag not found，第 $attempt 次重扫重试...');
+                  try {
+                    await _dev.cmdHf14aScan();
+                  } catch (_) {}
+                }
+              }
+            }
+            // 探测成功：收到 DarksideCore 帧（length==33），probe.status 为
+            // darkside_status 枚举（0=vulnerable 1=cantFixNT 2=luckyAuthOK
+            // 3=notSendingNACK 4=tagChanged）。3 次仍是 HF tag not found 时
+            // 按 CU catch 容错，提示用户重新放卡而非中断整个解卡流程。
+            if (probe == null) {
+              LogService.instance.log(
+                  '[解卡] Darkside探测连续3次 HF tag not found，请重新放卡后重试');
+              throw DeviceException(-1, '未检测到卡片，请将卡片放稳后重试');
+            }
             if (probe.status != 0) {
               LogService.instance.log(
                   '[解卡] Darkside探测 status=${probe.status} (0=vulnerable)');
@@ -1176,6 +1209,10 @@ class _IcTabState extends State<IcTab> {
                     4 => '卡片响应变化(TAG_CHANGED)',
                     _ => '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥',
                   });
+            }
+            if (sawTagNotFound) {
+              LogService.instance.log(
+                  '[解卡] Darkside探测重试后成功，继续样本累积攻击');
             }
             // 样本累积攻击（严格对齐 CU getMf1Darkside：block 0x03 keyB(0x61)，
               // 首轮 isFirst，syncMax=15；CU recovery.dart:281 tries<5）
