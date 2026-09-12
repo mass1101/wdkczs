@@ -1549,28 +1549,24 @@ class _IcTabState extends State<IcTab> {
           final dist = _bytesInt(distRes.dist.sublist(0, 4));
           final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dist=$dist nestedUid=$nestedUid');
-          // 多轮采集累加采样对（固件每次仅返 2 条=1 对）。WEAK 卡 dist 抖动
-          // ±150 远超 C 库 nested 的 dist±14 窗口，单对采样命中率低；多对里
-          // 总有一次采样与测得 dist 对齐，能显著提高真 key 恢复概率
-          final atks = <Map<String, int>>[];
-          const acqRounds = 4;
-          for (var r = 0; r < acqRounds && atks.length < 8; r++) {
-            stop();
-            final nested = await _dev.cmdMf1AcquireNested(
-                block: eSector * 4,
-                keyType: acquireKeyType,
-                key: eKey,
-                targetBlock: sector * 4,
-                targetKeyType: targetKeyType);
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry acqRound=$r nested.length=${nested.length}');
-            for (final a in nested) {
-              atks.add({
-                'nt1': _bytesInt(a.nt1),
-                'nt2': _bytesInt(a.nt2),
-                'par': a.par,
-              });
-            }
-          }
+          // 单次采集（对齐 80c4a4d 等历史可解版本）。多对采集（acqRounds=4）在
+          // 部分卡上引入回归：连续多次 cmdMf1AcquireNested 用同一测得的 dist，
+          // 后续采集对与 dist 不对齐且污染候选，导致原本可解的卡恢复含真 key
+          // 却被噪声淹没。恢复单次采集，验证提速另有路径。
+          final nested = await _dev.cmdMf1AcquireNested(
+              block: eSector * 4,
+              keyType: acquireKeyType,
+              key: eKey,
+              targetBlock: sector * 4,
+              targetKeyType: targetKeyType);
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry nested.length=${nested.length}');
+          final atks = nested
+              .map((a) => {
+                    'nt1': _bytesInt(a.nt1),
+                    'nt2': _bytesInt(a.nt2),
+                    'par': a.par,
+                  })
+              .toList();
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
           // 对齐小程序：每轮重试追加进度点
           progress?.value = '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
