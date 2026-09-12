@@ -2313,41 +2313,83 @@ class _IcTabState extends State<IcTab> {
     }
     final uidInt = _bytesInt(acq.uid.sublist(0, 4));
 
+    // reconstNamedNt：后门采集仅含 NT 高 16 位，低 16 位由 PRNG 线性特性补全
+    // （CU general.dart:89 同公式）
+    int fullNt(int nt16) =>
+        ((nt16 << 16) | Crypto1.prngSuccessor(nt16, 16)) & 0xFFFFFFFF;
+
+    // 按扇区聚合 A/B 的 (nt, ntEnc, rawPar)
+    final bySector = <int, Map<int, (int, int, int)>>{};
     for (final a in acq.atks) {
-      checkStop();
       final (sector, keyType, nt16, ntEnc, rawPar) = a;
-      final hasKey = keyType == KeyType.keyA
-          ? sectorKeys[sector].hasKeyA
-          : sectorKeys[sector].hasKeyB;
-      if (hasKey) continue;
-      progress.value = '解卡片：后门恢复扇区$sector ${keyType.label}...';
-      // reconstructFullNt：后门采集仅含 NT 高 16 位，
-      // 低 16 位由 PRNG 线性特性补全（CU general.dart:89 同公式）
-      final nt = ((nt16 << 16) | Crypto1.prngSuccessor(nt16, 16)) & 0xFFFFFFFF;
-      final cands = NativeRecovery.staticEncryptedNested(
-          uid: uidInt, nt: nt, ntEnc: ntEnc, ntParEnc: _parityToInt(rawPar));
+      bySector.putIfAbsent(sector, () => <int, (int, int, int)>{})
+        [keyType == KeyType.keyA ? 0 : 1] = (fullNt(nt16), ntEnc, rawPar);
+    }
+
+    // 候选约 3.5 万 -> 对齐 CU filterKeys 先做 A/B seednt 交集过滤压到可验证规模
+    for (final e in bySector.entries) {
+      checkStop();
+      final sector = e.key;
+      final ab = e.value;
+      final hasA = sectorKeys[sector].hasKeyA;
+      final hasB = sectorKeys[sector].hasKeyB;
+      if (hasA && hasB) continue;
+      final ntA = ab[0];
+      final ntB = ab[1];
+      final candsA = ntA != null
+          ? NativeRecovery.staticEncryptedNested(
+              uid: uidInt,
+              nt: ntA.$1,
+              ntEnc: ntA.$2,
+              ntParEnc: _parityToInt(ntA.$3))
+          : const <int>[];
+      final candsB = ntB != null
+          ? NativeRecovery.staticEncryptedNested(
+              uid: uidInt,
+              nt: ntB.$1,
+              ntEnc: ntB.$2,
+              ntParEnc: _parityToInt(ntB.$3))
+          : const <int>[];
       LogService.instance.log(
-          '[解卡] 后门恢复 扇区$sector ${keyType.label}: nt=${nt.toRadixString(16)} 候选=${cands.length}');
-      if (cands.isEmpty) continue;
-      // 候选约 3.5 万，分块上卡批量验证（防单包过大）
+          '[解卡] 后门恢复 扇区$sector: A候选=${candsA.length} B候选=${candsB.length}');
+      // A/B 均有且都未解时用 seednt 交集过滤（CU filterKeys）
+      List<int> keysA = candsA;
+      List<int> keysB = candsB;
+      if (ntA != null && ntB != null && !hasA && !hasB) {
+        final f = Crypto1.filterBackdoorKeys(candsA, candsB, ntA.$1, ntB.$1);
+        keysA = f.$1;
+        keysB = f.$2;
+        LogService.instance.log(
+            '[解卡] 后门恢复 扇区$sector: filterKeys后 A=${keysA.length} B=${keysB.length}');
+      }
+      // 上卡批量验证（对齐 CU checkKeysOnSector）；缺对侧/已解一侧时单侧验证
       const chunk = 500;
-      final keys = <Uint8List>[];
-      for (final k in cands) {
-        final b = Uint8List(6);
-        var v = k;
-        for (var i = 5; i >= 0; i--) {
-          b[i] = v & 0xFF;
-          v >>= 8;
-        }
-        keys.add(b);
-      }
-      for (var i = 0; i < keys.length; i += chunk) {
+      for (final entry in [(0, hasA, keysA), (1, hasB, keysB)]) {
         checkStop();
-        await _checkCrackedKeys(
-            keys.sublist(i, (i + chunk).clamp(0, keys.length)), sectorKeys);
+        final pair = entry;
+        if (pair.$2) continue;
+        final cands = pair.$3;
+        if (cands.isEmpty) continue;
+        progress.value =
+            '解卡片：后门恢复扇区$sector ${pair.$1 == 0 ? 'keyA' : 'keyB'}...';
+        final keys = <Uint8List>[];
+        for (final k in cands) {
+          final b = Uint8List(6);
+          var v = k;
+          for (var i = 5; i >= 0; i--) {
+            b[i] = v & 0xFF;
+            v >>= 8;
+          }
+          keys.add(b);
+        }
+        for (var i = 0; i < keys.length; i += chunk) {
+          checkStop();
+          await _checkCrackedKeys(
+              keys.sublist(i, (i + chunk).clamp(0, keys.length)), sectorKeys);
+        }
+        crackTick.value++;
+        _appendKeysFromSectors(sectorKeys);
       }
-      crackTick.value++;
-      _appendKeysFromSectors(sectorKeys);
     }
     final missing = <String>[];
     for (var s = 0; s < 16; s++) {

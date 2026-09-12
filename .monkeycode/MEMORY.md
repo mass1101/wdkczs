@@ -85,7 +85,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - C `static_encrypted_nested`（lfsr_recovery32）单条输入候选约 3.5 万（KEY_SPACE_SIZE=1<<18），上卡验证必须分块（当前 500/块）防蓝牙包过大。
   - 后门卡多路径设计（9307b2a 起对齐 CU 0x64 能力，用户确认 nfctool 与 CU 固件相同）：后门 key（A396EFA4E24F 等 3 个）普通认证命中 → 作为已知密钥走常规 nested/hardnested（精准）；认证未命中 + WEAK → 0x64 后门认证采集嵌套走 nested（authKeyType=KeyType.backdoor 透传，对齐 CU recovery.dart:314）；仍未恢复 → 后门采集 + C static_encrypted_nested 恢复 + 批量验证兜底。0x64 探测 = cmdHf14aRaw 发 [0x64,0x00]+CRC 原始帧（对齐 mfClassicHasBackdoor），后门卡响应 4 字节，普通卡无响应，作前置快筛。
   - 后门采集 nt 仅含高 16 位，明文 NT = reconstructFullNt = (nt16<<16) | prngSuccessor(nt16,16)；parity 千位编码（CU parityToInt）：bit3→千位，C 端 bin_to_uint8_arr 按十进制逐位拆回，bit3↔最高字节。
-  - CU StaticEncryptedKeysFilterAsync.filterKeys（gen3NonceTag/cI 种子交叉）仅对静态加密卡有效（同 seed），weak/hard 卡跳过该过滤直接批量验证；nfctool 3gen 路径已覆盖静态卡，backdoor 兜底路径不做交叉。
+  - CU StaticEncryptedKeysFilterAsync.filterKeys（gen3NonceTag/cI 种子交叉）仅对静态加密卡有效（同 seed），weak/hard 卡跳过该过滤直接批量验证；nfctool 3gen 路径已覆盖静态卡。后门恢复兜底 `_crackBackdoorNested` 已对齐 CU filterKeys：按扇区聚合 A/B 候选，用 `Crypto1.filterBackdoorKeys`（复用 gen3NonceTag，与 CU `_computeSeednt16Nt32` 逐字等价）对 A/B 候选做 seednt 交集过滤再上卡验证（压住 3.5 万级候选到可验证规模），缺对侧/弱卡退化单侧验证。
   - 密钥体系按 UID 隔离（204ed5a 终版，用户明确要求）：验证集合由 _collectVerifyKeys(uidHex) 临时构造=编辑框+本卡 KeyFor_UID.txt（解卡额外加扩展字典），编辑框是用户自管内容严禁扩库污染；KeyFor 文件仅存解卡命中密钥（_autoSaveKeyFileForUid 显式传参）；default_keys.txt=跨卡累积库——解卡 finally 自动累积命中密钥（用户要求保留），但按 UID 隔离的验证集合不读它，仅供手动导出/查阅。历史废弃方案：_loadKeys 灌全库进编辑框（用户质疑）、验证集合含全部密钥文件（用户要求隔离）。
 
 [Project Knowledge Summary]
@@ -99,3 +99,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - 卡「认证失败锁死」假说已被对照实验证伪（e4e6f1e）：同张 CUID 卡小程序无任何复位走完 WEAK 全流程（Darkside 破首把 + nested 逐扇区），app 加 TAG→reader 强制复位反而 HF tag not found——**复位是干扰源，勿再给 Gen1a/Darkside 加射频复位**；_mf1Gen1aAuth 严格对齐 Kk 库（halt→0x40→0x43），cmdMf1AcquireDarkside 直接 assureDeviceMode(reader) 后采集。小程序识别为「普通加密卡」说明该卡 0x40 后门无响应（Gen1a 探测失败是卡的稳定特性）。
   - Darkside 采集 cb 语义（f3af8fe 对齐）：固件 status 枚举 OK=0/CANT_FIX_NT=1/LUCKY_AUTH_OK=2/NO_NAK_SENT=3/TAG_CHANGED=4，非 OK 单轮即 throw「该卡片为无漏洞全加密卡」，LUCKY_AUTH_OK 单独抛；catch 透传原始错误到进度框。
   - 小程序 checkCrackedKey chunkSize=20，app 用 32（cmdMf1CheckKeysOfSectors 支持动态收窄），语义等价。
+
+[Project Knowledge Summary]
+- Date: 2026-09-12
+- Context: 观测 CU app（chameleonultra-app）破解日志「恢复密钥(后门)-检查密钥(15918)」时对齐其候选交集能力
+- Category: Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - CU「检查密钥(N)」的 N = 传入 `checkKeysOnSector` 的候选 key 数；后门恢复后是 3.5 万级原始候选经 `StaticEncryptedKeysFilterAsync.filterKeys`（staticnested_2x1nt_rf08s）A/B seednt 交集过滤后的规模（实测 15918）。nfctool-app 对应缺口已通过 Crypto1.filterBackdoorKeys 补齐。
+  - 算法等价性：CU `_computeSeednt16Nt32(nt32,key)` 与 nfctool `Crypto1.gen3NonceTag(nt,key)` **逐字等价**（同 a/b 表、同前退 14 步+每 8 步、同 key 48 位两半字节展开；nfctool 的 d==32/40 中间截断表达只是等价改写，产出相同 seednt16）。filterKeys 依赖此等价，勿改 gen3NonceTag 内部。
+  - filterKeys 原理：同扇区 keyA/keyB 加密嵌套来自同一 LFSR 序号，二者 seednt16 必须相等；用此约束把 A、B 各自候选里的错 key 交叉剔除，保留下来的交集两侧才上卡验证。
+  - nfctool `cmdMf1AcquireStaticEncryptedNested` 每 14 字节 chunk 同时含该扇区 keyA+keyB 的 (nt,ntEnc,par)，天然支撑按扇区做 A/B 交叉过滤，无需额外采集。

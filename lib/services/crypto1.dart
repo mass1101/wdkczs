@@ -739,6 +739,35 @@ class Crypto1 {
     return keys;
   }
 
+  /// 后门 A/B 候选交集过滤（对齐 ChameleonUltra StaticEncryptedKeysFilter.filterKeys，
+  /// staticnested_2x1nt_rf08s）：同扇区 keyA 与 keyB 的加密嵌套来自同一 LFSR 序号，
+  /// 二者 seednt16（gen3NonceTag）必须相等。用此约束剔除候选噪声，
+  /// 把 3.5 万级候选压到可上卡验证的规模。返回过滤后的 (A候选, B候选)。
+  static (List<int>, List<int>) filterBackdoorKeys(
+      List<int> keys1, List<int> keys2, int nt1, int nt2) {
+    final seed1 = List<int>.generate(keys1.length, (i) => gen3NonceTag(nt1, keys1[i]));
+    final keep1 = List<bool>.filled(keys1.length, false);
+    final keep2 = List<bool>.filled(keys2.length, false);
+    for (var j = 0; j < keys2.length; j++) {
+      final seed2 = gen3NonceTag(nt2, keys2[j]);
+      for (var i = 0; i < keys1.length; i++) {
+        if (seed2 == seed1[i]) {
+          keep1[i] = true;
+          keep2[j] = true;
+        }
+      }
+    }
+    final out1 = <int>[];
+    final out2 = <int>[];
+    for (var i = 0; i < keys1.length; i++) {
+      if (keep1[i]) out1.add(keys1[i]);
+    }
+    for (var j = 0; j < keys2.length; j++) {
+      if (keep2[j]) out2.add(keys2[j]);
+    }
+    return (out1, out2);
+  }
+
   /// 种子恢复（对齐小程序 Crack_bySeedNt）：候选中找特征值与已知参照一致的密钥
   static List<int> gen3RecoverBySeed({
     required int uid,
