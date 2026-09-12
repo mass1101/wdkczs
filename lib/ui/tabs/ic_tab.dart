@@ -223,13 +223,18 @@ class _IcTabState extends State<IcTab> {
       if (!names.contains(k)) names.add(k);
     }
     if (names.isEmpty) return;
-    // 构造只开未标记槽位的掩码；全标记则无需传播
+    // 掩码语义（固件 mf1_toolbox_check_keys_of_sectors）：位=1 表示该槽已知、固件跳过；
+    // 位=0 表示待检查。故以全 0xFF 为底，仅对已标记槽位置位（与 _checkCrackedKeys 一致）。
+    // 曾误用「零底 + 置位未标记槽」，语义反转后固件会检查全部已标记/其余槽位
+    // （78 槽 × N 把密钥 ≈ 20s），撞穿 5000ms BLE 超时；固件忙于旧命令期间
+    // 后续所有命令连锁超时，导致同扇区 keyB 破解被误判失败
     final mask = Uint8List(10);
+    mask.fillRange(0, 10, 0xFF);
     for (var s = 0; s < 16; s++) {
-      if (!sectorKeys[s].hasKeyA) mask[s >> 2] |= 2 << (6 - s % 4 * 2);
-      if (!sectorKeys[s].hasKeyB) mask[s >> 2] |= 1 << (6 - s % 4 * 2);
+      if (sectorKeys[s].hasKeyA) mask[s >> 2] |= 2 << (6 - s % 4 * 2);
+      if (sectorKeys[s].hasKeyB) mask[s >> 2] |= 1 << (6 - s % 4 * 2);
     }
-    if (mask.every((m) => m == 0)) return;
+    if (mask.every((m) => m == 0xFF)) return;
     LogService.instance.log(
         '[_propagateKeys] ${names.length} known keys, mask=${_hexStr(mask)} (全卡批量)');
     final res = await _dev.cmdMf1CheckKeysOfSectors(
@@ -1741,6 +1746,9 @@ class _IcTabState extends State<IcTab> {
           }
         } catch (e) {
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry ERROR=$e');
+          // 设备通信超时（status=-2）视为瞬时异常，进入下一轮重新采集；
+          // 直接 rethrow 会让单个扇区密钥因一次抖动永久放弃，其余 4 轮重试形同虚设
+          if (e is DeviceException && e.status == -2) continue;
           rethrow;
         }
       }
@@ -1802,14 +1810,16 @@ class _IcTabState extends State<IcTab> {
     final byteIdx = sector >> 2;
     final slotBit = isKeyA ? 2 << (6 - sector % 4 * 2) : 1 << (6 - sector % 4 * 2);
     final mask = Uint8List(10);
+    // 掩码语义：位=1 为已知槽（固件跳过），位=0 为待检查槽，故以全 0xFF 为底再清位
+    mask.fillRange(0, 10, 0xFF);
     if (sectorKeys != null) {
-      mask.fillRange(0, 10, 0xFF);
       for (var s = 0; s < 16; s++) {
         if (sectorKeys[s].hasKeyA) mask[s >> 2] ^= 2 << (6 - s % 4 * 2);
         if (sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
       }
     } else {
-      mask[byteIdx] = slotBit;
+      // 仅检查目标槽：其余槽位保持 1 跳过
+      mask[byteIdx] &= ~slotBit;
     }
     final res = await _dev.cmdMf1CheckKeysOfSectors(
         keys: keys, mask: mask, chunkSize: chunkSize);
