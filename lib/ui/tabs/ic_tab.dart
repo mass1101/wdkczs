@@ -1159,11 +1159,9 @@ class _IcTabState extends State<IcTab> {
         try {
           int? darkKey;
           if (NativeRecovery.available) {
-            // 前置探测（对齐小程序 Crack：Darkside 采集用 syncMax 默认 30，
-            // 非 CU 的 syncMax=2——CUID 国产卡 NT 固定常需更多同步，syncMax=2
-            // 采样不足会误判 cantFixNT/notSendingNACK 而退出）
+            // 前置探测（严格对齐 CU checkMf1Darkside：block 0x03 + keyB(0x61) + syncMax=2）
             final probe = await _dev.cmdMf1AcquireDarkside(
-                block: 0, keyType: KeyType.keyA, isFirst: true);
+                block: 3, keyType: KeyType.keyB, isFirst: true, syncMax: 2);
             // status 枚举（对齐 CU DarksideResult）：
             // 0=vulnerable 1=cantFixNT 2=luckyAuthOK 3=notSendingNACK 4=tagChanged
             if (probe.status != 0) {
@@ -1179,20 +1177,21 @@ class _IcTabState extends State<IcTab> {
                     _ => '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥',
                   });
             }
-            // 样本累积攻击（对齐 CU recovery.dart:281 tries<5，每条 syncMax=15）
-            final items = <({int nt1, int ks1, int par, int nr, int ar})>[];
-            int be(List<int> b) {
-              var v = 0;
-              for (final x in b) {
-                v = (v << 8) | (x & 0xFF);
+            // 样本累积攻击（严格对齐 CU getMf1Darkside：block 0x03 keyB(0x61)，
+              // 首轮 isFirst，syncMax=15；CU recovery.dart:281 tries<5）
+              final items = <({int nt1, int ks1, int par, int nr, int ar})>[];
+              int be(List<int> b) {
+                var v = 0;
+                for (final x in b) {
+                  v = (v << 8) | (x & 0xFF);
+                }
+                return v;
               }
-              return v;
-            }
-            for (var t = 0; t < 5 && darkKey == null; t++) {
-              checkStop();
-              progress.value = '破解密钥：Darkside攻击中 采集样本${t + 1}/5...';
-              final res = await _dev.cmdMf1AcquireDarkside(
-                  block: 0, keyType: KeyType.keyA, isFirst: t == 0, syncMax: 15);
+              for (var t = 0; t < 5 && darkKey == null; t++) {
+                checkStop();
+                progress.value = '破解密钥：Darkside攻击中 采集样本${t + 1}/5...';
+                final res = await _dev.cmdMf1AcquireDarkside(
+                    block: 3, keyType: KeyType.keyB, isFirst: t == 0, syncMax: 15);
               if (res.status != 0 || res.uid == null) {
                 LogService.instance.log(
                     '[解卡] Darkside采集失败样本${t + 1} status=${res.status}');
@@ -1215,7 +1214,7 @@ class _IcTabState extends State<IcTab> {
                 checkStop();
                 final khex = _int6Hex(k);
                 final ok = await _dev.cmdMf1CheckBlockKey(
-                    block: 0, keyType: KeyType.keyA, key: _hex(khex));
+                    block: 3, keyType: KeyType.keyB, key: _hex(khex));
                 if (ok) {
                   darkKey = k;
                   LogService.instance.log(
@@ -1239,7 +1238,7 @@ class _IcTabState extends State<IcTab> {
                   LogService.instance.log('[解卡] Darkside采集轮${isFirst + 1}');
                 }
                 final res = await _dev.cmdMf1AcquireDarkside(
-                    block: 0, keyType: KeyType.keyA, isFirst: isFirst == 0);
+                    block: 3, keyType: KeyType.keyB, isFirst: isFirst == 0);
                 if (res.status == 0) {
                   return {
                     'uid': res.uid!,
@@ -1263,7 +1262,7 @@ class _IcTabState extends State<IcTab> {
               },
               (key) async {
                 final ok = await _dev.cmdMf1CheckBlockKey(
-                    block: 0, keyType: KeyType.keyA, key: key);
+                    block: 3, keyType: KeyType.keyB, key: key);
                 if (ok) {
                   LogService.instance.log(
                       '[解卡] Darkside候选验证命中 key=${_hexStr(key)}');
@@ -1273,17 +1272,19 @@ class _IcTabState extends State<IcTab> {
             );
           }
           final darkHex = _int6Hex(darkKey!);
-          sectorKeys[0].hasKeyA = true;
-          sectorKeys[0].keyA = darkHex;
+          // 严格对齐 CU getMf1Darkside(block 0x03 keyB)+checkKeysOnSector(keys,1,0)：
+          // Darkside 恢复的是扇区0 keyB
+          sectorKeys[0].hasKeyB = true;
+          sectorKeys[0].keyB = darkHex;
           eSector = 0;
-          eKeyType = KeyType.keyA;
+          eKeyType = KeyType.keyB;
           eKeyHex = darkHex;
           _appendKeysFromSectors(sectorKeys);
           await _propagateKeys(sectorKeys);
           crackTick.value++;
           progress.value = '破解密钥：破解出一个密钥，进入半加密卡破解流程...';
           LogService.instance.log(
-              '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyA=$darkHex, 进入半加密流程');
+              '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyB=$darkHex, 进入半加密流程');
         } catch (e) {
           // 透传具体失败原因（对齐小程序 catch 显示采集cb的报错）：
           // 无漏洞卡/卡无响应/LUCKY_AUTH_OK/256轮穷尽各自可见
