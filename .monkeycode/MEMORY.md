@@ -128,3 +128,15 @@ Entries discovered by the Agent during task execution should follow this format:
   - **`_verifyCandidates` 验证速度瓶颈在单槽 mask**：2012 `cmdMf1CheckKeysOfSectors` 单槽（mask 只置目标槽）逐 key 串行认证极慢（50 候选约 4 分钟），而 `_checkCrackedKeys` 的全缺失槽 mask（多槽并行）47 字典仅 ~34 秒。`_verifyCandidates` 已加可选 `sectorKeys` 参数：传入时构造全缺失槽 mask（多槽快路径），命中后读 `res.sectorKeys[sector*2 + (keyA?0:1)]`；未传退化为单槽。所有 `_crackSectorKey` 调用点均传 `verifySectorKeys`。
   - **WEAK 恢复要多对采集合并**：固件 `cmdMf1AcquireNested` 单次仅返 2 条（1 对），而 WEAK 卡 `cmdMf1TestNtDistance` 返回的 dist 抖动 ±150（如 27242→27092），远超 C 库 `nested` 的 dist±14 窗口，单对采样命中率低。改为循环 acqRounds=4 次累加到 ≥8 条（4 对），native 逐对调 C `nested` 合并高频候选（每对取 top50 去重 append，总量可 >50 各对高频并存），多对里总有一对采样与测得 dist 对齐，提高真 key 恢复概率。
   - WEAK dist 抖动 ±150 是固件测距特性（`cmdMf1TestNtDistance` 返回每次不同），非 Dart 层可控；本处只能靠多对采样 + 多槽快验证抵消其影响。
+
+[Project Knowledge Summary]
+- Date: 2026-09-12
+- Context: 用户要求"解卡流程/漏洞利用全部使用 CU(chameleonultra-app)方案"，WEAK 回归修复后经真机验证 OK，大幅重构验证与采集路径
+- Category: Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - **修正旧知识1（_verifyCandidates 验证命令）**：CU `checkKeysOnSector` 用 2015 `mf1CheckKeysOnBlock` 单块逐 chunk 全量候选，未命中 status!=0 时**返回 null 继续、不抛异常**（CU：`resp.status==0?data.sublist(1):null`）。nfctool 曾因 `_request` 把 status=6 当异常弃用 2015 改 2012——正解是**命令侧捕获 DeviceException 返回 null**（`cmdMf1CheckKeysOfBlock` 已改），2015 即可安全用于全部候选验证。`_verifyCandidates` 默认 `use2015=true`，所有漏洞利用(weak/static/hard/darkside/backdoor)候选统一走 CU 2015 语义；`_checkCrackedKeys`(2012 多槽全卡批量) 仅留词典批量提速。
+  - **修正旧知识2（WEAK topK=50）**：topK=50 会截断排序靠后的真 key（日志 `native recovered=50` 恰打满 topK 即强信号），使 80c4a4d 全量可解的卡解不开。native `mergeTop` 与 Dart `nestedMerge` 上限放宽到 **5000**（保留排序靠前真 key、规避 42 万全量上卡）。
+  - **WEAK 多对采集必须每对重测 dist**：677523a 曾"测一次 dist 连续采多对"→ 后续采集对 PRNG 已前移与 dist 不对齐、污染候选致回归。正解 = 每对独立「`cmdMf1TestNtDistance`+`cmdMf1AcquireNested`」带当轮 dist，对齐 CU 的 NtDistance+Acquire 成对绑定；native 候选全验证失败且<50 时追加 Dart `recoverKeysInIsolate` 兜底(读全32bit par 已对拍正确)。
+  - **Darkside 严格对齐 CU**：探测 `cmdMf1AcquireDarkside(block:3, keyType:keyB(0x61), syncMax:2)`、采集块3 keyB syncMax=15、候选验证 `cmdMf1CheckBlockKey(block:3,keyB)`、成功后产出**扇区0 keyB**(非 keyA，对齐 CU `getMf1Darkside(0x03,0x61)`+`checkKeysOnSector(keys,1,0)`)。
+  - **backdoor 验证对齐 CU**：`_crackBackdoorNested` 候选验证从 `_checkCrackedKeys`(2012 多槽全卡) 改按目标扇区 `_verifyCandidates(use2015=true)`，filterKeys 交集过滤沿用。
+  - 采集协议已确认全部字节对齐 CU：weak=`[keyType,block,key6,targetKeyType,targetBlock]`响应每9字节(nt4+ntEnc4+par1)；static=`mf1StaticNestedAcquire`+uid(4)+每8字节对、从i=4起；hard=`[slow,keyType,block,key6,targetKeyType,targetBlock]`。
