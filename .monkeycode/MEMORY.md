@@ -119,3 +119,12 @@ Entries discovered by the Agent during task execution should follow this format:
   - **WEAK native 恢复务必只取 C 库 `nested_run` 前 topK(top50) 高频候选**，对齐小程序 nestedMerge：C 库返回已按出现频次排序（真 key 频次最高靠前），而旧代码 `merged.addAll(...)`(Set) 把 42 万候选全量保留且丢弃排序，既让候选验证不可行（上卡扫 42 万）又丢精度。每对恢复结果按序取前 50 去重保序即可。
   - `_verifyCandidates` 是 3gen/STATIC/WEAK/hardnested 全部候选验证的公共入口，此修复一处覆盖全部。
   - 判据：日志出现 `native recovered=425113/558730` 且随后的 `_verifyCandidates ... status=6`，即同时命中上述两个 bug。
+
+[Project Knowledge Summary]
+- Date: 2026-09-12
+- Context: 修 WEAK 卡继续解不开（候选50全NOT FOUND + 每轮验证4分钟）时进一步定位
+- Category: Testing Methods | Troubleshooting & Debugging
+- Instructions:
+  - **`_verifyCandidates` 验证速度瓶颈在单槽 mask**：2012 `cmdMf1CheckKeysOfSectors` 单槽（mask 只置目标槽）逐 key 串行认证极慢（50 候选约 4 分钟），而 `_checkCrackedKeys` 的全缺失槽 mask（多槽并行）47 字典仅 ~34 秒。`_verifyCandidates` 已加可选 `sectorKeys` 参数：传入时构造全缺失槽 mask（多槽快路径），命中后读 `res.sectorKeys[sector*2 + (keyA?0:1)]`；未传退化为单槽。所有 `_crackSectorKey` 调用点均传 `verifySectorKeys`。
+  - **WEAK 恢复要多对采集合并**：固件 `cmdMf1AcquireNested` 单次仅返 2 条（1 对），而 WEAK 卡 `cmdMf1TestNtDistance` 返回的 dist 抖动 ±150（如 27242→27092），远超 C 库 `nested` 的 dist±14 窗口，单对采样命中率低。改为循环 acqRounds=4 次累加到 ≥8 条（4 对），native 逐对调 C `nested` 合并高频候选（每对取 top50 去重 append，总量可 >50 各对高频并存），多对里总有一对采样与测得 dist 对齐，提高真 key 恢复概率。
+  - WEAK dist 抖动 ±150 是固件测距特性（`cmdMf1TestNtDistance` 返回每次不同），非 Dart 层可控；本处只能靠多对采样 + 多槽快验证抵消其影响。

@@ -1009,7 +1009,8 @@ class _IcTabState extends State<IcTab> {
                   uidInt, 0, KeyType.keyA, 1,
                   0, KeyType.keyA, _backdoorKeys.first,
                   progress: progress, checkStop: checkStop,
-                  authKeyType: KeyType.backdoor);
+                  authKeyType: KeyType.backdoor,
+                  verifySectorKeys: sectorKeys);
             } catch (_) {}
             if (rec != null) {
               LogService.instance.log(
@@ -1357,7 +1358,8 @@ class _IcTabState extends State<IcTab> {
           try {
             final rec = await _crackSectorKey(
                 uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex,
-                progress: progress, checkStop: checkStop);
+                progress: progress, checkStop: checkStop,
+                verifySectorKeys: sectorKeys);
             if (rec != null) {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
@@ -1380,7 +1382,8 @@ class _IcTabState extends State<IcTab> {
           try {
             final rec = await _crackSectorKey(
                 uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex,
-                progress: progress, checkStop: checkStop);
+                progress: progress, checkStop: checkStop,
+                verifySectorKeys: sectorKeys);
             if (rec != null) {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
@@ -1463,7 +1466,7 @@ class _IcTabState extends State<IcTab> {
       int uidInt, int sector, KeyType targetKeyType, int prng,
       int eSector, KeyType eKeyType, String eKeyHex,
       {ValueNotifier<String>? progress, void Function()? checkStop,
-      KeyType? authKeyType}) async {
+      KeyType? authKeyType, List<SectorKeyState>? verifySectorKeys}) async {
     void stop() => checkStop?.call();
     final eKey = _hex(eKeyHex);
     // WEAK 采集认证用的 keyType：后门卡传 0x64（对齐 CU backdoor nested），
@@ -1546,21 +1549,29 @@ class _IcTabState extends State<IcTab> {
           final dist = _bytesInt(distRes.dist.sublist(0, 4));
           final nestedUid = _bytesInt(distRes.uid.sublist(0, 4));
           LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dist=$dist nestedUid=$nestedUid');
-          final nested = await _dev.cmdMf1AcquireNested(
-              block: eSector * 4,
-              keyType: acquireKeyType,
-              key: eKey,
-              targetBlock: sector * 4,
-              targetKeyType: targetKeyType);
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry nested.length=${nested.length}');
-          final atks = nested
-              .map((a) => {
-                    'nt1': _bytesInt(a.nt1),
-                    'nt2': _bytesInt(a.nt2),
-                    'par': a.par,
-                  })
-              .toList();
-              LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
+          // 多轮采集累加采样对（固件每次仅返 2 条=1 对）。WEAK 卡 dist 抖动
+          // ±150 远超 C 库 nested 的 dist±14 窗口，单对采样命中率低；多对里
+          // 总有一次采样与测得 dist 对齐，能显著提高真 key 恢复概率
+          final atks = <Map<String, int>>[];
+          const acqRounds = 4;
+          for (var r = 0; r < acqRounds && atks.length < 8; r++) {
+            stop();
+            final nested = await _dev.cmdMf1AcquireNested(
+                block: eSector * 4,
+                keyType: acquireKeyType,
+                key: eKey,
+                targetBlock: sector * 4,
+                targetKeyType: targetKeyType);
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry acqRound=$r nested.length=${nested.length}');
+            for (final a in nested) {
+              atks.add({
+                'nt1': _bytesInt(a.nt1),
+                'nt2': _bytesInt(a.nt2),
+                'par': a.par,
+              });
+            }
+          }
+          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry atks.length=${atks.length}');
           // 对齐小程序：每轮重试追加进度点
           progress?.value = '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
           List<int> recovered;
@@ -1593,7 +1604,7 @@ class _IcTabState extends State<IcTab> {
                   nt1: atks.first['nt1']!, nt1Enc: atks.first['nt2']!, par1: atks.first['par']!));
             }
             recovered = merged;
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native recovered=${recovered.length}(topK=$topK)');
+            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native recovered=${recovered.length}');
           } else {
             // Dart 路径（native 不可用时回退）
             // 第一步：奇偶过滤得到有效采样对（快速）
@@ -1616,7 +1627,8 @@ class _IcTabState extends State<IcTab> {
             LogService.instance.log(
                 '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选交集为空(采集样本质量差), 重试');
           } else {
-            final found = await _verifyCandidates(sector, keyTypeBit, recovered);
+            final found = await _verifyCandidates(sector, keyTypeBit, recovered,
+                sectorKeys: verifySectorKeys);
             // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
             if (found != null) return found;
             LogService.instance.log(
@@ -1638,7 +1650,7 @@ class _IcTabState extends State<IcTab> {
   /// 逐候选扫描返回命中（2015 mf1CheckKeysOnBlock 对未命中回 status=6 已弃用）
   Future<String?> _verifyCandidates(
       int sector, int keyTypeBit, List<int> candidates,
-      {int chunkSize = 32}) async {
+      {int chunkSize = 32, List<SectorKeyState>? sectorKeys}) async {
     if (candidates.isEmpty) {
       LogService.instance.log('[_verifyCandidates] sector=$sector candidates empty');
       return null;
@@ -1646,11 +1658,12 @@ class _IcTabState extends State<IcTab> {
     LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length} chunkSize=$chunkSize');
     final isKeyA = keyTypeBit == 2;
     final slot = sector * 2 + (isKeyA ? 0 : 1);
-    // 对齐小程序 WEAK nested 验证：用 2012 mf1CheckKeysOfSectors + 单扇区槽位
-    // mask（容忍错 key，返回命中，不抛 status=6）。2015 mf1CheckKeysOnBlock 对
-    // 未命中候选返回认证失败 status=6 被 _request 抛异常，导致候选验证全部中断。
+    // 对齐 2012 mf1CheckKeysOfSectors（容忍错 key，返回命中，不抛 status=6）。
+    // 2015 mf1CheckKeysOnBlock 对未命中候选回 status=6 被 _request 抛异常致验证中断。
     // mask 布局（10 字节 80 槽，对齐 _checkCrackedKeys）：byte= sector>>2，
     // keyA 位 2<<(6-s%4*2)，keyB 位 1<<(6-s%4*2)。
+    // 传入了全卡 sectorKeys 时复用全缺失槽 mask（多槽并行，实测远快于单槽串行，
+    // 与 _checkCrackedKeys 同样 30 秒级），命中后查目标槽；否则退化为单槽。
     final byteIdx = sector >> 2;
     final slotBit = isKeyA ? 2 << (6 - sector % 4 * 2) : 1 << (6 - sector % 4 * 2);
     final keys = candidates
@@ -1662,19 +1675,22 @@ class _IcTabState extends State<IcTab> {
           return buf;
         })
         .toList();
-    for (var i = 0; i < keys.length; i += chunkSize) {
-      final end = i + chunkSize < keys.length ? i + chunkSize : keys.length;
-      final mask = Uint8List(10);
-      mask[byteIdx] = slotBit;
-      final res = await _dev.cmdMf1CheckKeysOfSectors(
-          keys: keys.sublist(i, end),
-          mask: mask,
-          chunkSize: chunkSize);
-      final hit = res.sectorKeys[slot];
-      if (hit != null && hit.length == 6) {
-        LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(hit)}');
-        return _hexStr(hit);
+    final mask = Uint8List(10);
+    if (sectorKeys != null) {
+      mask.fillRange(0, 10, 0xFF);
+      for (var s = 0; s < 16; s++) {
+        if (sectorKeys[s].hasKeyA) mask[s >> 2] ^= 2 << (6 - s % 4 * 2);
+        if (sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
       }
+    } else {
+      mask[byteIdx] = slotBit;
+    }
+    final res = await _dev.cmdMf1CheckKeysOfSectors(
+        keys: keys, mask: mask, chunkSize: chunkSize);
+    final hit = res.sectorKeys[slot];
+    if (hit != null && hit.length == 6) {
+      LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(hit)}');
+      return _hexStr(hit);
     }
     LogService.instance.log('[_verifyCandidates] sector=$sector NOT FOUND (found bit=0)');
     return null;
