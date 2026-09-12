@@ -1158,9 +1158,11 @@ class _IcTabState extends State<IcTab> {
         try {
           int? darkKey;
           if (NativeRecovery.available) {
-            // 前置探测（对齐 CU checkMf1Darkside）：同命令 syncMax=2 快探
+            // 前置探测（对齐小程序 Crack：Darkside 采集用 syncMax 默认 30，
+            // 非 CU 的 syncMax=2——CUID 国产卡 NT 固定常需更多同步，syncMax=2
+            // 采样不足会误判 cantFixNT/notSendingNACK 而退出）
             final probe = await _dev.cmdMf1AcquireDarkside(
-                block: 0, keyType: KeyType.keyA, isFirst: true, syncMax: 2);
+                block: 0, keyType: KeyType.keyA, isFirst: true);
             // status 枚举（对齐 CU DarksideResult）：
             // 0=vulnerable 1=cantFixNT 2=luckyAuthOK 3=notSendingNACK 4=tagChanged
             if (probe.status != 0) {
@@ -1286,11 +1288,14 @@ class _IcTabState extends State<IcTab> {
           // 无漏洞卡/卡无响应/LUCKY_AUTH_OK/256轮穷尽各自可见
           LogService.instance.log('[解卡] Darkside异常: $e');
           _appendKeysFromSectors(sectorKeys);
+          // 诊断卡 PRNG 类型，辅助判断是否因 syncMax/采样问题误判
+          try {
+            final dp = await _dev.cmdMf1TestPrngType();
+            LogService.instance.log('[解卡] Darkside失败后 PRNG分型=$dp (0=static 1=weak 2=hard)');
+          } catch (_) {}
           // 后门卡已在开头前置路由（对齐 CU recoverKeys），此处仅剩无后门的全加密卡
           progress.value = '解卡片：$e';
           if (mounted) Navigator.of(context).pop();
-          // 卡无响应类失败多为反复认证后的锁死态（RF复位无法替代物理断电），
-          // 提示用户离场重置后再试
           _toast('Darkside攻击失败: $e\n若卡曾被反复认证, 请离开读卡器10秒后重放再试');
           return sectorKeys;
         }
