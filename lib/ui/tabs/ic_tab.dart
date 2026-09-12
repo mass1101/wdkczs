@@ -1707,13 +1707,14 @@ class _IcTabState extends State<IcTab> {
   /// 暴力验证候选密钥（对齐小程序 bruteforce_Crack + mf1CheckKeysOfSectors）
   /// 候选集验证单扇区槽位：2012 mf1CheckKeysOfSectors + 单扇区 mask，容忍错 key
   /// 逐候选扫描返回命中（2015 mf1CheckKeysOnBlock 对未命中回 status=6 已弃用）
-  /// use2015=true 时对齐 CU checkKeysOnSector：仅用 2015 mf1CheckKeysOnBlock
-  /// 单块逐 chunk 全量候选扫描（命令侧已对齐 CU status!=0->null 语义，不中断），
-  /// 用于 WEAK 候选验证，消除 mask/多槽布局的不确定性。
+  /// use2015 默认 true（对齐 CU checkKeysOnSector）：全部漏洞利用恢复出的候选
+  /// 用 2015 mf1CheckKeysOnBlock 单块逐 chunk 全量扫描验证（命令侧已对齐 CU
+  /// status!=0->null 语义，不中断）。use2015=false 走 2012 多槽 mask 提速，
+  /// 仅词典批量(_checkCrackedKeys)等确定安全场景使用。
   Future<String?> _verifyCandidates(
       int sector, int keyTypeBit, List<int> candidates,
       {int chunkSize = 32, List<SectorKeyState>? sectorKeys,
-      bool use2015 = false}) async {
+      bool use2015 = true}) async {
     if (candidates.isEmpty) {
       LogService.instance.log('[_verifyCandidates] sector=$sector candidates empty');
       return null;
