@@ -13,12 +13,10 @@ import 'storage_service.dart';
 
 /// 判断是否 MIFARE Classic 卡
 bool isMifareClassic(TagType tag) =>
-    tag == TagType.mifareClassic1k ||
-    tag == TagType.mifareClassic4k;
+    tag == TagType.mifareClassic1k || tag == TagType.mifareClassic4k;
 
 /// 判断是否 EM4100 家族（含 Electra）
-bool isEM410X(TagType tag) =>
-    tag == TagType.em4100 || tag == TagType.electra;
+bool isEM410X(TagType tag) => tag == TagType.em4100 || tag == TagType.electra;
 
 /// 判断是否 MIFARE Ultralight 家族
 bool isMifareUltralight(TagType tag) =>
@@ -68,8 +66,7 @@ int mfClassicGetSectorCount(MfClassicType type) {
 }
 
 /// 每扇区块数（0-31 扇区 4 块，32+ 扇区 16 块）
-int mfClassicGetBlockCountBySector(int sector) =>
-    sector < 32 ? 4 : 16;
+int mfClassicGetBlockCountBySector(int sector) => sector < 32 ? 4 : 16;
 
 /// 扇区对应的首块号
 int mfClassicGetFirstBlockBySector(int sector) =>
@@ -115,10 +112,26 @@ List<String> generateMfClassicBlocks(TagType type) {
   final mfcType = tagTypeToMfClassicType(type);
   final sectorCount = mfClassicGetSectorCount(mfcType);
   final List<String> blocks = [];
-  final sectorTrailerHex = _bytesToHexString(Uint8List.fromList([
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x07, 0x80, 0x69,
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-  ]));
+  final sectorTrailerHex = _bytesToHexString(
+    Uint8List.fromList([
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+      0x07,
+      0x80,
+      0x69,
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+      0xFF,
+    ]),
+  );
   for (int sector = 0; sector < sectorCount; sector++) {
     final blockCount = mfClassicGetBlockCountBySector(sector);
     for (int block = 0; block < blockCount - 1; block++) {
@@ -197,8 +210,9 @@ List<Uint8List> mfUltralightGenerateFirstBlocks(Uint8List uid) {
 List<String> generateMfUltralightBlocks(TagType type, Uint8List uid) {
   final firstBlocks = mfUltralightGenerateFirstBlocks(uid);
   final totalBlocks = getBlockCountForTagType(type);
-  final List<String> blocks =
-      firstBlocks.map((b) => _bytesToHexString(b)).toList();
+  final List<String> blocks = firstBlocks
+      .map((b) => _bytesToHexString(b))
+      .toList();
 
   // CC (Capability Container) at page 3
   final cc = Uint8List(4);
@@ -221,8 +235,7 @@ String bytesToHexSpace(Uint8List bytes) =>
     bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
 
 /// hex 字符串转 Uint8List
-Uint8List hexToUint8List(String hex) =>
-    StorageService.hexToBytes(hex);
+Uint8List hexToUint8List(String hex) => StorageService.hexToBytes(hex);
 
 /// hex 字符串格式化输入（只允许 0-9 a-f A-F 和空格）
 String formatHexInput(String input) =>
@@ -269,39 +282,39 @@ class SaveCard {
       'c${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
 
   SaveCard copy() => SaveCard(
-        id: id,
-        uid: uid,
-        sak: sak,
-        atqa: atqa,
-        ats: ats,
-        name: name,
-        tag: tag,
-        data: List<String>.from(data),
-        ultralightVersion: ultralightVersion,
-        ultralightSignature: ultralightSignature,
-        ultralightCounters: List<int>.from(ultralightCounters),
-        folderId: folderId,
-        updatedAt: updatedAt,
-        colorValue: colorValue,
-      );
+    id: id,
+    uid: uid,
+    sak: sak,
+    atqa: atqa,
+    ats: ats,
+    name: name,
+    tag: tag,
+    data: List<String>.from(data),
+    ultralightVersion: ultralightVersion,
+    ultralightSignature: ultralightSignature,
+    ultralightCounters: List<int>.from(ultralightCounters),
+    folderId: folderId,
+    updatedAt: updatedAt,
+    colorValue: colorValue,
+  );
 
   Map<String, dynamic> toMap({bool includeUpdatedAt = true}) => {
-        'id': id,
-        'uid': uid,
-        'sak': sak,
-        'atqa': atqa,
-        'ats': ats,
-        'name': name,
-        'tag': tag.value,
-        'data': data,
-        'ultralightVersion': ultralightVersion,
-        'ultralightSignature': ultralightSignature,
-        'ultralightCounters': ultralightCounters,
-        if (folderId != null) 'folderId': folderId,
-        'color': colorValue,
-        if (includeUpdatedAt && updatedAt != null)
-          'updatedAt': updatedAt!.toIso8601String(),
-      };
+    'id': id,
+    'uid': uid,
+    'sak': sak,
+    'atqa': atqa,
+    'ats': ats,
+    'name': name,
+    'tag': tag.value,
+    'data': data,
+    'ultralightVersion': ultralightVersion,
+    'ultralightSignature': ultralightSignature,
+    'ultralightCounters': ultralightCounters,
+    if (folderId != null) 'folderId': folderId,
+    'color': colorValue,
+    if (includeUpdatedAt && updatedAt != null)
+      'updatedAt': updatedAt!.toIso8601String(),
+  };
 
   String toJson() => jsonEncode(toMap());
 
@@ -324,10 +337,9 @@ class SaveCard {
           .toList(),
       ultralightVersion: data['ultralightVersion'] ?? '',
       ultralightSignature: data['ultralightSignature'] ?? '',
-      ultralightCounters:
-          (data['ultralightCounters'] as List<dynamic>? ?? [])
-              .map((e) => e as int)
-              .toList(),
+      ultralightCounters: (data['ultralightCounters'] as List<dynamic>? ?? [])
+          .map((e) => e as int)
+          .toList(),
       folderId: data['folderId'] as String?,
       colorValue: data['color'] ?? 0xFFFF5722,
       updatedAt: data['updatedAt'] == null
@@ -355,11 +367,11 @@ class SaveFolder {
   set color(Color c) => colorValue = c.toARGB32();
 
   Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        if (parentId != null) 'parentId': parentId,
-        'color': colorValue,
-      };
+    'id': id,
+    'name': name,
+    if (parentId != null) 'parentId': parentId,
+    'color': colorValue,
+  };
 
   String toJson() => jsonEncode(toMap());
 
@@ -422,6 +434,68 @@ class CardLibraryStorage {
     cards.removeWhere((c) => c.id == id);
     await saveCards(cards);
     return cards.length != before;
+  }
+
+  /// 导入 CU 卡片文件夹包（chameleon-ultra-gui-folder）
+  /// 对齐 CU _importFolderSource：重建文件夹树并重映射卡片 folderId
+  /// 返回导入卡片数，非该格式抛 FormatException
+  Future<int> importCuBundle(String source, {String? targetFolderId}) async {
+    final raw = jsonDecode(source) as Map<String, dynamic>;
+    if (raw['format'] != 'chameleon-ultra-gui-folder' || raw['version'] != 1) {
+      throw const FormatException('不是 CU 卡片文件夹包');
+    }
+    final rootFolderId = raw['rootFolderId'] as String? ?? '';
+    final cuFolders = (raw['folders'] as List<dynamic>? ?? const [])
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+    final cuCards = (raw['cards'] as List<dynamic>? ?? const [])
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+
+    int cuColor(dynamic v) {
+      if (v is String && v.isNotEmpty) {
+        final hex = v.replaceAll('#', '').replaceAll(' ', '');
+        if (hex.length == 6) return (0xFF << 24) | int.parse(hex, radix: 16);
+      }
+      return 0xFFFF5722;
+    }
+
+    final folders = await getFolders();
+    final cards = await getCards();
+    final idMap = <String, String>{};
+
+    // 占位生成新 id，保证同批次内唯一（对齐 CU 的 CardFolder(name: '').id）
+    var seq = DateTime.now().microsecondsSinceEpoch;
+    for (final f in cuFolders) {
+      idMap[f['id'] as String] = 'f${(seq++).toRadixString(16)}';
+    }
+    for (final f in cuFolders) {
+      final oldId = f['id'] as String;
+      folders.add(
+        SaveFolder(
+          id: idMap[oldId],
+          name: f['name'] as String? ?? '',
+          colorValue: cuColor(f['color']),
+          parentId: oldId == rootFolderId
+              ? targetFolderId
+              : (f['parentId'] as String?) != null
+              ? idMap[f['parentId'] as String]
+              : null,
+        ),
+      );
+    }
+    for (final c in cuCards) {
+      final copy = SaveCard.fromJson(jsonEncode(c));
+      copy.id = SaveCard._genId();
+      final oldFolder = c['folderId'] as String?;
+      copy.folderId = oldFolder != null ? idMap[oldFolder] : null;
+      copy.updatedAt = DateTime.now();
+      cards.add(copy);
+    }
+
+    await saveFolders(folders);
+    await saveCards(cards);
+    return cuCards.length;
   }
 
   Future<List<SaveFolder>> getFolders() async {

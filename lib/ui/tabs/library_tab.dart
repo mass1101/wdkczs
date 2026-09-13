@@ -3,22 +3,31 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../main.dart';
+import '../../models/enums.dart';
 import '../../services/card_backup.dart';
 import '../../services/card_library.dart';
 import '../../services/card_save_converters.dart';
 import '../../services/slot_writer.dart';
+import '../../services/storage_service.dart';
 import '../../state/app_controller.dart';
 import '../screens/card_analyze_screen.dart';
 import '../screens/card_compare_screen.dart';
 import '../screens/card_create_dialog.dart';
 import '../screens/card_edit_dialog.dart';
 import '../screens/card_view_dialog.dart';
-import '../screens/dictionary_manager_screen.dart';
 import '../screens/dump_editor.dart';
-import '../screens/geofence_screen.dart';
 import '../widgets/common.dart' show ActionButton;
+
+/// 二进制导入对话框可选卡型（仅 tagTypeByDumpSize 可推断出的卡型）
+const _importTagOptions = <TagType>[
+  TagType.mifareClassic1k,
+  TagType.mifareClassic4k,
+  TagType.mifareUltralight,
+  TagType.ntag215,
+];
 
 /// 预设文件夹颜色
 const _folderColors = <Color>[
@@ -36,9 +45,7 @@ const _folderColors = <Color>[
 
 /// 卡库 Tab：已保存卡片列表 + 文件夹树形导航 + 写卡槽 + 导入/导出
 class LibraryTab extends StatefulWidget {
-  const LibraryTab({super.key, this.onOpenGeofence});
-
-  final VoidCallback? onOpenGeofence;
+  const LibraryTab({super.key});
 
   @override
   State<LibraryTab> createState() => _LibraryTabState();
@@ -85,7 +92,9 @@ class _LibraryTabState extends State<LibraryTab> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+      );
   }
 
   /// 当前文件夹下的子文件夹（按搜索词过滤）
@@ -101,8 +110,7 @@ class _LibraryTabState extends State<LibraryTab> {
       .toList();
 
   bool _match(String text) =>
-      _search.isEmpty ||
-      text.toLowerCase().contains(_search.toLowerCase());
+      _search.isEmpty || text.toLowerCase().contains(_search.toLowerCase());
 
   /// 当前文件夹对象
   SaveFolder? get _currentFolder {
@@ -116,7 +124,9 @@ class _LibraryTabState extends State<LibraryTab> {
   /// 文件夹子树内卡片总数
   int _folderCardCount(SaveFolder folder) {
     final subtreeIds = _lib.folderSubtreeIds(folder.id, _folders);
-    return _cards.where((c) => c.folderId != null && subtreeIds.contains(c.folderId!)).length;
+    return _cards
+        .where((c) => c.folderId != null && subtreeIds.contains(c.folderId!))
+        .length;
   }
 
   @override
@@ -141,52 +151,43 @@ class _LibraryTabState extends State<LibraryTab> {
                 Expanded(
                   child: Text(
                     _currentFolder!.name,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        // 搜索 + 字典管理
+        // 搜索
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchCtrl,
-                  decoration: InputDecoration(
-                    hintText: '搜索名称 / UID / 卡型',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _search.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () {
-                              _searchCtrl.clear();
-                              _search = '';
-                              setState(() {});
-                            },
-                          ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+          child: TextField(
+            controller: _searchCtrl,
+            decoration: InputDecoration(
+              hintText: '搜索名称 / UID / 卡型',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _search.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        _search = '';
+                        setState(() {});
+                      },
                     ),
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                  ),
-                  onChanged: (v) {
-                    _search = v.trim();
-                    setState(() {});
-                  },
-                ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(width: 8),
-              ActionButton(
-                label: '字典',
-                icon: Icons.bookmarks,
-                onTap: _openDictionaryManager,
-              ),
-            ],
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 6),
+            ),
+            onChanged: (v) {
+              _search = v.trim();
+              setState(() {});
+            },
           ),
         ),
         // 操作区
@@ -196,14 +197,36 @@ class _LibraryTabState extends State<LibraryTab> {
             spacing: 8,
             runSpacing: 4,
             children: [
-              ActionButton(label: '创建卡片', icon: Icons.add_card, onTap: _createCard),
-              ActionButton(label: '新建文件夹', icon: Icons.create_new_folder, onTap: _editFolder),
-              ActionButton(label: '导入', icon: Icons.file_download, onTap: _openImport),
-              ActionButton(label: '写入卡槽', icon: Icons.memory,
-                  onTap: _connected ? _pickAndWrite : null),
-              ActionButton(label: '电子围栏', icon: Icons.location_on, onTap: _openGeofence),
-              ActionButton(label: '云端备份', icon: Icons.cloud_upload, onTap: _cloudBackup),
-              ActionButton(label: '云端还原', icon: Icons.cloud_download, onTap: _cloudRestore),
+              ActionButton(
+                label: '创建卡片',
+                icon: Icons.add_card,
+                onTap: _createCard,
+              ),
+              ActionButton(
+                label: '新建文件夹',
+                icon: Icons.create_new_folder,
+                onTap: _editFolder,
+              ),
+              ActionButton(
+                label: '导入',
+                icon: Icons.file_download,
+                onTap: _openImport,
+              ),
+              ActionButton(
+                label: '写入卡槽',
+                icon: Icons.memory,
+                onTap: _connected ? _pickAndWrite : null,
+              ),
+              ActionButton(
+                label: '云端备份',
+                icon: Icons.cloud_upload,
+                onTap: _cloudBackup,
+              ),
+              ActionButton(
+                label: '云端还原',
+                icon: Icons.cloud_download,
+                onTap: _cloudRestore,
+              ),
             ],
           ),
         ),
@@ -223,9 +246,7 @@ class _LibraryTabState extends State<LibraryTab> {
     if (folders.isEmpty && cards.isEmpty) {
       return Center(
         child: Text(
-          _folderId == null
-              ? '卡库为空，点击「创建卡片」或「导入」'
-              : '此文件夹为空',
+          _folderId == null ? '卡库为空，点击「创建卡片」或「导入」' : '此文件夹为空',
           style: const TextStyle(color: Colors.grey, fontSize: 13),
         ),
       );
@@ -253,7 +274,11 @@ class _LibraryTabState extends State<LibraryTab> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1))
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 2,
+            offset: Offset(0, 1),
+          ),
         ],
       ),
       child: Row(
@@ -266,18 +291,32 @@ class _LibraryTabState extends State<LibraryTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(f.name,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF333333))),
+                  Text(
+                    f.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text('$count 张卡片',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF999999))),
+                  Text(
+                    '$count 张卡片',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF999999),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, size: 20, color: Color(0xFF888888)),
+            icon: const Icon(
+              Icons.more_vert,
+              size: 20,
+              color: Color(0xFF888888),
+            ),
             onSelected: (v) {
               if (v == 'edit') _editFolder(folder: f);
               if (v == 'move') _moveFolder(f);
@@ -304,7 +343,11 @@ class _LibraryTabState extends State<LibraryTab> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1))
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 2,
+            offset: Offset(0, 1),
+          ),
         ],
       ),
       child: Row(
@@ -313,7 +356,9 @@ class _LibraryTabState extends State<LibraryTab> {
             width: 4,
             height: 34,
             decoration: BoxDecoration(
-                color: c.color, borderRadius: BorderRadius.circular(2)),
+              color: c.color,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -322,13 +367,21 @@ class _LibraryTabState extends State<LibraryTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(c.name.isEmpty ? '未命名' : c.name,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF333333))),
+                  Text(
+                    c.name.isEmpty ? '未命名' : c.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     '${c.tag.label}  $freq  UID:${c.uid.toUpperCase()}',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF666666)),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF666666),
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -343,7 +396,11 @@ class _LibraryTabState extends State<LibraryTab> {
               onPressed: () => _writeToSlot(c),
             ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, size: 20, color: Color(0xFF888888)),
+            icon: const Icon(
+              Icons.more_vert,
+              size: 20,
+              color: Color(0xFF888888),
+            ),
             onSelected: (v) {
               if (v == 'view') _viewCard(c);
               if (v == 'edit') _editCard(c);
@@ -439,9 +496,14 @@ class _LibraryTabState extends State<LibraryTab> {
         title: const Text('删除卡片'),
         content: Text('确定删除「${c.name.isEmpty ? c.uid : c.name}」？'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('删除', style: TextStyle(color: Colors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -492,19 +554,28 @@ class _LibraryTabState extends State<LibraryTab> {
                                     color: cc,
                                     shape: BoxShape.circle,
                                     border: sel
-                                        ? Border.all(color: Colors.white, width: 3)
+                                        ? Border.all(
+                                            color: Colors.white,
+                                            width: 3,
+                                          )
                                         : null,
                                   ),
                                   child: sel
-                                      ? const Icon(Icons.check, color: Colors.white, size: 18)
+                                      ? const Icon(
+                                          Icons.check,
+                                          color: Colors.white,
+                                          size: 18,
+                                        )
                                       : null,
                                 ),
                               );
                             }).toList(),
                           ),
                           actions: [
-                            TextButton(onPressed: () => Navigator.pop(c, false),
-                                child: const Text('取消')),
+                            TextButton(
+                              onPressed: () => Navigator.pop(c, false),
+                              child: const Text('取消'),
+                            ),
                           ],
                         ),
                       );
@@ -514,12 +585,16 @@ class _LibraryTabState extends State<LibraryTab> {
                     },
                   ),
                 ),
-                onSubmitted: (_) => Navigator.pop(ctx, ctrl.text.trim().isNotEmpty),
+                onSubmitted: (_) =>
+                    Navigator.pop(ctx, ctrl.text.trim().isNotEmpty),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, ctrl.text.trim().isNotEmpty),
               child: Text(folder == null ? '创建' : '保存'),
@@ -530,11 +605,13 @@ class _LibraryTabState extends State<LibraryTab> {
     );
     if (saved != true) return;
     if (folder == null) {
-      await _lib.upsertFolder(SaveFolder(
-        name: ctrl.text.trim(),
-        colorValue: color.toARGB32(),
-        parentId: _folderId,
-      ));
+      await _lib.upsertFolder(
+        SaveFolder(
+          name: ctrl.text.trim(),
+          colorValue: color.toARGB32(),
+          parentId: _folderId,
+        ),
+      );
     } else {
       folder.name = ctrl.text.trim();
       folder.colorValue = color.toARGB32();
@@ -588,9 +665,14 @@ class _LibraryTabState extends State<LibraryTab> {
         title: Text('删除文件夹「${folder.name}」'),
         content: const Text('将删除此文件夹及其所有子文件夹，文件夹内的卡片将移至根目录。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('删除', style: TextStyle(color: Colors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -608,11 +690,15 @@ class _LibraryTabState extends State<LibraryTab> {
         children: _cards.isEmpty
             ? [const Padding(padding: EdgeInsets.all(20), child: Text('卡库为空'))]
             : _cards
-                .map((c) => SimpleDialogOption(
+                  .map(
+                    (c) => SimpleDialogOption(
                       onPressed: () => Navigator.pop(ctx, c),
-                      child: Text('${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]'),
-                    ))
-                .toList(),
+                      child: Text(
+                        '${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]',
+                      ),
+                    ),
+                  )
+                  .toList(),
       ),
     );
     if (card == null) return;
@@ -623,9 +709,14 @@ class _LibraryTabState extends State<LibraryTab> {
     final slot = await _pickSlotDialog();
     if (slot == null) return;
     try {
-      await uploadCardToSlot(_app.device, card, slot, onProgress: (p) {
-        _toast('写入卡槽 ${slot + 1}：$p%');
-      });
+      await uploadCardToSlot(
+        _app.device,
+        card,
+        slot,
+        onProgress: (p) {
+          _toast('写入卡槽 ${slot + 1}：$p%');
+        },
+      );
       _toast('已写入卡槽 ${slot + 1}');
       await _app.loadEnabledSlots();
     } catch (e) {
@@ -653,9 +744,13 @@ class _LibraryTabState extends State<LibraryTab> {
               return Padding(
                 padding: const EdgeInsets.all(4),
                 child: ChoiceChip(
-                  label: Text('卡槽 ${i + 1}',
-                      style: TextStyle(
-                          fontSize: 13, color: hasCard ? Colors.black87 : Colors.grey)),
+                  label: Text(
+                    '卡槽 ${i + 1}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: hasCard ? Colors.black87 : Colors.grey,
+                    ),
+                  ),
                   selected: false,
                   onSelected: (_) => Navigator.pop(ctx, i),
                 ),
@@ -665,7 +760,9 @@ class _LibraryTabState extends State<LibraryTab> {
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: TextButton(
-                onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
           ),
         ],
       ),
@@ -676,29 +773,7 @@ class _LibraryTabState extends State<LibraryTab> {
   Future<void> _openImport() async {
     showModalBottomSheet<void>(
       context: context,
-      builder: (_) => const _ImportSheet(),
-    ).then((_) => _reload());
-  }
-
-  // ========== 字典管理 ==========
-  Future<void> _openDictionaryManager() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const DictionaryManagerScreen()),
-    );
-    _reload();
-  }
-
-  // ========== 电子围栏 ==========
-  void _openGeofence() {
-    final cb = widget.onOpenGeofence;
-    if (cb != null) {
-      cb();
-      return;
-    }
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const GeofenceScreen()),
+      builder: (_) => _ImportSheet(folderId: _folderId),
     ).then((_) => _reload());
   }
 
@@ -718,10 +793,14 @@ class _LibraryTabState extends State<LibraryTab> {
           decoration: const InputDecoration(hintText: '请输入芯片编号'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('确定')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
@@ -747,9 +826,7 @@ class _LibraryTabState extends State<LibraryTab> {
       all: _cards,
       chipId: chipId,
     );
-    _toast(result.success
-        ? '备份成功：${result.uploaded} 张卡片'
-        : '备份失败，请检查网络或服务器');
+    _toast(result.success ? '备份成功：${result.uploaded} 张卡片' : '备份失败，请检查网络或服务器');
   }
 
   Future<void> _cloudRestore() async {
@@ -782,123 +859,441 @@ class _LibraryTabState extends State<LibraryTab> {
   }
 }
 
-/// 导入面板：粘贴 PM3/Flipper/MCT 文本并选择格式
+/// 导入面板（对齐 CU saved_cards 的 importCard）
+/// 支持多选文件、PM3/Flipper/MCT/RFID 文本自动识别、CU 单卡 JSON、CU 文件夹包、二进制 dump
 class _ImportSheet extends StatefulWidget {
-  const _ImportSheet();
+  final String? folderId;
+
+  const _ImportSheet({this.folderId});
 
   @override
   State<_ImportSheet> createState() => _ImportSheetState();
 }
 
 class _ImportSheetState extends State<_ImportSheet> {
-  final _ctrl = TextEditingController();
-  int _fmt = 0;
+  final _pasteCtrl = TextEditingController();
+  final _pasteNameCtrl = TextEditingController();
 
-  Future<void> _doImport() async {
-    final text = _ctrl.text.trim();
-    if (text.isEmpty) {
-      _toast('请先粘贴内容或选择文件');
+  Future<Uint8List> _readBytes(PlatformFile f) async =>
+      f.bytes ?? await File(f.path!).readAsBytes();
+
+  /// 文本导出自动识别（顺序对齐 CU importCard）
+  SaveCard? _parseText(String t, String name) {
+    if (t.contains('"Created": "proxmark3",')) return pm3JsonToSaveCard(t);
+    if (t.contains('Filetype: Flipper NFC device')) {
+      return flipperNfcToSaveCard(t);
+    }
+    if (t.contains('+Sector: 0')) return mctToSaveCard(t);
+    if (t.contains('Filetype: Flipper RFID key')) {
+      return flipperRfidToSaveCard(t);
+    }
+    try {
+      final j = jsonDecode(t);
+      if (j is Map && j['uid'] != null) {
+        return cuJsonToSaveCard(t)..name = name;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 导入单文件（对齐 CU importCard 逐文件分支）
+  Future<void> _importOne(
+    Uint8List contents,
+    String fileName, {
+    bool batch = false,
+  }) async {
+    final name = baseName(fileName);
+    String? text;
+    try {
+      text = utf8.decode(contents);
+    } catch (_) {}
+
+    final t = text?.trim() ?? '';
+    if (t.isNotEmpty) {
+      // CU 卡片文件夹包
+      if (isCuCardBundle(t)) {
+        final n = await CardLibraryStorage().importCuBundle(
+          t,
+          targetFolderId: widget.folderId,
+        );
+        if (mounted) _toast('已导入文件夹：$n 张卡片');
+        return;
+      }
+      SaveCard? card;
+      try {
+        card = _parseText(t, name);
+      } catch (_) {}
+      if (card != null) {
+        card.name = name;
+        card.folderId = widget.folderId;
+        await CardLibraryStorage().upsertCard(card);
+        if (mounted) {
+          _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
+        }
+        return;
+      }
+    }
+
+    // 二进制 dump
+    final tag = tagTypeByDumpSize(contents.length);
+    if (tag == null) {
+      if (mounted) _toast('跳过 $fileName：无法识别的内容');
       return;
     }
-    try {
-      final card = switch (_fmt) {
-        1 => flipperNfcToSaveCard(text),
-        2 => flipperRfidToSaveCard(text),
-        3 => mctToSaveCard(text),
-        _ => pm3JsonToSaveCard(text),
-      };
-      await CardLibraryStorage().upsertCard(card);
-      if (mounted) {
-        _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      _toast('导入失败: $e');
+    if (batch) {
+      await _importBinarySilent(contents, tag, fileName);
+      return;
+    }
+    if (mounted) await _showBinaryDialog(contents, tag, fileName);
+  }
+
+  /// 从二进制 dump 按卡型切块（对齐 CU blockSize: Classic 16 / 其他 4）
+  List<String> _blocksOf(Uint8List d, TagType tag) {
+    final size = isMifareClassic(tag) ? 16 : 4;
+    return [
+      for (var i = 0; i + size <= d.length; i += size)
+        StorageService.bytesToHex(d.sublist(i, i + size)),
+    ];
+  }
+
+  /// 多文件批量：二进制静默导入（对齐 CU files.length > 1 分支）
+  Future<void> _importBinarySilent(
+    Uint8List contents,
+    TagType tag,
+    String fileName,
+  ) async {
+    var cardName = baseName(fileName);
+    final dot = cardName.lastIndexOf('.');
+    if (dot > 0) cardName = cardName.substring(0, dot);
+    final card = SaveCard(
+      name: cardName,
+      tag: tag,
+      uid: bytesToHexSpace(contents.sublist(0, 4)),
+      sak: isMifareClassic(tag) && contents.length > 5 ? contents[5] : 0,
+      atqa: isMifareClassic(tag) && contents.length > 7
+          ? StorageService.bytesToHex(
+              Uint8List.fromList([contents[7], contents[6]]),
+            )
+          : '',
+      data: _blocksOf(contents, tag),
+      folderId: widget.folderId,
+    );
+    await CardLibraryStorage().upsertCard(card);
+    if (mounted) {
+      _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
     }
   }
 
-  Future<void> _pickFile() async {
-    try {
-      final pick = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json', 'nfc', 'rfid', 'txt', 'mct', 'bin'],
-        withData: true,
+  /// 单文件二进制：修正标签数据对话框（对齐 CU correct_tag_data）
+  Future<void> _showBinaryDialog(
+    Uint8List contents,
+    TagType tag,
+    String fileName,
+  ) async {
+    final hasUid4 = isMifareClassic(tag);
+    Uint8List uid4 = Uint8List(0);
+    Uint8List uid7 = Uint8List(0);
+    var sak4 = 0;
+    var sak7 = 0;
+    Uint8List atqa4 = Uint8List(0);
+    Uint8List atqa7 = Uint8List(0);
+
+    if (hasUid4) {
+      uid4 = contents.sublist(0, 4);
+      uid7 = contents.sublist(0, 7);
+      sak4 = contents[5];
+      atqa4 = Uint8List.fromList([contents[7], contents[6]]);
+    } else if (isMifareUltralight(tag)) {
+      atqa7 = Uint8List.fromList([0x00, 0x44]);
+      uid7 = Uint8List.fromList([
+        ...contents.sublist(0, 3),
+        ...contents.sublist(4, 8),
+      ]);
+    }
+
+    final uid4Ctrl = TextEditingController(text: bytesToHexSpace(uid4));
+    final sak4Ctrl = TextEditingController(
+      text: StorageService.bytesToHex(Uint8List.fromList([sak4])),
+    );
+    final atqa4Ctrl = TextEditingController(text: bytesToHexSpace(atqa4));
+    final uid7Ctrl = TextEditingController(text: bytesToHexSpace(uid7));
+    final sak7Ctrl = TextEditingController(
+      text: StorageService.bytesToHex(Uint8List.fromList([sak7])),
+    );
+    final atqa7Ctrl = TextEditingController(text: bytesToHexSpace(atqa7));
+    final nameCtrl = TextEditingController(text: baseName(fileName));
+    var selectedTag = tag;
+    late BuildContext dialogCtx;
+
+    final hexFmt = FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]'));
+    String hexOnly(String s) =>
+        s.replaceAll(RegExp(r'[^0-9a-fA-F]'), '').toLowerCase();
+    Future<bool> showInvalid(String m) async {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('错误'),
+          content: Text(m),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
       );
-      if (pick == null || pick.files.isEmpty) return;
-      final file = pick.files.first;
-      final path = file.path;
-      final bytes = file.bytes ??
-          (path != null ? await File(path).readAsBytes() : null);
-      if (bytes == null) {
-        _toast('无法读取文件');
-        return;
+      return true;
+    }
+
+    Future<bool> saveAs(
+      int bytes,
+      TextEditingController uid,
+      TextEditingController sak,
+      TextEditingController atqa,
+    ) async {
+      if (hexOnly(sak.text).length != 2 || hexOnly(atqa.text).length != 4) {
+        if (await showInvalid('SAK 需 1 字节、ATQA 需 2 字节十六进制')) {
+          return false;
+        }
       }
-      final text = utf8.decode(bytes, allowMalformed: true).trim();
-      if (_looksLikeTextExport(text)) {
-        setState(() => _ctrl.text = text);
-        return;
+      final s = hexOnly(uid.text);
+      if (s.length != bytes * 2) {
+        if (await showInvalid('UID 需 $bytes 字节十六进制')) return false;
       }
-      // 非已知文本格式：按二进制 dump 内容推断卡型
-      final card = autoDetectToSaveCard(bytes, fileName: file.name);
-      if (card == null) {
-        _toast('无法识别格式，支持 PM3/Flipper/MCT 文本或二进制 dump');
-        return;
-      }
+      final card = SaveCard(
+        name: nameCtrl.text.trim(),
+        tag: selectedTag,
+        uid: uid.text.trim(),
+        sak: hexToUint8List(sak.text).isNotEmpty
+            ? hexToUint8List(sak.text)[0]
+            : 0,
+        atqa: StorageService.bytesToHex(hexToUint8List(atqa.text)),
+        data: _blocksOf(contents, selectedTag),
+        folderId: widget.folderId,
+      );
       await CardLibraryStorage().upsertCard(card);
-      if (mounted) {
-        _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
-        Navigator.pop(context);
+      if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+      _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
+      return true;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        dialogCtx = dialogContext;
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('修正标签数据'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (hasUid4) ...[
+                    const Text('UID（4 字节）'),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: uid4Ctrl,
+                      inputFormatters: [hexFmt],
+                      decoration: const InputDecoration(
+                        labelText: 'UID',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: sak4Ctrl,
+                      inputFormatters: [hexFmt],
+                      decoration: const InputDecoration(
+                        labelText: 'SAK',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: atqa4Ctrl,
+                      inputFormatters: [hexFmt],
+                      decoration: const InputDecoration(
+                        labelText: 'ATQA',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  const Text('UID（7 字节）'),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: uid7Ctrl,
+                    inputFormatters: [hexFmt],
+                    decoration: const InputDecoration(
+                      labelText: 'UID',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: sak7Ctrl,
+                    inputFormatters: [hexFmt],
+                    decoration: const InputDecoration(
+                      labelText: 'SAK',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: atqa7Ctrl,
+                    inputFormatters: [hexFmt],
+                    decoration: const InputDecoration(
+                      labelText: 'ATQA',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: '名称',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButton<TagType>(
+                    value: selectedTag,
+                    items: _importTagOptions
+                        .map(
+                          (t) =>
+                              DropdownMenuItem(value: t, child: Text(t.label)),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => selectedTag = v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('取消'),
+              ),
+              if (hasUid4)
+                TextButton(
+                  onPressed: () => saveAs(4, uid4Ctrl, sak4Ctrl, atqa4Ctrl),
+                  child: const Text('保存为 4 字节 UID'),
+                ),
+              TextButton(
+                onPressed: () => saveAs(7, uid7Ctrl, sak7Ctrl, atqa7Ctrl),
+                child: const Text('保存为 7 字节 UID'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickFiles() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(allowMultiple: true);
+      if (res == null || res.files.isEmpty) return;
+      final total = res.files.length;
+      var ok = 0;
+      for (final f in res.files) {
+        try {
+          await _importOne(
+            await _readBytes(f),
+            f.name,
+            batch: res.files.length > 1,
+          );
+          ok++;
+        } catch (e) {
+          if (mounted) _toast('导入失败 ${f.name}: $e');
+        }
       }
+      if (mounted && ok > 0) _toast('导入完成：成功 $ok / $total');
     } catch (e) {
-      _toast('选择文件失败: $e');
+      if (mounted) _toast('选择文件失败: $e');
     }
   }
 
-  bool _looksLikeTextExport(String text) {
-    final t = text.trimLeft().toLowerCase();
-    if (t.startsWith('{')) return t.contains('"');
-    if (t.contains('mifare_classic')) return true;
-    if (t.contains('mifare_ultralight')) return true;
-    if (t.contains('rfid')) return true;
-    if (t.contains('+sector')) return true;
-    return false;
+  Future<void> _pasteImport() async {
+    final text = _pasteCtrl.text.trim();
+    if (text.isEmpty) {
+      _toast('请先粘贴导出内容');
+      return;
+    }
+    final name = _pasteNameCtrl.text.trim();
+    try {
+      final card = _parseText(text, name.isNotEmpty ? name : '导入卡片');
+      if (card != null) {
+        card.name = name.isNotEmpty ? name : card.name;
+        card.folderId = widget.folderId;
+        await CardLibraryStorage().upsertCard(card);
+        if (mounted) {
+          _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
+          Navigator.pop(context);
+        }
+        return;
+      }
+    } catch (e) {
+      if (mounted) _toast('导入失败: $e');
+      return;
+    }
+    if (mounted) {
+      _toast('无法识别格式，支持 PM3 / Flipper NFC / Flipper RFID / MCT / CU JSON');
+    }
   }
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+      );
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
-          left: 12, right: 12, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+        left: 12,
+        right: 12,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('导入卡片',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const Text(
+            '导入卡片',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
-          SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('PM3')),
-              ButtonSegment(value: 1, label: Text('Flipper NFC')),
-              ButtonSegment(value: 2, label: Text('Flipper RFID')),
-              ButtonSegment(value: 3, label: Text('MCT')),
-            ],
-            selected: {_fmt},
-            onSelectionChanged: (s) => setState(() => _fmt = s.first),
+          ActionButton(
+            label: '选择文件',
+            icon: Icons.file_upload,
+            onTap: _pickFiles,
+            stretch: true,
+          ),
+          const SizedBox(height: 8),
+          const Text('或直接粘贴导出内容', style: TextStyle(fontSize: 13)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _pasteCtrl,
+            maxLines: 6,
+            decoration: const InputDecoration(
+              hintText: '粘贴 PM3 / Flipper / MCT / CU JSON 文本',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 8),
           TextField(
-            controller: _ctrl,
-            maxLines: 8,
+            controller: _pasteNameCtrl,
             decoration: const InputDecoration(
-              hintText: '粘贴卡片导出文本（JSON 或文本文件内容）',
+              hintText: '卡片名称（可选）',
+              prefixIcon: Icon(Icons.label_outline),
               border: OutlineInputBorder(),
             ),
           ),
@@ -906,10 +1301,11 @@ class _ImportSheetState extends State<_ImportSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-              ActionButton(label: '选择文件', icon: Icons.folder_open, onTap: _pickFile),
-              const SizedBox(width: 8),
-              ActionButton(label: '导入', icon: Icons.check, onTap: _doImport),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              ActionButton(label: '导入', icon: Icons.check, onTap: _pasteImport),
             ],
           ),
         ],

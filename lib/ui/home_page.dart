@@ -150,7 +150,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 const IcTab(),
                 const IdTab(),
                 const SlotManagerTab(),
-                LibraryTab(onOpenGeofence: () => _tabController.animateTo(4)),
+                const LibraryTab(),
                 const GeofenceScreen(),
                 const SettingsTab(),
               ],

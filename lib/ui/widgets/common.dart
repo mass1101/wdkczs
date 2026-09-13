@@ -64,7 +64,11 @@ class SectionCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 2,
+            offset: Offset(0, 1),
+          ),
         ],
       ),
       child: Column(
@@ -109,6 +113,7 @@ class ActionButton extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? color;
   final bool enabled;
+  final bool stretch;
 
   const ActionButton({
     super.key,
@@ -117,6 +122,7 @@ class ActionButton extends StatelessWidget {
     this.onTap,
     this.color,
     this.enabled = true,
+    this.stretch = false,
   });
 
   @override
@@ -138,18 +144,19 @@ class ActionButton extends StatelessWidget {
             ),
             child: Container(
               height: 34,
+              width: stretch ? double.infinity : null,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisSize: stretch ? MainAxisSize.max : MainAxisSize.min,
+                mainAxisAlignment: stretch
+                    ? MainAxisAlignment.spaceBetween
+                    : MainAxisAlignment.start,
                 children: [
                   if (icon != null) ...[
                     Icon(icon, size: 16, color: c),
                     const SizedBox(width: 4),
                   ],
-                  Text(
-                    label,
-                    style: TextStyle(fontSize: 13, color: c),
-                  ),
+                  Text(label, style: TextStyle(fontSize: 13, color: c)),
                 ],
               ),
             ),
@@ -203,14 +210,18 @@ class ConnectionBanner extends StatelessWidget {
           if (connected && onDisconnect != null)
             GestureDetector(
               onTap: onDisconnect,
-              child: const Text('断开',
-                  style: TextStyle(fontSize: 13, color: Colors.grey)),
+              child: const Text(
+                '断开',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
             )
           else if (!connected && onConnect != null)
             GestureDetector(
               onTap: onConnect,
-              child: Text('去连接',
-                  style: TextStyle(fontSize: 13, color: primary)),
+              child: Text(
+                '去连接',
+                style: TextStyle(fontSize: 13, color: primary),
+              ),
             ),
         ],
       ),
@@ -249,7 +260,9 @@ class ColorPickerRow extends StatelessWidget {
               color: Color(c),
               shape: BoxShape.circle,
               border: Border.all(
-                color: sel ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                color: sel
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.transparent,
                 width: 2,
               ),
             ),
@@ -297,34 +310,43 @@ class KeyCard extends StatelessWidget {
         children: [
           SizedBox(
             width: 56,
-            child: Text(label,
-                style: const TextStyle(
-                    fontSize: 13, color: Color(0xFF666666))),
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+            ),
           ),
           Expanded(
             child: Text(
               value,
               style: const TextStyle(
-                  fontSize: 12, color: Color(0xFF333333), letterSpacing: 0.5),
+                fontSize: 12,
+                color: Color(0xFF333333),
+                letterSpacing: 0.5,
+              ),
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (onList != null)
             IconButton(
-                onPressed: onList, icon: Icon(Icons.list, size: 18, color: primary)),
+              onPressed: onList,
+              icon: Icon(Icons.list, size: 18, color: primary),
+            ),
           if (onDownload != null)
             IconButton(
-                onPressed: onDownload,
-                icon: Icon(Icons.download, size: 18, color: primary)),
+              onPressed: onDownload,
+              icon: Icon(Icons.download, size: 18, color: primary),
+            ),
           if (onRefresh != null)
             IconButton(
-                onPressed: onRefresh,
-                icon: Icon(Icons.refresh, size: 18, color: primary)),
+              onPressed: onRefresh,
+              icon: Icon(Icons.refresh, size: 18, color: primary),
+            ),
           if (onDelete != null)
             IconButton(
-                onPressed: onDelete,
-                icon: Icon(Icons.close, size: 18, color: Colors.grey)),
+              onPressed: onDelete,
+              icon: Icon(Icons.close, size: 18, color: Colors.grey),
+            ),
         ],
       ),
     );

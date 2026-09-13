@@ -34,10 +34,7 @@ SaveCard pm3JsonToSaveCard(String json) {
       : 0;
   final atqaHex = card['ATQA'] as String;
   final atqaList = _parseAtqa(atqaHex);
-  final atqa = [
-    atqaList[1],
-    atqaList[0],
-  ];
+  final atqa = [atqaList[1], atqaList[0]];
 
   final blocks = <String>[];
   final blockData = data['blocks'] as Map<String, dynamic>;
@@ -57,7 +54,8 @@ SaveCard pm3JsonToSaveCard(String json) {
     name: uid,
     tag: tag,
     sak: sak,
-    atqa: '${atqa[0].toRadixString(16).padLeft(2, '0')}${atqa[1].toRadixString(16).padLeft(2, '0')}',
+    atqa:
+        '${atqa[0].toRadixString(16).padLeft(2, '0')}${atqa[1].toRadixString(16).padLeft(2, '0')}',
     data: blocks,
   );
 }
@@ -69,8 +67,7 @@ SaveCard flipperNfcToSaveCard(String data) {
   final atqaMatch = RegExp(r'ATQA:\s+([\dA-Fa-f ]+)').firstMatch(data);
 
   final uid = uidMatch?.group(1)?.trim() ?? '';
-  final sakBytes =
-      StorageService.hexToBytes(sakMatch?.group(1)?.trim() ?? '');
+  final sakBytes = StorageService.hexToBytes(sakMatch?.group(1)?.trim() ?? '');
   final sak = sakBytes.isNotEmpty ? sakBytes[0] : 0;
   final atqaHex = (atqaMatch?.group(1)?.trim() ?? '').replaceAll(' ', '');
   final atqaList = _parseAtqa(atqaHex);
@@ -94,7 +91,8 @@ SaveCard flipperNfcToSaveCard(String data) {
     name: uid,
     tag: tag,
     sak: sak,
-    atqa: '${atqaList[1].toRadixString(16).padLeft(2, '0')}${atqaList[0].toRadixString(16).padLeft(2, '0')}',
+    atqa:
+        '${atqaList[1].toRadixString(16).padLeft(2, '0')}${atqaList[0].toRadixString(16).padLeft(2, '0')}',
     data: blocks,
   );
 }
@@ -107,8 +105,8 @@ SaveCard mctToSaveCard(String data) {
   final uid = header.length >= 8 ? header.substring(0, 8) : '';
   final sak = header.length >= 12
       ? StorageService.hexToBytes(header.substring(10, 12)).isNotEmpty
-          ? StorageService.hexToBytes(header.substring(10, 12))[0]
-          : 0
+            ? StorageService.hexToBytes(header.substring(10, 12))[0]
+            : 0
       : 0;
   final atqaList = header.length >= 16
       ? _parseAtqa(header.substring(12, 16))
@@ -133,7 +131,8 @@ SaveCard mctToSaveCard(String data) {
     name: uid,
     tag: tag,
     sak: sak,
-    atqa: '${atqaList[1].toRadixString(16).padLeft(2, '0')}${atqaList[0].toRadixString(16).padLeft(2, '0')}',
+    atqa:
+        '${atqaList[1].toRadixString(16).padLeft(2, '0')}${atqaList[0].toRadixString(16).padLeft(2, '0')}',
     data: blocks,
   );
 }
@@ -162,18 +161,7 @@ SaveCard flipperRfidToSaveCard(String data) {
       // HID 10 字节编码：hidType=1, fc=uid byte0, uid=3 bytes, il=0, oem=0
       final ub = StorageService.hexToBytes(uid);
       if (ub.length >= 3) {
-        final hid = <int>[
-          1,
-          ub[0],
-          0,
-          0,
-          0,
-          ...ub.sublist(1, 3),
-          0,
-          0,
-          0,
-          0,
-        ];
+        final hid = <int>[1, ub[0], 0, 0, 0, ...ub.sublist(1, 3), 0, 0, 0, 0];
         uid = StorageService.bytesToHex(Uint8List.fromList(hid));
       }
       break;
@@ -215,8 +203,10 @@ const supportedBinSizes =
 SaveCard binToSaveCard(Uint8List bytes, {String? name}) {
   final tag = tagTypeByDumpSize(bytes.length);
   if (tag == null) {
-    throw FormatException('无法识别的二进制 dump：${bytes.length} 字节，'
-        '支持尺寸 $supportedBinSizes');
+    throw FormatException(
+      '无法识别的二进制 dump：${bytes.length} 字节，'
+      '支持尺寸 $supportedBinSizes',
+    );
   }
 
   String uid;
@@ -236,10 +226,9 @@ SaveCard binToSaveCard(Uint8List bytes, {String? name}) {
   } else {
     if (bytes.length < 8) throw FormatException('Ultralight dump 至少 8 字节');
     // page0 = [uid0,uid1,uid2,BCC]，跳过 BCC 拼 7 字节 UID
-    uid = StorageService.bytesToHex(Uint8List.fromList([
-      ...bytes.sublist(0, 3),
-      ...bytes.sublist(4, 8),
-    ]));
+    uid = StorageService.bytesToHex(
+      Uint8List.fromList([...bytes.sublist(0, 3), ...bytes.sublist(4, 8)]),
+    );
     atqa = '0044';
     for (int i = 0; i + 4 <= bytes.length; i += 4) {
       blocks.add(StorageService.bytesToHex(bytes.sublist(i, i + 4)));
@@ -300,5 +289,60 @@ SaveCard? autoDetectToSaveCard(Uint8List bytes, {String? fileName}) {
     return binToSaveCard(bytes, name: baseName(fileName ?? ''));
   } catch (_) {
     return null;
+  }
+}
+
+/// CU 单卡 JSON（CardSave）→ nfcapp SaveCard
+/// CU 的 data/atqa/ats 是字节数组、color 是 hex 字符串、extra 装 ultralight 字段
+SaveCard cuJsonToSaveCard(String json) {
+  final d = jsonDecode(json) as Map<String, dynamic>;
+  final extra = (d['extra'] ?? const {}) as Map<String, dynamic>;
+
+  // CU 字节数组 → nfcapp 紧凑 hex 字符串
+  String cuHex(List<dynamic>? l) => StorageService.bytesToHex(
+    Uint8List.fromList((l ?? const []).map((e) => e as int).toList()),
+  );
+
+  var colorValue = 0xFFFF5722;
+  final colorRaw = d['color'];
+  if (colorRaw is String && colorRaw.isNotEmpty) {
+    final hex = colorRaw.replaceAll('#', '').replaceAll(' ', '');
+    if (hex.length == 6) {
+      colorValue = (0xFF << 24) | int.parse(hex, radix: 16);
+    }
+  }
+
+  final updatedRaw = d['updatedAt'];
+  return SaveCard(
+    id: d['id'] is String ? d['id'] as String : null,
+    uid: d['uid'] is String ? d['uid'] as String : '',
+    name: d['name'] is String ? d['name'] as String : '',
+    tag: TagType.from(d['tag'] is int ? d['tag'] : 0),
+    sak: d['sak'] is int ? d['sak'] as int : 0,
+    atqa: cuHex(d['atqa']),
+    ats: cuHex(d['ats']),
+    data: (d['data'] as List<dynamic>? ?? const [])
+        .map((e) => cuHex(e is List<dynamic> ? e : null))
+        .toList(),
+    ultralightVersion: cuHex(extra['ultralightVersion']),
+    ultralightSignature: cuHex(extra['ultralightSignature']),
+    ultralightCounters:
+        (extra['ultralightCounters'] as List<dynamic>? ?? const [])
+            .map((e) => e is int ? e : 0)
+            .toList(),
+    folderId: d['folderId'] is String ? d['folderId'] as String : null,
+    colorValue: colorValue,
+    updatedAt: updatedRaw is String ? DateTime.tryParse(updatedRaw) : null,
+  );
+}
+
+/// 判断文本是否为 CU 卡片文件夹包（chameleon-ultra-gui-folder）
+bool isCuCardBundle(String text) {
+  try {
+    final j = jsonDecode(text.trim());
+    if (j is! Map) return false;
+    return j['format'] == 'chameleon-ultra-gui-folder' && j['version'] == 1;
+  } catch (_) {
+    return false;
   }
 }
