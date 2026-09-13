@@ -110,12 +110,27 @@ class DeviceService {
   }
 
   /// 底层发送请求并等待响应（命令串行化，避免并发导致响应错乱）
+  /// [retriesOnTimeout]：仅在命令级超时(-2)时幂等重发，默认 0 不启用。
+  /// 只给确无副作用的大批量检查类命令（如 2012 mf1CheckKeysOfSectors）开启；
+  /// 采集/读块等有状态命令保持 0，重发会改变语义。计数为每次调用独立预算，用完即止。
   Future<Uint8List> _request(int cmd, Uint8List? data,
-      {int timeout = UltraFrame.defaultTimeoutMs}) {
-    final task = _txQueue
-        .then((_) => _requestRaw(cmd, data, timeout: timeout));
-    _txQueue = task.then<void>((_) {}, onError: (_) {});
-    return task;
+      {int timeout = UltraFrame.defaultTimeoutMs, int retriesOnTimeout = 0}) {
+    var remaining = retriesOnTimeout;
+    Future<Uint8List> attempt() {
+      final task = _txQueue.then((_) => _requestRaw(cmd, data, timeout: timeout));
+      _txQueue = task.then<void>((_) {}, onError: (_) {});
+      return task.catchError((e) {
+        // 固件可能仍在忙旧命令（2012 大命令），立即重发仍可能超时，故仅幂等重试有限次
+        if (e is DeviceException && e.status == -2 && remaining > 0) {
+          remaining--;
+          debugPrint('cmd=$cmd 超时($timeout ms)后幂等重试, 剩 $remaining 次');
+          return attempt();
+        }
+        throw e;
+      });
+    }
+
+    return attempt();
   }
 
   Future<Uint8List> _requestRaw(int cmd, Uint8List? data,
@@ -1186,7 +1201,7 @@ class DeviceService {
         n.setRange(10 + i * 6, 10 + i * 6 + 6, chunk[i]);
       }
       final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n,
-          timeout: waitMs);
+          timeout: waitMs, retriesOnTimeout: 1);
       final found = Uint8List(10);
       found.setRange(0, 10, r.sublist(0, 10));
       var allDone = true;
