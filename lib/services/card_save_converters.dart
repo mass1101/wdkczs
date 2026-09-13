@@ -7,11 +7,21 @@ import 'storage_service.dart';
 
 /// 导入转换器：PM3/Flipper/MCT（对齐 CU card_save_converters，输出 nfcapp SaveCard）
 
-/// 由块数推断 MIFARE Classic 卡型
+/// 由块数推断 MIFARE Classic 卡型（对齐 CU mfClassicGetChameleonTagType）
 TagType _tagTypeByBlockCount(int blockCount) {
-  if (blockCount == 256) return TagType.mifareClassic4k;
-  // 64/72 = 1K，128 = 2K，20 = Mini（nfcapp 仅 1K/4K，2K/Mini 就近映射）
-  return TagType.mifareClassic1k;
+  switch (blockCount) {
+    case 20:
+      return TagType.mifareMini;
+    case 64:
+    case 72: // EV1
+      return TagType.mifare1K;
+    case 128:
+      return TagType.mifare2K;
+    case 256:
+      return TagType.mifare4K;
+    default:
+      return TagType.unknown;
+  }
 }
 
 /// 从 atqa hex 字符串解析为小端 2 字节（CU 约定 [lo, hi]）
@@ -44,7 +54,7 @@ SaveCard pm3JsonToSaveCard(String json) {
 
   final TagType tag;
   if (blocks.isNotEmpty && blocks[0].replaceAll(' ', '').length > 32) {
-    tag = TagType.mifareUltralight;
+    tag = TagType.ultralight;
   } else {
     tag = _tagTypeByBlockCount(blocks.length);
   }
@@ -81,7 +91,7 @@ SaveCard flipperNfcToSaveCard(String data) {
 
   final TagType tag;
   if (blocks.isNotEmpty && blocks[0].replaceAll(' ', '').length > 32) {
-    tag = TagType.mifareUltralight;
+    tag = TagType.ultralight;
   } else {
     tag = _tagTypeByBlockCount(blocks.length);
   }
@@ -121,7 +131,7 @@ SaveCard mctToSaveCard(String data) {
 
   final TagType tag;
   if (blocks.isNotEmpty && blocks[0].replaceAll(' ', '').length > 32) {
-    tag = TagType.mifareUltralight;
+    tag = TagType.ultralight;
   } else {
     tag = _tagTypeByBlockCount(blocks.length);
   }
@@ -148,13 +158,13 @@ SaveCard flipperRfidToSaveCard(String data) {
   TagType tag;
   switch (type) {
     case 'EM4100':
-      tag = TagType.em4100;
+      tag = TagType.em410X64;
       break;
     case 'EM4100/32':
-      tag = TagType.em4100;
+      tag = TagType.em410X32;
       break;
     case 'EM4100/16':
-      tag = TagType.em4100;
+      tag = TagType.em410X16;
       break;
     case 'H10301':
       tag = TagType.hidProx;
@@ -166,29 +176,40 @@ SaveCard flipperRfidToSaveCard(String data) {
       }
       break;
     default:
-      tag = TagType.em4100;
+      tag = TagType.unknown;
   }
 
   return SaveCard(uid: uid, name: uid, tag: tag);
 }
 
 /// 按 dump 字节数推断卡型（对齐 CU getTagTypeByDumpSize）
-/// nfcapp 仅支持 1K/4K/Ultralight/NTAG215，不支持的尺寸返回 null
 TagType? tagTypeByDumpSize(int size) {
   switch (size) {
+    case 320:
+      return TagType.mifareMini;
     case 1024:
-    case 1088:
-    case 1152:
-      return TagType.mifareClassic1k;
+      return TagType.mifare1K;
+    case 1088: // EV1
+    case 1152: // EV1
+      return TagType.mifare1K;
+    case 2048:
+      return TagType.mifare2K;
     case 4096:
-      return TagType.mifareClassic4k;
+      return TagType.mifare4K;
     case 64:
-      return TagType.mifareUltralight;
+      return TagType.ultralight;
+    case 192:
+      return TagType.ultralightC;
+    case 80:
+      return TagType.ultralight11; // also NTAG210
     case 164:
+      return TagType.ultralight21; // also NTAG212
     case 180:
+      return TagType.ntag213;
     case 540:
-    case 924:
       return TagType.ntag215;
+    case 924:
+      return TagType.ntag216;
     default:
       return null;
   }
@@ -196,7 +217,7 @@ TagType? tagTypeByDumpSize(int size) {
 
 /// 可识别的二进制 dump 尺寸提示文案
 const supportedBinSizes =
-    '64 / 164 / 180 / 540 / 924 / 1024 / 1088 / 1152 / 4096 字节';
+    '320 / 64 / 80 / 164 / 180 / 192 / 540 / 924 / 1024 / 1088 / 1152 / 2048 / 4096 字节';
 
 /// 二进制 dump（.bin）导入：按字节数推断卡型并提取 UID/SAK/ATQA
 /// 对齐 CU saved_cards 的二进制分支（无扩展名判断，纯按内容推断）
@@ -317,7 +338,7 @@ SaveCard cuJsonToSaveCard(String json) {
     id: d['id'] is String ? d['id'] as String : null,
     uid: d['uid'] is String ? d['uid'] as String : '',
     name: d['name'] is String ? d['name'] as String : '',
-    tag: TagType.from(d['tag'] is int ? d['tag'] : 0),
+    tag: TagType.from(d['tag'] is int ? d['tag'] : TagType.mifare1K.value),
     sak: d['sak'] is int ? d['sak'] as int : 0,
     atqa: cuHex(d['atqa']),
     ats: cuHex(d['ats']),

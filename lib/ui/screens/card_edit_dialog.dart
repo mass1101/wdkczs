@@ -53,12 +53,18 @@ class _CardEditDialogState extends State<CardEditDialog> {
     _uidCtrl = TextEditingController(text: widget.card.uid);
     final sakHex = widget.card.sak.toRadixString(16).padLeft(2, '0');
     _sakCtrl = TextEditingController(text: sakHex);
-    _atqaCtrl = TextEditingController(text: _formatHexWithSpace(widget.card.atqa));
-    _atsCtrl = TextEditingController(text: _formatHexWithSpace(widget.card.ats));
-    _ulVersionCtrl =
-        TextEditingController(text: _formatHexWithSpace(widget.card.ultralightVersion));
-    _ulSignatureCtrl =
-        TextEditingController(text: _formatHexWithSpace(widget.card.ultralightSignature));
+    _atqaCtrl = TextEditingController(
+      text: _formatHexWithSpace(widget.card.atqa),
+    );
+    _atsCtrl = TextEditingController(
+      text: _formatHexWithSpace(widget.card.ats),
+    );
+    _ulVersionCtrl = TextEditingController(
+      text: _formatHexWithSpace(widget.card.ultralightVersion),
+    );
+    _ulSignatureCtrl = TextEditingController(
+      text: _formatHexWithSpace(widget.card.ultralightSignature),
+    );
     _currentColor = widget.card.color;
     _originalUid = widget.card.uid;
     _originalSak = sakHex;
@@ -67,6 +73,9 @@ class _CardEditDialogState extends State<CardEditDialog> {
   }
 
   void _initCounterControllers() {
+    for (final c in _counterCtrls) {
+      c.dispose();
+    }
     _counterCtrls = [];
     final count = mfUltralightGetCounterCount(_selectedType);
     for (int i = 0; i < count; i++) {
@@ -104,22 +113,7 @@ class _CardEditDialogState extends State<CardEditDialog> {
   bool _canUpdateData() =>
       (_isClassic || _isUltralight) && widget.card.data.isNotEmpty;
 
-  List<TagType> get _hfTypes => [
-        TagType.mifareClassic1k,
-        TagType.mifareClassic4k,
-        TagType.mifareUltralight,
-        TagType.ntag215,
-      ];
-
-  List<TagType> get _lfTypes => [
-        TagType.em4100,
-        TagType.hidProx,
-        TagType.viking,
-        TagType.electra,
-        TagType.pac,
-        TagType.ioProx,
-        TagType.idteck,
-      ];
+  List<TagType> get _tagTypes => TagType.values;
 
   String? _validateUid(String? value) {
     if (value == null || value.trim().isEmpty) return 'UID 不能为空';
@@ -129,7 +123,11 @@ class _CardEditDialogState extends State<CardEditDialog> {
     return null;
   }
 
-  String? _validateHex(String? value, {int? exactBytes, bool required = false}) {
+  String? _validateHex(
+    String? value, {
+    int? exactBytes,
+    bool required = false,
+  }) {
     if (value == null || value.trim().isEmpty) {
       return required ? '不能为空' : null;
     }
@@ -161,7 +159,10 @@ class _CardEditDialogState extends State<CardEditDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('选择颜色', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const Text(
+              '选择颜色',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 12,
@@ -179,9 +180,17 @@ class _CardEditDialogState extends State<CardEditDialog> {
                     decoration: BoxDecoration(
                       color: c,
                       shape: BoxShape.circle,
-                      border: selected ? Border.all(color: Colors.white, width: 3) : null,
+                      border: selected
+                          ? Border.all(color: Colors.white, width: 3)
+                          : null,
                       boxShadow: selected
-                          ? [BoxShadow(color: c, blurRadius: 6, spreadRadius: 1)]
+                          ? [
+                              BoxShadow(
+                                color: c,
+                                blurRadius: 6,
+                                spreadRadius: 1,
+                              ),
+                            ]
                           : null,
                     ),
                     child: selected
@@ -205,8 +214,14 @@ class _CardEditDialogState extends State<CardEditDialog> {
             title: const Text('更新卡数据'),
             content: const Text('UID/SAK/ATQA 已更改，是否更新卡数据中的对应字段？'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('否')),
-              TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('是')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('否'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('是'),
+              ),
             ],
           ),
         ) ??
@@ -225,12 +240,16 @@ class _CardEditDialogState extends State<CardEditDialog> {
       final sakVal = hexToUint8List(sak)[0];
       final atqaBytes = hexToUint8List(atqa);
       final block0 = mfClassicGenerateFirstBlock(uidBytes, sakVal, atqaBytes);
-      updated[0] = block0.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      updated[0] = block0
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
     } else if (_isUltralight) {
       final uidBytes = hexToUint8List(uid);
       final newBlocks = mfUltralightGenerateFirstBlocks(uidBytes);
       for (int i = 0; i < newBlocks.length && i < updated.length; i++) {
-        updated[i] = newBlocks[i].map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        updated[i] = newBlocks[i]
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
       }
     }
     return updated;
@@ -257,13 +276,13 @@ class _CardEditDialogState extends State<CardEditDialog> {
     final atqa = _isLf
         ? widget.card.atqa
         : (_atqaCtrl.text.trim().isNotEmpty
-            ? StorageService.bytesToHex(hexToUint8List(_atqaCtrl.text))
-            : '');
+              ? StorageService.bytesToHex(hexToUint8List(_atqaCtrl.text))
+              : '');
     final ats = _isLf
         ? widget.card.ats
         : (_atsCtrl.text.trim().isNotEmpty
-            ? StorageService.bytesToHex(hexToUint8List(_atsCtrl.text))
-            : '');
+              ? StorageService.bytesToHex(hexToUint8List(_atsCtrl.text))
+              : '');
 
     final updated = SaveCard(
       id: widget.card.id,
@@ -280,8 +299,9 @@ class _CardEditDialogState extends State<CardEditDialog> {
       ultralightSignature: _ulSignatureCtrl.text.trim().isNotEmpty
           ? StorageService.bytesToHex(hexToUint8List(_ulSignatureCtrl.text))
           : '',
-      ultralightCounters:
-          _counterCtrls.map((c) => int.tryParse(c.text) ?? 0).toList(),
+      ultralightCounters: _counterCtrls
+          .map((c) => int.tryParse(c.text) ?? 0)
+          .toList(),
       folderId: widget.card.folderId,
       colorValue: _currentColor.toARGB32(),
       updatedAt: DateTime.now(),
@@ -304,7 +324,13 @@ class _CardEditDialogState extends State<CardEditDialog> {
           actions: [
             TextButton(
               onPressed: _save,
-              child: const Text('保存', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              child: const Text(
+                '保存',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ),
@@ -332,12 +358,13 @@ class _CardEditDialogState extends State<CardEditDialog> {
               DropdownButtonFormField<TagType>(
                 initialValue: _selectedType,
                 decoration: const InputDecoration(labelText: '卡类型'),
-                items: [
-                  ..._hfTypes.map((t) => DropdownMenuItem(value: t, child: Text(t.label))),
-                  ..._lfTypes.map((t) => DropdownMenuItem(value: t, child: Text(t.label))),
-                ],
+                items: _tagTypes
+                    .map(
+                      (t) => DropdownMenuItem(value: t, child: Text(t.label)),
+                    )
+                    .toList(),
                 onChanged: (v) {
-                  if (v != null) {
+                  if (v != null && v != TagType.unknown) {
                     setState(() {
                       _selectedType = v;
                       _initCounterControllers();
@@ -361,25 +388,36 @@ class _CardEditDialogState extends State<CardEditDialog> {
               if (!_isLf) ...[
                 TextFormField(
                   controller: _sakCtrl,
-                  decoration: const InputDecoration(labelText: 'SAK', hintText: '1 字节'),
+                  decoration: const InputDecoration(
+                    labelText: 'SAK',
+                    hintText: '1 字节',
+                  ),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
                   ],
-                  validator: (v) => _validateHex(v, exactBytes: 1, required: true),
+                  validator: (v) =>
+                      _validateHex(v, exactBytes: 1, required: true),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _atqaCtrl,
-                  decoration: const InputDecoration(labelText: 'ATQA', hintText: '2 字节'),
+                  decoration: const InputDecoration(
+                    labelText: 'ATQA',
+                    hintText: '2 字节',
+                  ),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
                   ],
-                  validator: (v) => _validateHex(v, exactBytes: 2, required: true),
+                  validator: (v) =>
+                      _validateHex(v, exactBytes: 2, required: true),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _atsCtrl,
-                  decoration: const InputDecoration(labelText: 'ATS', hintText: '可选'),
+                  decoration: const InputDecoration(
+                    labelText: 'ATS',
+                    hintText: '可选',
+                  ),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
                   ],
@@ -389,18 +427,28 @@ class _CardEditDialogState extends State<CardEditDialog> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _ulVersionCtrl,
-                    decoration: const InputDecoration(labelText: 'Ultralight Version', hintText: '8 字节'),
+                    decoration: const InputDecoration(
+                      labelText: 'Ultralight Version',
+                      hintText: '8 字节',
+                    ),
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[0-9a-fA-F\s]'),
+                      ),
                     ],
                     validator: (v) => _validateHex(v, exactBytes: 8),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _ulSignatureCtrl,
-                    decoration: const InputDecoration(labelText: 'Ultralight Signature', hintText: '可选'),
+                    decoration: const InputDecoration(
+                      labelText: 'Ultralight Signature',
+                      hintText: '可选',
+                    ),
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[0-9a-fA-F\s]'),
+                      ),
                     ],
                     validator: (v) => _validateHex(v),
                   ),
@@ -410,7 +458,9 @@ class _CardEditDialogState extends State<CardEditDialog> {
                       TextFormField(
                         controller: _counterCtrls[i],
                         decoration: InputDecoration(labelText: '计数器 $i'),
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                         validator: (v) {
                           final n = int.tryParse(v ?? '');
                           if (n == null || n < 0 || n > 16777215) {

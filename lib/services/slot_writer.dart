@@ -26,11 +26,13 @@ Future<void> uploadCardToSlot(
     await device.cmdHf14aSetAntiCollData(
       uid: StorageService.hexToBytes(card.uid),
       atqa: StorageService.hexToBytes(card.atqa),
-      sak: StorageService.hexToBytes(card.sak.toRadixString(16).padLeft(2, '0')),
+      sak: StorageService.hexToBytes(
+        card.sak.toRadixString(16).padLeft(2, '0'),
+      ),
       ats: StorageService.hexToBytes(card.ats),
     );
 
-    final blockCount = card.tag == TagType.mifareClassic4k ? 256 : 64;
+    final blockCount = getBlockCountForTagType(card.tag);
     final blockChunk = <int>[];
     var lastSend = 0;
     for (var blockOffset = 0; blockOffset < blockCount; blockOffset++) {
@@ -38,7 +40,9 @@ Future<void> uploadCardToSlot(
           blockChunk.length >= 128) {
         if (blockChunk.isNotEmpty) {
           await device.cmdMf1EmuWriteBlock(
-              lastSend, Uint8List.fromList(blockChunk));
+            lastSend,
+            Uint8List.fromList(blockChunk),
+          );
           blockChunk.clear();
           lastSend = blockOffset;
         }
@@ -52,8 +56,10 @@ Future<void> uploadCardToSlot(
       onProgress?.call((blockOffset / blockCount * 100).round());
     }
     if (blockChunk.isNotEmpty) {
-      await device
-          .cmdMf1EmuWriteBlock(lastSend, Uint8List.fromList(blockChunk));
+      await device.cmdMf1EmuWriteBlock(
+        lastSend,
+        Uint8List.fromList(blockChunk),
+      );
     }
     onProgress?.call(100);
 
@@ -63,10 +69,8 @@ Future<void> uploadCardToSlot(
     await device.cmdChangeDeviceMode(DeviceMode.tag);
     await device.cmdSlotSetEnable(slot, freqLf, true);
     await device.cmdSlotSetActive(slot);
-    final slotTagType =
-        card.tag == TagType.electra ? TagType.electra : TagType.em4100;
-    await device.cmdSlotChangeTagType(slot, slotTagType.value);
-    await device.cmdSlotResetTagType(slot, slotTagType.value);
+    await device.cmdSlotChangeTagType(slot, card.tag.value);
+    await device.cmdSlotResetTagType(slot, card.tag.value);
     await device.cmdEm410xSetEmuId(StorageService.hexToBytes(card.uid));
     await device.cmdSlotSetFreqName(slot, freqLf, card.name);
     await device.cmdSlotSaveSettings();
@@ -125,32 +129,43 @@ Future<void> uploadCardToSlot(
     await device.cmdHf14aSetAntiCollData(
       uid: StorageService.hexToBytes(card.uid),
       atqa: StorageService.hexToBytes(card.atqa),
-      sak: StorageService.hexToBytes(card.sak.toRadixString(16).padLeft(2, '0')),
+      sak: StorageService.hexToBytes(
+        card.sak.toRadixString(16).padLeft(2, '0'),
+      ),
       ats: StorageService.hexToBytes(card.ats),
     );
 
-    final pageCount = card.tag == TagType.ntag215 ? 135 : 41;
+    final pageCount = mfUltralightGetPagesCount(card.tag);
     for (var page = 0; page < pageCount && page < card.data.length; page++) {
-      await device
-          .cmdMf0EmuWritePages(page, StorageService.hexToBytes(card.data[page]));
+      await device.cmdMf0EmuWritePages(
+        page,
+        StorageService.hexToBytes(card.data[page]),
+      );
       onProgress?.call((page / pageCount * 100).round());
     }
 
     if (card.ultralightVersion.isNotEmpty) {
-      await device
-          .cmdMf0EmuSetVersionData(StorageService.hexToBytes(card.ultralightVersion));
+      await device.cmdMf0EmuSetVersionData(
+        StorageService.hexToBytes(card.ultralightVersion),
+      );
     }
     if (card.ultralightSignature.isNotEmpty) {
       await device.cmdMf0EmuSetSignatureData(
-          StorageService.hexToBytes(card.ultralightSignature));
+        StorageService.hexToBytes(card.ultralightSignature),
+      );
     }
     if (card.ultralightCounters.isNotEmpty) {
       for (var i = 0; i < card.ultralightCounters.length; i++) {
-        await device
-            .cmdMf0EmuSetCounterData(i, card.ultralightCounters[i], true);
+        await device.cmdMf0EmuSetCounterData(
+          i,
+          card.ultralightCounters[i],
+          true,
+        );
       }
     }
-    await device.cmdMf0ResetAuthCount();
+    if (mfUltralightHasCounters(card.tag)) {
+      await device.cmdMf0ResetAuthCount();
+    }
 
     onProgress?.call(100);
     await device.cmdSlotSetFreqName(slot, freqHf, card.name);
@@ -185,8 +200,11 @@ Future<SaveCard?> readSlotDump(
       // LF 卡：读取模拟器 ID
       Uint8List uid;
       switch (tag) {
-        case TagType.em4100:
-        case TagType.electra:
+        case TagType.em410X:
+        case TagType.em410X16:
+        case TagType.em410X32:
+        case TagType.em410X64:
+        case TagType.em410XElectra:
           uid = await device.cmdEm410xGetEmuId();
           break;
         case TagType.hidProx:
@@ -219,7 +237,7 @@ Future<SaveCard?> readSlotDump(
     if (anti == null) return null;
 
     if (isMifareUltralight(tag)) {
-      final pageCount = tag == TagType.ntag215 ? 135 : 41;
+      final pageCount = mfUltralightGetPagesCount(tag);
       final pages = <String>[];
       for (int page = 0; page < pageCount; page++) {
         final pageData = await device.cmdMf0EmuReadPages(page, 1);
@@ -229,11 +247,9 @@ Future<SaveCard?> readSlotDump(
       final versionData = await device.cmdMf0EmuGetVersionData();
       final signatureData = await device.cmdMf0EmuGetSignatureData();
       final counters = <int>[];
-      if (pageCount > 41) {
-        for (int i = 0; i < pageCount - 41; i++) {
-          final (val, _) = await device.cmdMf0EmuGetCounterData(i);
-          counters.add(val);
-        }
+      for (int i = 0; i < mfUltralightGetCounterCount(tag); i++) {
+        final (val, _) = await device.cmdMf0EmuGetCounterData(i);
+        counters.add(val);
       }
 
       return SaveCard(
@@ -249,19 +265,20 @@ Future<SaveCard?> readSlotDump(
         ultralightCounters: counters,
       );
     } else if (isMifareClassic(tag)) {
-      final blockCount = tag == TagType.mifareClassic4k ? 256 : 64;
+      final blockCount = getBlockCountForTagType(tag);
       final blocks = <String>[];
       final readCount = 16;
       var binDataIndex = 0;
       final binData = Uint8List(blockCount * 16);
 
-      for (int currentBlock = 0;
-          currentBlock < blockCount;
-          currentBlock += readCount) {
+      for (
+        int currentBlock = 0;
+        currentBlock < blockCount;
+        currentBlock += readCount
+      ) {
         final result = await device.cmdMf1EmuReadBlock(currentBlock, readCount);
         if (result.length >= 16) {
-          binData.setRange(binDataIndex,
-              binDataIndex + result.length, result);
+          binData.setRange(binDataIndex, binDataIndex + result.length, result);
           binDataIndex += result.length;
         }
       }

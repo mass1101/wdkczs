@@ -11,34 +11,88 @@ import 'storage_service.dart';
 /// 采用 nfcapp 原生约定：atqa/sak/ats 以 hex 字符串存储、data 为 16 进制行，
 /// 不引入 uuid/crypto 依赖（id 用时间戳生成）。
 
-/// 判断是否 MIFARE Classic 卡
-bool isMifareClassic(TagType tag) =>
-    tag == TagType.mifareClassic1k || tag == TagType.mifareClassic4k;
+/// 判断是否 MIFARE Classic 卡（对齐 CU isMifareClassic）
+bool isMifareClassic(TagType tag) => _mifareClassicTypes.contains(tag);
 
-/// 判断是否 EM4100 家族（含 Electra）
-bool isEM410X(TagType tag) => tag == TagType.em4100 || tag == TagType.electra;
+/// 判断是否 EM410X 家族（含 Electra，对齐 CU isEM410X）
+bool isEM410X(TagType tag) => _em410XTypes.contains(tag);
 
-/// 判断是否 MIFARE Ultralight 家族
-bool isMifareUltralight(TagType tag) =>
-    tag == TagType.mifareUltralight || tag == TagType.ntag215;
+/// 判断是否 MIFARE Ultralight 家族（对齐 CU isMifareUltralight）
+bool isMifareUltralight(TagType tag) => _ultralightTypes.contains(tag);
 
-/// 判断是否 LF 卡
-bool isLfTag(TagType tag) =>
-    tag == TagType.em4100 ||
-    tag == TagType.electra ||
-    tag == TagType.hidProx ||
-    tag == TagType.viking ||
-    tag == TagType.pac ||
-    tag == TagType.ioProx ||
-    tag == TagType.idteck;
+/// 判断是否 LF 卡（对齐 CU getTagTypesByFrequency(TagFrequency.lf)）
+bool isLfTag(TagType tag) => lfTagTypes().contains(tag);
+
+/// 判断是否 HF 卡（对齐 CU chameleonTagToFrequency == hf）
+bool isHfTag(TagType tag) => hfTagTypes().contains(tag);
+
+const List<TagType> _mifareClassicTypes = [
+  TagType.mifare1K,
+  TagType.mifare2K,
+  TagType.mifare4K,
+  TagType.mifareMini,
+];
+
+const List<TagType> _em410XTypes = [
+  TagType.em410X,
+  TagType.em410X16,
+  TagType.em410X32,
+  TagType.em410X64,
+  TagType.em410XElectra,
+];
+
+const List<TagType> _ultralightTypes = [
+  TagType.ntag210,
+  TagType.ntag212,
+  TagType.ntag213,
+  TagType.ntag215,
+  TagType.ntag216,
+  TagType.ultralight,
+  TagType.ultralightC,
+  TagType.ultralight11,
+  TagType.ultralight21,
+];
+
+/// HF 卡类型（顺序对齐 CU getTagTypesByFrequency(hf)）
+List<TagType> hfTagTypes() => [
+  TagType.mifare1K,
+  TagType.mifare2K,
+  TagType.mifare4K,
+  TagType.mifareMini,
+  TagType.ntag210,
+  TagType.ntag212,
+  TagType.ntag213,
+  TagType.ntag215,
+  TagType.ntag216,
+  TagType.ultralight,
+  TagType.ultralightC,
+  TagType.ultralight11,
+  TagType.ultralight21,
+];
+
+/// LF 卡类型（顺序对齐 CU getTagTypesByFrequency(lf)）
+List<TagType> lfTagTypes() => [
+  TagType.em410X,
+  TagType.em410X16,
+  TagType.em410X32,
+  TagType.em410X64,
+  TagType.em410XElectra,
+  TagType.hidProx,
+  TagType.viking,
+  TagType.pac,
+  TagType.ioProx,
+  TagType.idteck,
+];
 
 /// LF 卡 UID 字节数（对齐 CU uidSizeForLfTag）
 int lfUidSize(TagType tag) {
   switch (tag) {
-    case TagType.electra:
+    case TagType.em410XElectra:
       return 13;
-    case TagType.em4100:
-      return 5;
+    case TagType.em410X:
+    case TagType.em410X16:
+    case TagType.em410X32:
+    case TagType.em410X64:
     case TagType.hidProx:
       return 5;
     case TagType.viking:
@@ -118,13 +172,17 @@ const List<String> _hidProxTypeNames = [
 /// Mifare Classic 卡类型枚举
 enum MfClassicType { none, mini, m1k, m2k, m4k }
 
-/// TagType -> MfClassicType
+/// TagType -> MfClassicType（对齐 CU chameleonTagTypeGetMfClassicType）
 MfClassicType tagTypeToMfClassicType(TagType type) {
   switch (type) {
-    case TagType.mifareClassic1k:
+    case TagType.mifare1K:
       return MfClassicType.m1k;
-    case TagType.mifareClassic4k:
+    case TagType.mifare2K:
+      return MfClassicType.m2k;
+    case TagType.mifare4K:
       return MfClassicType.m4k;
+    case TagType.mifareMini:
+      return MfClassicType.mini;
     default:
       return MfClassicType.none;
   }
@@ -225,40 +283,133 @@ List<String> generateMfClassicBlocks(TagType type) {
 
 // ========== Mifare Ultralight helpers (对齐 CU mifare_ultralight/general.dart) ==========
 
-/// 获取卡类型的页数
+/// 获取卡类型的页数（对齐 CU getBlockCountForTagType）
 int getBlockCountForTagType(TagType tagType) {
   switch (tagType) {
-    case TagType.mifareUltralight:
+    case TagType.mifareMini:
+      return 20;
+    case TagType.mifare1K:
+      return 64;
+    case TagType.mifare2K:
+      return 128;
+    case TagType.mifare4K:
+      return 256;
+    case TagType.ultralight:
+    case TagType.ultralightC:
       return 16;
+    case TagType.ultralight11:
+    case TagType.ultralight21:
+      return 20;
+    case TagType.ntag210:
+      return 16;
+    case TagType.ntag212:
+      return 41;
+    case TagType.ntag213:
+      return 45;
     case TagType.ntag215:
       return 135;
+    case TagType.ntag216:
+      return 231;
     default:
       return 64;
   }
 }
 
-/// 获取卡类型内存大小（字节）
+/// 获取卡类型内存大小（字节，对齐 CU getMemorySizeForTagType）
 int getMemorySizeForTagType(TagType tagType) {
   switch (tagType) {
-    case TagType.mifareUltralight:
+    case TagType.ultralight:
+    case TagType.ultralightC:
       return 64;
+    case TagType.ultralight11:
+    case TagType.ultralight21:
+      return 80;
+    case TagType.ntag210:
+      return 64;
+    case TagType.ntag212:
+      return 164;
+    case TagType.ntag213:
+      return 180;
     case TagType.ntag215:
       return 540;
+    case TagType.ntag216:
+      return 924;
     default:
       return 64;
   }
 }
 
-/// 是否有计数器
-bool mfUltralightHasCounters(TagType type) =>
-    type == TagType.mifareUltralight || type == TagType.ntag215;
+/// Ultralight 可寻址页数（对齐 CU mfUltralightGetPagesCount）
+int mfUltralightGetPagesCount(TagType type) {
+  switch (type) {
+    case TagType.ultralight:
+      return 16;
+    case TagType.ultralightC:
+      return 48;
+    case TagType.ultralight11:
+      return 20;
+    case TagType.ultralight21:
+      return 41;
+    case TagType.ntag210:
+      return 20;
+    case TagType.ntag212:
+      return 41;
+    case TagType.ntag213:
+      return 45;
+    case TagType.ntag215:
+      return 135;
+    case TagType.ntag216:
+      return 231;
+    default:
+      return 0;
+  }
+}
 
-/// 计数器数量
+/// Ultralight 密码页号（对齐 CU mfUltralightGetPasswordPage，无密码支持返回 0）
+int mfUltralightGetPasswordPage(TagType type) {
+  switch (type) {
+    case TagType.ultralight:
+    case TagType.ultralightC:
+      return 0;
+    case TagType.ultralight11:
+    case TagType.ntag210:
+      return 18;
+    case TagType.ultralight21:
+    case TagType.ntag212:
+      return 39;
+    case TagType.ntag213:
+      return 43;
+    case TagType.ntag215:
+      return 133;
+    case TagType.ntag216:
+      return 229;
+    default:
+      return 0;
+  }
+}
+
+/// 是否有计数器（对齐 CU mfUltralightHasCounters）
+bool mfUltralightHasCounters(TagType type) => [
+  TagType.ultralight11,
+  TagType.ultralight21,
+  TagType.ntag210,
+  TagType.ntag212,
+  TagType.ntag213,
+  TagType.ntag215,
+  TagType.ntag216,
+].contains(type);
+
+/// 计数器数量（对齐 CU mfUltralightGetCounterCount）
 int mfUltralightGetCounterCount(TagType type) {
   switch (type) {
-    case TagType.mifareUltralight:
+    case TagType.ultralight11:
+    case TagType.ultralight21:
       return 3;
+    case TagType.ntag210:
+    case TagType.ntag212:
+    case TagType.ntag213:
     case TagType.ntag215:
+    case TagType.ntag216:
       return 1;
     default:
       return 0;
@@ -409,7 +560,9 @@ class SaveCard {
       id: data['id'] as String,
       uid: data['uid'] as String,
       name: data['name'] as String,
-      tag: TagType.from(data['tag'] ?? 0),
+      tag: TagType.from(
+        (data['tag'] as num?)?.toInt() ?? TagType.mifare1K.value,
+      ),
       sak: data['sak'] ?? 0,
       atqa: data['atqa'] ?? '',
       ats: data['ats'] ?? '',

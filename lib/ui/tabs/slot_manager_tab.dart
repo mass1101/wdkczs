@@ -1158,9 +1158,9 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
         DropdownButtonFormField<int>(
           initialValue: _selectedType,
           items: [
-            const DropdownMenuItem(value: 0, child: Text('未设置')),
             for (final t in _availableTagTypes())
               DropdownMenuItem(value: t.$1, child: Text(t.$2)),
+            const DropdownMenuItem(value: 0, child: Text('未设置')),
           ],
           onChanged: (v) => setState(() => _selectedType = v ?? 0),
           decoration: const InputDecoration(
@@ -1429,23 +1429,8 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   }
 
   List<(int, String)> _availableTagTypes() {
-    if (widget.isHf) {
-      return [
-        (1001, 'Mifare Classic 1K'),
-        (1003, 'Mifare Classic 4K'),
-        (1100, 'Mifare Ultralight'),
-        (1101, 'NTAG215'),
-      ];
-    }
-    return [
-      (100, 'EM4100'),
-      (104, 'Electra'),
-      (170, 'Viking'),
-      (150, 'PAC'),
-      (200, 'HID Prox'),
-      (201, 'ioProx'),
-      (310, 'idteck'),
-    ];
+    final types = widget.isHf ? hfTagTypes() : lfTagTypes();
+    return [for (final t in types) (t.value, t.label)];
   }
 
   Future<void> _randomSignature() async {

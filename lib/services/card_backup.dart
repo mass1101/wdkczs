@@ -13,72 +13,13 @@ import 'storage_service.dart';
 /// 序列化采用 CU CardSave JSON 形状 + bin_data，保证与 CU 服务器/客户端互操作。
 
 /// nfcapp TagType → CU TagType.name（服务器 `tag_type` 字段用 CU 枚举名）
-String _cuTagName(TagType tag) {
-  switch (tag) {
-    case TagType.em4100:
-      return 'em410X';
-    case TagType.electra:
-      return 'em410XElectra';
-    case TagType.pac:
-      return 'pac';
-    case TagType.viking:
-      return 'viking';
-    case TagType.hidProx:
-      return 'hidProx';
-    case TagType.ioProx:
-      return 'ioProx';
-    case TagType.idteck:
-      return 'idteck';
-    case TagType.mifareClassic1k:
-      return 'mifare1K';
-    case TagType.mifareClassic4k:
-      return 'mifare4K';
-    case TagType.mifareUltralight:
-      return 'ultralight';
-    case TagType.ntag215:
-      return 'ntag215';
-  }
-}
+/// 两者成员命名已完全对齐，直接取 name
+String _cuTagName(TagType tag) => tag.name;
 
-/// CU TagType.name → nfcapp TagType（还原时不带 tag 值时用）
+/// CU TagType.name → nfcapp TagType
 TagType? _tagByName(String? name) {
-  switch (name) {
-    case 'em410X':
-    case 'em410X16':
-    case 'em410X32':
-    case 'em410X64':
-      return TagType.em4100;
-    case 'em410XElectra':
-      return TagType.electra;
-    case 'pac':
-      return TagType.pac;
-    case 'viking':
-      return TagType.viking;
-    case 'hidProx':
-      return TagType.hidProx;
-    case 'ioProx':
-      return TagType.ioProx;
-    case 'idteck':
-      return TagType.idteck;
-    case 'mifareMini':
-    case 'mifare1K':
-    case 'mifare2K':
-      return TagType.mifareClassic1k;
-    case 'mifare4K':
-      return TagType.mifareClassic4k;
-    case 'ultralight':
-    case 'ultralightC':
-    case 'ultralight11':
-    case 'ultralight21':
-      return TagType.mifareUltralight;
-    case 'ntag210':
-    case 'ntag212':
-    case 'ntag213':
-    case 'ntag215':
-    case 'ntag216':
-      return TagType.ntag215;
-  }
-  return null;
+  if (name == null) return null;
+  return TagType.values.where((e) => e.name == name).firstOrNull;
 }
 
 /// 将 nfcapp SaveCard 序列化为 CU CardSave JSON 形状（字节数组版），并附 bin_data。
@@ -160,7 +101,7 @@ SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
       final data = map['data'] as List<dynamic>;
       final tag =
           _tagByName(map['tag_type'] as String?) ??
-          TagType.from((map['tag'] as num?)?.toInt() ?? 0);
+          TagType.from((map['tag'] as num?)?.toInt() ?? TagType.mifare1K.value);
       final extra = (map['extra'] as Map<String, dynamic>?) ?? const {};
       final sign = (extra['ultralightSignature'] as List<dynamic>? ?? []);
       final ver = (extra['ultralightVersion'] as List<dynamic>? ?? []);

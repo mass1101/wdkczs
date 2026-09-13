@@ -805,7 +805,7 @@ class _IcTabState extends State<IcTab> {
     final card = SaveCard(
       uid: uidSpaced,
       name: name.trim(),
-      tag: TagType.mifareClassic1k,
+      tag: TagType.mifare1K,
       sak: _sakToValue(),
       atqa: _ctrlHex(_atqaCtrl.text),
       ats: _ctrlHex(_atsCtrl.text),
@@ -1219,12 +1219,12 @@ class _IcTabState extends State<IcTab> {
               }
               checkStop();
               if (!sectorKeys[r].hasKeyB) {
-              final ra = resA[r];
-              final rb = resB[r];
-              if (ra != null && rb != null && ra['nt1'] == rb['nt1']) {
-                continue;
-              }
-              await matchPair(o, r, false, false, 'keyB');
+                final ra = resA[r];
+                final rb = resB[r];
+                if (ra != null && rb != null && ra['nt1'] == rb['nt1']) {
+                  continue;
+                }
+                await matchPair(o, r, false, false, 'keyB');
               }
             }
           }

@@ -155,7 +155,7 @@ class AppController extends ChangeNotifier {
     return SaveCard(
       uid: uid,
       name: '',
-      tag: TagType.mifareClassic1k,
+      tag: TagType.mifare1K,
       sak: anti.sak,
       atqa: anti.atqaHex,
       ats: anti.atsHex,

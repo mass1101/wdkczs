@@ -1,6 +1,7 @@
 import 'package:latlong2/latlong.dart';
 
 import '../models/enums.dart';
+import 'card_library.dart';
 
 /// 生成围栏 id（时间戳，不引入 uuid 依赖）
 String newGeofenceId() =>
@@ -136,13 +137,7 @@ class GeofenceMatcher {
 }
 
 /// 判断卡是否 HF（用于滚动码轮询，仅 HF 可读回）
-bool isHfCard(TagType tag) => !isLf(tag);
+bool isHfCard(TagType tag) => isHfTag(tag);
 
-bool isLf(TagType tag) =>
-    tag == TagType.em4100 ||
-    tag == TagType.electra ||
-    tag == TagType.hidProx ||
-    tag == TagType.viking ||
-    tag == TagType.pac ||
-    tag == TagType.ioProx ||
-    tag == TagType.idteck;
+/// 判断卡是否 LF（对齐 CU getTagTypesByFrequency(lf)）
+bool isLf(TagType tag) => isLfTag(tag);

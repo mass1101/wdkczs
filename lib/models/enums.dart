@@ -134,26 +134,40 @@ enum DeviceMode {
       values.firstWhere((e) => e.value == v, orElse: () => tag);
 }
 
-/// 卡片类型（对应固件 TagSpecificType 值域，见 chameleon_enum.py）
+/// 卡片类型（值域对齐固件 TagSpecificType，见 chameleon80lx chameleon_enum.py；
+/// 成员命名与标签对齐 CU TagType / chameleonTagToString）
 enum TagType {
-  mifareClassic1k(1001, 'Mifare Classic 1K'),
-  mifareClassic4k(1003, 'Mifare Classic 4K'),
-  mifareUltralight(1100, 'Mifare Ultralight'),
-  ntag215(1101, 'NTAG215'),
-  em4100(100, 'EM4100'),
-  hidProx(200, 'HID Prox'),
+  unknown(0, '未设置'),
+  em410X(100, 'EM410X'),
+  em410X16(101, 'EM410X (16)'),
+  em410X32(102, 'EM410X (32)'),
+  em410X64(103, 'EM410X (64)'),
+  em410XElectra(104, 'EM410X Electra'),
+  pac(150, 'PAC/Stanley'),
   viking(170, 'Viking'),
-  electra(104, 'Electra'),
-  pac(150, 'PAC'),
+  hidProx(200, 'HID Prox'),
   ioProx(201, 'ioProx'),
-  idteck(310, 'idteck');
+  idteck(310, 'IDTECK'),
+  mifareMini(1000, 'Mifare Mini'),
+  mifare1K(1001, 'Mifare Classic 1K'),
+  mifare2K(1002, 'Mifare Classic 2K'),
+  mifare4K(1003, 'Mifare Classic 4K'),
+  ntag210(1107, 'NTAG210'),
+  ntag212(1108, 'NTAG212'),
+  ntag213(1100, 'NTAG213'),
+  ntag215(1101, 'NTAG215'),
+  ntag216(1102, 'NTAG216'),
+  ultralight(1103, 'Ultralight'),
+  ultralightC(1104, 'Ultralight C'),
+  ultralight11(1105, 'Ultralight EV1 (20)'),
+  ultralight21(1106, 'Ultralight EV1 (41)');
 
   const TagType(this.value, this.label);
   final int value;
   final String label;
 
   static TagType from(int v) =>
-      values.firstWhere((e) => e.value == v, orElse: () => mifareClassic1k);
+      values.firstWhere((e) => e.value == v, orElse: () => mifare1K);
 }
 
 /// 密钥类型 A/B（对应逆向 Ob）

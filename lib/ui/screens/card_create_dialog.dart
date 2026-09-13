@@ -44,7 +44,7 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
   final _issueLevelCtrl = TextEditingController();
   final _oemCtrl = TextEditingController();
 
-  TagType _selectedType = TagType.mifareClassic1k;
+  TagType _selectedType = TagType.mifare1K;
   Color _currentColor = _presetColors[0];
 
   @override
@@ -68,24 +68,11 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
   bool get _isClassic => isMifareClassic(_selectedType);
   bool get _isHidProx => _selectedType == TagType.hidProx;
 
-  /// 获取 HF 卡类型列表
-  List<TagType> get _hfTypes => [
-    TagType.mifareClassic1k,
-    TagType.mifareClassic4k,
-    TagType.mifareUltralight,
-    TagType.ntag215,
-  ];
+  /// 获取 HF 卡类型列表（对齐 CU getTagTypesByFrequency(hf)）
+  List<TagType> get _hfTypes => hfTagTypes();
 
-  /// 获取 LF 卡类型列表
-  List<TagType> get _lfTypes => [
-    TagType.em4100,
-    TagType.hidProx,
-    TagType.viking,
-    TagType.electra,
-    TagType.pac,
-    TagType.ioProx,
-    TagType.idteck,
-  ];
+  /// 获取 LF 卡类型列表（对齐 CU getTagTypesByFrequency(lf)）
+  List<TagType> get _lfTypes => lfTagTypes();
 
   String? _validateUid(String? value) {
     if (value == null || value.trim().isEmpty) return 'UID 不能为空';

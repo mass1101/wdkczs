@@ -1297,7 +1297,7 @@ class _FenceEditPageState extends State<FenceEditPage>
         } else {
           _idCardId = result;
         }
-        if (ic && !isHfCard(_selectedICCard?.tag ?? TagType.mifareClassic1k)) {
+        if (ic && !isHfCard(_selectedICCard?.tag ?? TagType.mifare1K)) {
           _rollingCode = false;
         }
       });

@@ -24,10 +24,17 @@ import '../widgets/common.dart' show ActionButton;
 
 /// 二进制导入对话框可选卡型（仅 tagTypeByDumpSize 可推断出的卡型）
 const _importTagOptions = <TagType>[
-  TagType.mifareClassic1k,
-  TagType.mifareClassic4k,
-  TagType.mifareUltralight,
+  TagType.mifareMini,
+  TagType.mifare1K,
+  TagType.mifare2K,
+  TagType.mifare4K,
+  TagType.ultralight,
+  TagType.ultralightC,
+  TagType.ultralight11,
+  TagType.ultralight21,
+  TagType.ntag213,
   TagType.ntag215,
+  TagType.ntag216,
 ];
 
 /// 预设文件夹颜色

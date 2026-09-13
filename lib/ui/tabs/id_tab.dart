@@ -431,7 +431,7 @@ class _IdTabState extends State<IdTab> {
     });
     await _app.storage.saveIdCards(_cards);
     // 同步导入到卡库：按 UID+卡型去重，已存在则复用原 id 刷新名称
-    final tag = _cardType == 'HID Prox' ? TagType.hidProx : TagType.em4100;
+    final tag = _cardType == 'HID Prox' ? TagType.hidProx : TagType.em410X;
     final lib = CardLibraryStorage();
     final cards = await lib.getCards();
     final idx = cards.indexWhere(
