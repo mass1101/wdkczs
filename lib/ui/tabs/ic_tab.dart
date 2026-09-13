@@ -108,18 +108,24 @@ class _IcTabState extends State<IcTab> {
         .where((e) => e.isNotEmpty)
         .toList();
     _keysValid = lines.every(
-        (e) => RegExp(r'^[0-9a-f]{12}$').hasMatch(e.toLowerCase()));
+      (e) => RegExp(r'^[0-9a-f]{12}$').hasMatch(e.toLowerCase()),
+    );
   }
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
   }
 
-  List<String> get _keys =>
-      _keyCtrl.text.split('\n').map((e) => e.trim()).where((e) => e.length == 12).toList();
+  List<String> get _keys => _keyCtrl.text
+      .split('\n')
+      .map((e) => e.trim())
+      .where((e) => e.length == 12)
+      .toList();
 
   /// 字典检查用密钥表：用户密钥 + 扩展字典（Chameleon Ultra 内置表，
   /// 仅用于检查/验证，不显示在编辑区）
@@ -141,8 +147,10 @@ class _IcTabState extends State<IcTab> {
   /// 完全对齐 CU checkKeys() + checkKeysOnSector() + recheckKey() 的命令与流程，
   /// 替换原来的全卡 mask 批量 cmdMf1CheckKeysOfSectors。
   Future<bool> _checkCrackedKeys(
-      List<Uint8List> keys, List<SectorKeyState> sectorKeys,
-      {void Function(int processedKeys)? onProgress}) async {
+    List<Uint8List> keys,
+    List<SectorKeyState> sectorKeys, {
+    void Function(int processedKeys)? onProgress,
+  }) async {
     if (keys.isEmpty) {
       return sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
     }
@@ -155,18 +163,24 @@ class _IcTabState extends State<IcTab> {
       for (var kt = 0; kt < 2; kt++) {
         final kType = kt == 0 ? KeyType.keyA : KeyType.keyB;
         // 对齐 CU：getSectorState(sector,keyType) found/disabled 则跳过
-        final alreadyHave =
-            kt == 0 ? sectorKeys[s].hasKeyA : sectorKeys[s].hasKeyB;
+        final alreadyHave = kt == 0
+            ? sectorKeys[s].hasKeyA
+            : sectorKeys[s].hasKeyB;
         if (alreadyHave) {
           processed += keys.length;
           continue;
         }
         for (var i = 0; i < keys.length; i += chunkSize) {
-          final end = (i + chunkSize) < keys.length ? (i + chunkSize) : keys.length;
+          final end = (i + chunkSize) < keys.length
+              ? (i + chunkSize)
+              : keys.length;
           final batch = keys.sublist(i, end);
           processed += batch.length;
           final hit = await _dev.cmdMf1CheckKeysOfBlock(
-              block: trailer, keyType: kType, keys: batch);
+            block: trailer,
+            keyType: kType,
+            keys: batch,
+          );
           if (onProgress != null && total > 0) {
             // 进度 = 已扫 key×扇区×2 组占总扫描量的比例折算，作为实时进度/停止检查
             onProgress((processed * keys.length) ~/ total);
@@ -181,7 +195,8 @@ class _IcTabState extends State<IcTab> {
               sectorKeys[s].keyB = _hexStr(hit);
             }
             LogService.instance.log(
-                '[_checkCrackedKeys] sector=$s keyType=$kType hit=${_hexStr(hit)}');
+              '[_checkCrackedKeys] sector=$s keyType=$kType hit=${_hexStr(hit)}',
+            );
             // 对齐 CU checkKeysOnSector: setKeyAsFound 后立即 recheckKey(key, sector)，
             // 把刚命中的密钥传播到后续扇区（CU recheckKey 用 mf1Auth 单把认证）
             await _recheckKeyCU(hit, s, sectorKeys);
@@ -194,23 +209,27 @@ class _IcTabState extends State<IcTab> {
       }
     }
     // 对齐 CU checkKeys 尾部 allKeysExists 判定
-    final anyMissing =
-        sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
+    final anyMissing = sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
     LogService.instance.log('[_checkCrackedKeys] anyMissing=$anyMissing');
     return anyMissing;
   }
 
   /// 对齐 CU recovery.recheckKey(key, startingSector)：用单把认证(mf1Auth→cmdMf1CheckBlockKey)
   /// 把刚找到的密钥依次尝试后续扇区的 keyA/keyB，能通过即标记（多扇区常共用密钥）。
-  Future<void> _recheckKeyCU(Uint8List key, int startSector,
-      List<SectorKeyState> sectorKeys) async {
+  Future<void> _recheckKeyCU(
+    Uint8List key,
+    int startSector,
+    List<SectorKeyState> sectorKeys,
+  ) async {
     for (var s = startSector; s < sectorKeys.length; s++) {
       for (var kt = 0; kt < 2; kt++) {
-        final have =
-            kt == 0 ? sectorKeys[s].hasKeyA : sectorKeys[s].hasKeyB;
+        final have = kt == 0 ? sectorKeys[s].hasKeyA : sectorKeys[s].hasKeyB;
         if (have) continue; // CU getSectorState != none 跳过
         final ok = await _dev.cmdMf1CheckBlockKey(
-            block: 4 * s + 3, keyType: kt == 0 ? KeyType.keyA : KeyType.keyB, key: key);
+          block: 4 * s + 3,
+          keyType: kt == 0 ? KeyType.keyA : KeyType.keyB,
+          key: key,
+        );
         if (ok) {
           if (kt == 0) {
             sectorKeys[s].hasKeyA = true;
@@ -220,7 +239,8 @@ class _IcTabState extends State<IcTab> {
             sectorKeys[s].keyB = _hexStr(key);
           }
           LogService.instance.log(
-              '[_recheckKeyCU] sector=$s keyType=$kt <- ${_hexStr(key)}');
+            '[_recheckKeyCU] sector=$s keyType=$kt <- ${_hexStr(key)}',
+          );
         }
       }
     }
@@ -229,7 +249,9 @@ class _IcTabState extends State<IcTab> {
   /// 将批量检查结果合并进扇区密钥状态（幂等，可对累积 partial 重复调用）
   /// 返回 true 表示仍有未找到的密钥
   bool _mergeSectorKeys(
-      Mf1CheckKeysOfSectorsRes res, List<SectorKeyState> sectorKeys) {
+    Mf1CheckKeysOfSectorsRes res,
+    List<SectorKeyState> sectorKeys,
+  ) {
     var anyMissing = false;
     for (var s = 0; s < sectorKeys.length; s++) {
       if (!sectorKeys[s].hasKeyA) {
@@ -299,12 +321,16 @@ class _IcTabState extends State<IcTab> {
     }
     if (mask.every((m) => m == 0xFF)) return;
     LogService.instance.log(
-        '[_propagateKeys] ${names.length} known keys, mask=${_hexStr(mask)} (全卡批量)');
+      '[_propagateKeys] ${names.length} known keys, mask=${_hexStr(mask)} (全卡批量)',
+    );
     final res = await _dev.cmdMf1CheckKeysOfSectors(
-        keys: names.map(_hex).toList(), mask: mask);
+      keys: names.map(_hex).toList(),
+      mask: mask,
+    );
     final anyMissing = _mergeSectorKeys(res, sectorKeys);
     LogService.instance.log(
-        '[_propagateKeys] found=${_hexStr(res.found)} anyMissing=$anyMissing');
+      '[_propagateKeys] found=${_hexStr(res.found)} anyMissing=$anyMissing',
+    );
     // 对齐 CU checkKeysOnSector 尾部：A 命中读 trailer 免费推导 keyB
     for (var s = 0; s < sectorKeys.length; s++) {
       if (!sectorKeys[s].hasKeyA || sectorKeys[s].hasKeyB) continue;
@@ -312,17 +338,24 @@ class _IcTabState extends State<IcTab> {
       if (kname.isEmpty) continue;
       try {
         final b3 = await _dev.cmdMf1ReadBlock(
-            block: 4 * s + 3, keyType: KeyType.keyA, key: _hex(kname));
+          block: 4 * s + 3,
+          keyType: KeyType.keyA,
+          key: _hex(kname),
+        );
         if (b3.length == 16) {
           final bkey = _hexStr(b3.sublist(10, 16));
           if (bkey != '000000000000') {
             final okB = await _dev.cmdMf1CheckBlockKey(
-                block: 4 * s, keyType: KeyType.keyB, key: _hex(bkey));
+              block: 4 * s,
+              keyType: KeyType.keyB,
+              key: _hex(bkey),
+            );
             if (okB) {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = bkey;
               LogService.instance.log(
-                  '[_propagateKeys] sector=$s keyB=$bkey FOUND (读b3推导)');
+                '[_propagateKeys] sector=$s keyB=$bkey FOUND (读b3推导)',
+              );
             }
           }
         }
@@ -395,7 +428,9 @@ class _IcTabState extends State<IcTab> {
           sectorKeys[s].hasKeyA = true;
           sectorKeys[s].hasKeyB = true;
           final blocks = List<BlockData>.generate(
-              4, (i) => BlockData(data: _hexStr(data.sublist(i * 16, i * 16 + 16))));
+            4,
+            (i) => BlockData(data: _hexStr(data.sublist(i * 16, i * 16 + 16))),
+          );
           gen1aSectors[s] = SectorData(blocks: blocks);
           // 从块3提取密钥（对齐小程序：bytes 48-54, 58-64）
           final kA = _hexStr(data.sublist(48, 54));
@@ -431,11 +466,16 @@ class _IcTabState extends State<IcTab> {
       // 批量检测扇区密钥（对齐小程序 checkCrackedKey）
       // 读卡仅用用户密钥：扩展字典 44 把全 miss 时会跑满 1500+ 次失败认证（30-60s），
       // 且部分命中后 anyMissing 仍提示去解卡，收益极低；扩展字典留给解卡第一步
-      final allKeys = (await _collectVerifyKeys(uidHex: uid)).map(_hex).toList();
-      final anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
-          onProgress: (processed) {
-        progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
-      });
+      final allKeys = (await _collectVerifyKeys(
+        uidHex: uid,
+      )).map(_hex).toList();
+      final anyMissing = await _checkCrackedKeys(
+        allKeys,
+        sectorKeys,
+        onProgress: (processed) {
+          progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
+        },
+      );
       if (anyMissing) {
         _appendKeysFromSectors(sectorKeys);
         progress.value = '读卡片：卡片有加密，请先使用解卡片功能获取密钥';
@@ -459,9 +499,10 @@ class _IcTabState extends State<IcTab> {
           if (sectorKeys[s].hasKeyA && sectorKeys[s].keyA.isNotEmpty) {
             try {
               final data = await _dev.cmdMf1ReadBlock(
-                  block: blockNum,
-                  keyType: KeyType.keyA,
-                  key: _hex(sectorKeys[s].keyA));
+                block: blockNum,
+                keyType: KeyType.keyA,
+                key: _hex(sectorKeys[s].keyA),
+              );
               sectorData.setRange(b * 16, b * 16 + 16, data);
               read = true;
             } catch (_) {}
@@ -470,9 +511,10 @@ class _IcTabState extends State<IcTab> {
           if (!read && sectorKeys[s].hasKeyB && sectorKeys[s].keyB.isNotEmpty) {
             try {
               final data = await _dev.cmdMf1ReadBlock(
-                  block: blockNum,
-                  keyType: KeyType.keyB,
-                  key: _hex(sectorKeys[s].keyB));
+                block: blockNum,
+                keyType: KeyType.keyB,
+                key: _hex(sectorKeys[s].keyB),
+              );
               sectorData.setRange(b * 16, b * 16 + 16, data);
               read = true;
             } catch (_) {}
@@ -488,7 +530,10 @@ class _IcTabState extends State<IcTab> {
         }
         // 设置扇区数据
         final blocks = List<BlockData>.generate(
-            4, (i) => BlockData(data: _hexStr(sectorData.sublist(i * 16, i * 16 + 16))));
+          4,
+          (i) =>
+              BlockData(data: _hexStr(sectorData.sublist(i * 16, i * 16 + 16))),
+        );
         _app.card.sectors[s] = SectorData(blocks: blocks);
         // 提取块3密钥到密钥区
         final kA = _hexStr(sectorData.sublist(48, 54));
@@ -535,11 +580,13 @@ class _IcTabState extends State<IcTab> {
         content: const Text('即将写入数据至卡片，继续吗?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('继续')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('继续'),
+          ),
         ],
       ),
     );
@@ -629,20 +676,22 @@ class _IcTabState extends State<IcTab> {
             if (!written) {
               try {
                 await _dev.cmdMf1WriteBlock(
-                    block: blockNum,
-                    keyType: KeyType.keyA,
-                    key: key,
-                    data: _hex(blocks[b].data));
+                  block: blockNum,
+                  keyType: KeyType.keyA,
+                  key: key,
+                  data: _hex(blocks[b].data),
+                );
                 written = true;
               } catch (_) {}
             }
             if (!written) {
               try {
                 await _dev.cmdMf1WriteBlock(
-                    block: blockNum,
-                    keyType: KeyType.keyB,
-                    key: key,
-                    data: _hex(blocks[b].data));
+                  block: blockNum,
+                  keyType: KeyType.keyB,
+                  key: key,
+                  data: _hex(blocks[b].data),
+                );
                 written = true;
               } catch (_) {}
             }
@@ -655,8 +704,7 @@ class _IcTabState extends State<IcTab> {
         progress.value = '写卡片：写入完成';
         _toast('写入完成');
       } else {
-        progress.value =
-            '写卡片：块${failedBlocks.join('，')} 写入失败';
+        progress.value = '写卡片：块${failedBlocks.join('，')} 写入失败';
         _toast('写入完成：${failedBlocks.length} 块失败');
       }
       if (mounted) Navigator.of(context).pop();
@@ -684,16 +732,19 @@ class _IcTabState extends State<IcTab> {
       await _dev.assureDeviceMode(DeviceMode.tag);
       // 输入校验（对齐小程序 btnEmuWrite）
       if (!_nuidXorValid()) throw Exception('数据有误，卡号XOR校验码不正确');
-      if (!RegExp(r'^[0-9a-fA-F]{8}$')
-          .hasMatch(_uidCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
+      if (!RegExp(
+        r'^[0-9a-fA-F]{8}$',
+      ).hasMatch(_uidCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
         throw Exception('卡号有误，IC卡号应为8位16进制数');
       }
-      if (!RegExp(r'^[0-9a-fA-F]{2}$')
-          .hasMatch(_sakCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
+      if (!RegExp(
+        r'^[0-9a-fA-F]{2}$',
+      ).hasMatch(_sakCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
         throw Exception('SAK有误，SAK应为2位16进制数');
       }
-      if (!RegExp(r'^[0-9a-fA-F]{4}$')
-          .hasMatch(_atqaCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
+      if (!RegExp(
+        r'^[0-9a-fA-F]{4}$',
+      ).hasMatch(_atqaCtrl.text.replaceAll(RegExp(r'\s'), ''))) {
         throw Exception('ATQA有误，ATQA应为4位16进制数');
       }
       await _prepareHfSlot(slot);
@@ -706,9 +757,10 @@ class _IcTabState extends State<IcTab> {
       // 写入反碰撞数据（小程序对 atqa 做字节反转）
       final atqa = _hex(_atqaCtrl.text).reversed.toList();
       await _dev.cmdHf14aSetAntiCollData(
-          uid: _hex(_uidCtrl.text),
-          atqa: Uint8List.fromList(atqa),
-          sak: _hex(_sakCtrl.text));
+        uid: _hex(_uidCtrl.text),
+        atqa: Uint8List.fromList(atqa),
+        sak: _hex(_sakCtrl.text),
+      );
       // 逐扇区写入，对齐小程序 cmdMf1EmuWriteBlock(sector*4, body[sector])
       for (var sector = 0; sector < 16; sector++) {
         if (!_app.card.toggle[sector]) continue;
@@ -727,14 +779,23 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 保存到卡库（对齐 CU 把当前编辑卡存入 savedCards） ==========
-  Future<void> _saveToLibrary() async {
-    final uid = _uidCtrl.text.trim();
+  // ========== 导出到卡库 / 从卡库导入（对齐 CU 把当前编辑卡存入 savedCards） ==========
+  Future<void> _exportToLibrary() async {
+    final uid = _uidCtrl.text.replaceAll(RegExp(r'[\s-]'), '');
     if (!RegExp(r'^[0-9a-fA-F]{8}$').hasMatch(uid)) {
       _toast('卡号有误，IC卡号应为8位16进制数');
       return;
     }
-    // 从当前 CardState 提取扇区块（16 块/行）
+    final uidSpaced = bytesToHexSpace(StorageService.hexToBytes(uid));
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => TextInputDialog(
+        title: '导出到卡库',
+        hint: '输入卡片名称',
+        initial: _app.card.name.isEmpty ? uidSpaced : _app.card.name,
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
     final blocks = <String>[];
     for (var s = 0; s < _app.card.sectors.length; s++) {
       for (var b = 0; b < 4; b++) {
@@ -742,20 +803,78 @@ class _IcTabState extends State<IcTab> {
       }
     }
     final card = SaveCard(
-      uid: uid.toLowerCase(),
-      name: _app.card.name.isEmpty ? uid : _app.card.name,
+      uid: uidSpaced,
+      name: name.trim(),
       tag: TagType.mifareClassic1k,
-      sak: _sakCtrl.text.trim().isEmpty
-          ? 0
-          : StorageService.hexToBytes(_sakCtrl.text.trim()).isNotEmpty
-              ? StorageService.hexToBytes(_sakCtrl.text.trim())[0]
-              : 0,
-      atqa: _atqaCtrl.text.trim(),
-      ats: _atsCtrl.text.trim(),
+      sak: _sakToValue(),
+      atqa: _ctrlHex(_atqaCtrl.text),
+      ats: _ctrlHex(_atsCtrl.text),
       data: blocks,
     );
     await CardLibraryStorage().upsertCard(card);
-    _toast('已保存到卡库');
+    _toast('已导出到卡库：${name.trim()}');
+  }
+
+  /// SAK 文本转卡库 int 值（默认 0）
+  int _sakToValue() {
+    final hex = _ctrlHex(_sakCtrl.text);
+    if (hex.length < 2) return 0;
+    final bytes = StorageService.hexToBytes(hex);
+    return bytes.isNotEmpty ? bytes[0] : 0;
+  }
+
+  /// 去掉输入框里的空格与分隔符，保留纯 hex
+  String _ctrlHex(String text) => text.replaceAll(RegExp(r'[\s-]'), '').trim();
+
+  /// 从卡库选择一张 IC 卡，把它的 dump 灌回扇区数据与卡号输入框
+  Future<void> _importFromLibrary() async {
+    final cards = (await CardLibraryStorage().getCards())
+        .where((c) => isMifareClassic(c.tag))
+        .toList();
+    if (cards.isEmpty) {
+      _toast('卡库中没有 IC 卡可导入');
+      return;
+    }
+    if (!mounted) return;
+    cards.sort((a, b) => a.name.compareTo(b.name));
+    final picked = await showDialog<SaveCard>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('从卡库选择'),
+        children: cards
+            .map(
+              (c) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, c),
+                child: Text(
+                  '${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]  '
+                  'UID:${c.uid.toUpperCase()}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked.data.length < 64) {
+      _toast('该卡没有完整的 Dump 数据（需 64 行）');
+      return;
+    }
+    final state = CardState.fromDumpText(picked.data);
+    final uid = _ctrlHex(picked.uid);
+    setState(() {
+      _app.card = state;
+      _app.card.name = picked.name;
+      _uidCtrl.text = uid.isNotEmpty ? uid : state.uid;
+      _atqaCtrl.text = _ctrlHex(picked.atqa).isNotEmpty
+          ? _ctrlHex(picked.atqa)
+          : state.atqa;
+      _sakCtrl.text = picked.sak != 0
+          ? picked.sak.toRadixString(16).padLeft(2, '0')
+          : state.sak;
+      _atsCtrl.text = _ctrlHex(picked.ats);
+    });
+    _toast('已从卡库导入：${picked.name.isEmpty ? picked.uid : picked.name}');
   }
 
   // ========== 解卡（对齐小程序 btnCrack + Crack() 完整流程） ==========
@@ -768,7 +887,10 @@ class _IcTabState extends State<IcTab> {
     // 扇区数随卡型变化：普通 1K=16，EV1 1K=18（对齐 CU sectorCount(isEV1)）。
     var sectorCount = 16;
     var isEV1 = false;
-    List<SectorKeyState> sectorKeys = List.generate(16, (s) => SectorKeyState(s));
+    List<SectorKeyState> sectorKeys = List.generate(
+      16,
+      (s) => SectorKeyState(s),
+    );
     final crackTick = ValueNotifier<int>(0);
     final hardnestedNotifier = ValueNotifier<bool>(false);
     var crackUidHex = '';
@@ -809,6 +931,7 @@ class _IcTabState extends State<IcTab> {
       void checkStop() {
         if (crackStopRequested) throw const CrackStoppedException();
       }
+
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -839,19 +962,21 @@ class _IcTabState extends State<IcTab> {
           }
         } catch (_) {}
         progress.value = '验证密钥：发现UID卡，可免密读卡...';
-        LogService.instance.log(
-            '[解卡] Gen1a免密读卡可用(UID魔改卡, 无漏洞限制, 直接读全部密钥)');
+        LogService.instance.log('[解卡] Gen1a免密读卡可用(UID魔改卡, 无漏洞限制, 直接读全部密钥)');
         final found = <String>[];
         final trailers = List<Uint8List?>.filled(16, null);
         var allRead = false;
         try {
-          await _dev.mf1Gen1aReadAllTrailerKeys(trailers,
-              onSector: (s) => progress.value = '破解密钥：正在解密扇区$s...');
+          await _dev.mf1Gen1aReadAllTrailerKeys(
+            trailers,
+            onSector: (s) => progress.value = '破解密钥：正在解密扇区$s...',
+          );
           allRead = true;
         } catch (e) {
           final readCount = trailers.where((t) => t != null).length;
           LogService.instance.log(
-              '[解卡] Gen1a后门读卡中断: $e, 已读$readCount/16扇区, 落常规流程');
+            '[解卡] Gen1a后门读卡中断: $e, 已读$readCount/16扇区, 落常规流程',
+          );
           if (readCount == 0 && '$e'.contains('failed 1')) {
             progress.value = '验证密钥：Gen1a后门无响应, 若反复失败请将卡离开读卡器5秒后重放';
           }
@@ -893,16 +1018,19 @@ class _IcTabState extends State<IcTab> {
         for (final sk in _backdoorKeys) {
           try {
             final n1 = await _dev.cmdMf1AcquireStaticEncryptedNested(
-                key: _hex(sk));
+              key: _hex(sk),
+            );
             final n2 = await _dev.cmdMf1AcquireStaticEncryptedNested(
-                key: _hex(sk));
+              key: _hex(sk),
+            );
             if (n1.atks.isNotEmpty && n2.atks.isNotEmpty) {
               if (n1.atks.first.$4 == n2.atks.first.$4) {
                 encNested = n1;
               } else {
                 backdoorAcq = n1;
                 LogService.instance.log(
-                    '[解卡] 后门卡检测: 采集成功但ntEnc动态($sk), 走backdoor恢复路径');
+                  '[解卡] 后门卡检测: 采集成功但ntEnc动态($sk), 走backdoor恢复路径',
+                );
               }
             }
             break;
@@ -913,7 +1041,9 @@ class _IcTabState extends State<IcTab> {
         // 第三代无漏洞卡破解（对齐小程序 Crack_3gen：候选集 + 两两配对交集 + 种子恢复）
         progress.value = '破解密钥：发现第三代无漏洞卡，正在破解...';
         final uidInt = _bytesInt(encNested.uid.sublist(0, 4));
-        LogService.instance.log('[_crackCard] 3gen uid=$uidInt atks=${encNested.atks.length}');
+        LogService.instance.log(
+          '[_crackCard] 3gen uid=$uidInt atks=${encNested.atks.length}',
+        );
 
         // 预处理：每扇区 A/B 样本 → nt1/nt2/明文域 par（对齐小程序 resA/resB）
         final resA = List<Map<String, int>?>.filled(sectorCount, null);
@@ -932,7 +1062,8 @@ class _IcTabState extends State<IcTab> {
             'par': fixPar(a.$5, a.$4),
           };
           LogService.instance.log(
-              '[_crackCard] 3gen atk sector=${a.$1} type=${a.$2} res=${a.$2 == KeyType.keyA ? 'A' : 'B'} nt1=${res['nt1']} nt2=${res['nt2']} par=${res['par']}');
+            '[_crackCard] 3gen atk sector=${a.$1} type=${a.$2} res=${a.$2 == KeyType.keyA ? 'A' : 'B'} nt1=${res['nt1']} nt2=${res['nt2']} par=${res['par']}',
+          );
           if (a.$2 == KeyType.keyA) {
             resA[a.$1] = res;
           } else {
@@ -945,7 +1076,9 @@ class _IcTabState extends State<IcTab> {
         // 候选验证（对齐 CU checkKeysOnSector：逐扇区 x A/B 批量验证）
         Future<void> verifyKeys(List<int> cands) async {
           if (cands.isEmpty) return;
-          LogService.instance.log('[_crackCard] 3gen verify candidates=${cands.length}');
+          LogService.instance.log(
+            '[_crackCard] 3gen verify candidates=${cands.length}',
+          );
           for (var s = 0; s < sectorKeys.length; s++) {
             checkStop();
             if (!sectorKeys[s].hasKeyA) {
@@ -976,23 +1109,37 @@ class _IcTabState extends State<IcTab> {
             if (ra == null || rb == null) continue;
             if (sectorKeys[s].hasKeyA && !sectorKeys[s].hasKeyB) {
               progress.value = '破解密钥：正在计算扇区 $s 的共同密钥...';
-              final tag =
-                  Crypto1.gen3NonceTag(ra['nt1']!, hex6Int(sectorKeys[s].keyA));
+              final tag = Crypto1.gen3NonceTag(
+                ra['nt1']!,
+                hex6Int(sectorKeys[s].keyA),
+              );
               final cands = Crypto1.gen3RecoverBySeed(
-                  uid: uidInt,
-                  nt1: rb['nt1']!, nt2: rb['nt2']!, par: rb['par']!,
-                  seedTag: tag);
-              LogService.instance.log('[_crackCard] 3gen seed sector=$s B cands=${cands.length}');
+                uid: uidInt,
+                nt1: rb['nt1']!,
+                nt2: rb['nt2']!,
+                par: rb['par']!,
+                seedTag: tag,
+              );
+              LogService.instance.log(
+                '[_crackCard] 3gen seed sector=$s B cands=${cands.length}',
+              );
               await verifyKeys(cands);
             } else if (!sectorKeys[s].hasKeyA && sectorKeys[s].hasKeyB) {
               progress.value = '破解密钥：正在计算扇区 $s 的共同密钥...';
-              final tag =
-                  Crypto1.gen3NonceTag(rb['nt1']!, hex6Int(sectorKeys[s].keyB));
+              final tag = Crypto1.gen3NonceTag(
+                rb['nt1']!,
+                hex6Int(sectorKeys[s].keyB),
+              );
               final cands = Crypto1.gen3RecoverBySeed(
-                  uid: uidInt,
-                  nt1: ra['nt1']!, nt2: ra['nt2']!, par: ra['par']!,
-                  seedTag: tag);
-              LogService.instance.log('[_crackCard] 3gen seed sector=$s A cands=${cands.length}');
+                uid: uidInt,
+                nt1: ra['nt1']!,
+                nt2: ra['nt2']!,
+                par: ra['par']!,
+                seedTag: tag,
+              );
+              LogService.instance.log(
+                '[_crackCard] 3gen seed sector=$s A cands=${cands.length}',
+              );
               await verifyKeys(cands);
             }
           }
@@ -1002,11 +1149,20 @@ class _IcTabState extends State<IcTab> {
         // 注：C 库无 2x1nt（gen3）实现，保持 Dart 候选生成
         List<int> gen3Candidates(Map<String, int> res) {
           return Crypto1.gen3GenerateKeys(
-              uidInt, res['nt1']!, res['nt2']!, res['par']!);
+            uidInt,
+            res['nt1']!,
+            res['nt2']!,
+            res['par']!,
+          );
         }
 
         Future<void> matchPair(
-            int s, int r, bool useAs, bool useAr, String label) async {
+          int s,
+          int r,
+          bool useAs,
+          bool useAr,
+          String label,
+        ) async {
           final rs = useAs ? resA[s] : resB[s];
           final rr = useAr ? resA[r] : resB[r];
           if (rs == null || rr == null) return;
@@ -1016,11 +1172,13 @@ class _IcTabState extends State<IcTab> {
           final ka = cacheS[s] ??= gen3Candidates(rs);
           final kb = cacheR[r] ??= gen3Candidates(rr);
           LogService.instance.log(
-              '[_crackCard] 3gen pair $s/$r ${useAs ? 'A' : 'B'}${useAr ? 'A' : 'B'} cands=${ka.length}/${kb.length}');
+            '[_crackCard] 3gen pair $s/$r ${useAs ? 'A' : 'B'}${useAr ? 'A' : 'B'} cands=${ka.length}/${kb.length}',
+          );
           final inter = ka.toSet().intersection(kb.toSet()).toList();
           if (inter.isEmpty) {
             LogService.instance.log(
-                '[解卡] 3gen 扇区$s/$r $label: 候选交集为空(两扇区候选无共同密钥, 采样不足)');
+              '[解卡] 3gen 扇区$s/$r $label: 候选交集为空(两扇区候选无共同密钥, 采样不足)',
+            );
           }
           if (inter.isNotEmpty) {
             await verifyKeys(inter);
@@ -1042,7 +1200,9 @@ class _IcTabState extends State<IcTab> {
               if (!sectorKeys[r].hasKeyB) {
                 final ra = resA[r];
                 final rb = resB[r];
-                if (ra != null && rb != null && ra['nt1'] == rb['nt1']) continue;
+                if (ra != null && rb != null && ra['nt1'] == rb['nt1']) {
+                  continue;
+                }
                 await matchPair(o, r, true, false, 'keyB');
               }
             }
@@ -1059,10 +1219,12 @@ class _IcTabState extends State<IcTab> {
               }
               checkStop();
               if (!sectorKeys[r].hasKeyB) {
-                final ra = resA[r];
-                final rb = resB[r];
-                if (ra != null && rb != null && ra['nt1'] == rb['nt1']) continue;
-                await matchPair(o, r, false, false, 'keyB');
+              final ra = resA[r];
+              final rb = resB[r];
+              if (ra != null && rb != null && ra['nt1'] == rb['nt1']) {
+                continue;
+              }
+              await matchPair(o, r, false, false, 'keyB');
               }
             }
           }
@@ -1074,11 +1236,13 @@ class _IcTabState extends State<IcTab> {
           for (var s = 0; s < sectorKeys.length; s++) {
             if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
               missing.add(
-                  '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
+                '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})',
+              );
             }
           }
           LogService.instance.log(
-              '[解卡] 3gen 解不开的扇区: ${missing.join(',')} (候选交集为空或种子恢复失败, 卡片nonce采样质量不足)');
+            '[解卡] 3gen 解不开的扇区: ${missing.join(',')} (候选交集为空或种子恢复失败, 卡片nonce采样质量不足)',
+          );
         }
         progress.value = allDone
             ? '解卡片：第三代无漏洞卡破解成功'
@@ -1121,7 +1285,8 @@ class _IcTabState extends State<IcTab> {
             }
           }
           LogService.instance.log(
-              '[解卡] 发现相同破解任务, 已恢复进度: 字典$dictStart/${dictKeysHex.length}');
+            '[解卡] 发现相同破解任务, 已恢复进度: 字典$dictStart/${dictKeysHex.length}',
+          );
           progress.value = '验证密钥：已恢复上次破解进度...';
         }
       }
@@ -1137,25 +1302,28 @@ class _IcTabState extends State<IcTab> {
         LogService.instance.log('[解卡] 字典断点已在末尾, 跳过批量验证');
         anyMissing = sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
       } else {
-        anyMissing = await _checkCrackedKeys(allKeys, sectorKeys,
-            onProgress: (processed) {
-          // 批量验证按 32 把/块(约31s)推进，块返回即检查停止，
-          // 停止请求后最多再等一个块即可中断，而非跑完全部字典
-          checkStop();
-          // 大字典逐块验证，实时反馈进度并点亮已恢复扇区
-          progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
-          _appendKeysFromSectors(sectorKeys);
-          crackTick.value++;
-          _app.storage.saveCrackResume({
-            'uidHex': tag.uidHex,
-            'dictIndex': dictStart + processed,
-            'dictKeys': dictKeysHex,
-            'sectorKeys': [
-              for (final sk in sectorKeys)
-                [sk.hasKeyA ? sk.keyA : null, sk.hasKeyB ? sk.keyB : null]
-            ],
-          });
-        });
+        anyMissing = await _checkCrackedKeys(
+          allKeys,
+          sectorKeys,
+          onProgress: (processed) {
+            // 批量验证按 32 把/块(约31s)推进，块返回即检查停止，
+            // 停止请求后最多再等一个块即可中断，而非跑完全部字典
+            checkStop();
+            // 大字典逐块验证，实时反馈进度并点亮已恢复扇区
+            progress.value = '验证密钥：已验证 $processed/${allKeys.length} 把密钥...';
+            _appendKeysFromSectors(sectorKeys);
+            crackTick.value++;
+            _app.storage.saveCrackResume({
+              'uidHex': tag.uidHex,
+              'dictIndex': dictStart + processed,
+              'dictKeys': dictKeysHex,
+              'sectorKeys': [
+                for (final sk in sectorKeys)
+                  [sk.hasKeyA ? sk.keyA : null, sk.hasKeyB ? sk.keyB : null],
+              ],
+            });
+          },
+        );
       }
       crackTick.value++;
       progress.value = '验证密钥：已标记扇区密钥信息.';
@@ -1220,7 +1388,11 @@ class _IcTabState extends State<IcTab> {
             for (var attempt = 1; attempt <= 3; attempt++) {
               try {
                 probe = await _dev.cmdMf1AcquireDarkside(
-                    block: 3, keyType: KeyType.keyB, isFirst: true, syncMax: 2);
+                  block: 3,
+                  keyType: KeyType.keyB,
+                  isFirst: true,
+                  syncMax: 2,
+                );
                 break;
               } on DeviceException catch (e) {
                 if (e.status != 1) {
@@ -1229,7 +1401,8 @@ class _IcTabState extends State<IcTab> {
                 sawTagNotFound = true;
                 if (attempt < 3) {
                   LogService.instance.log(
-                      '[解卡] Darkside探测 HF tag not found，第 $attempt 次重扫重试...');
+                    '[解卡] Darkside探测 HF tag not found，第 $attempt 次重扫重试...',
+                  );
                   try {
                     await _dev.cmdHf14aScan();
                   } catch (_) {}
@@ -1242,46 +1415,53 @@ class _IcTabState extends State<IcTab> {
             // 按 CU catch 容错，提示用户重新放卡而非中断整个解卡流程。
             if (probe == null) {
               LogService.instance.log(
-                  '[解卡] Darkside探测连续3次 HF tag not found，请重新放卡后重试');
+                '[解卡] Darkside探测连续3次 HF tag not found，请重新放卡后重试',
+              );
               throw DeviceException(-1, '未检测到卡片，请将卡片放稳后重试');
             }
             if (probe.status != 0) {
               LogService.instance.log(
-                  '[解卡] Darkside探测 status=${probe.status} (0=vulnerable)');
-              throw DeviceException(
-                  -1,
-                  switch (probe.status) {
-                    1 => '该卡片无法固定NT(CANT_FIX_NT), Darkside不可用',
-                    2 => 'LUCKY_AUTH_OK',
-                    3 => '该卡片不发送NAK(NO_NAK_SENT), Darkside不可用',
-                    4 => '卡片响应变化(TAG_CHANGED)',
-                    _ => '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥',
-                  });
+                '[解卡] Darkside探测 status=${probe.status} (0=vulnerable)',
+              );
+              throw DeviceException(-1, switch (probe.status) {
+                1 => '该卡片无法固定NT(CANT_FIX_NT), Darkside不可用',
+                2 => 'LUCKY_AUTH_OK',
+                3 => '该卡片不发送NAK(NO_NAK_SENT), Darkside不可用',
+                4 => '卡片响应变化(TAG_CHANGED)',
+                _ => '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥',
+              });
             }
             if (sawTagNotFound) {
-              LogService.instance.log(
-                  '[解卡] Darkside探测重试后成功，继续样本累积攻击');
+              LogService.instance.log('[解卡] Darkside探测重试后成功，继续样本累积攻击');
             }
             // 样本累积攻击（严格对齐 CU getMf1Darkside：block 0x03 keyB(0x61)，
-              // 首轮 isFirst，syncMax=15；CU recovery.dart:281 tries<5）
-              final items = <({int nt1, int ks1, int par, int nr, int ar})>[];
-              int be(List<int> b) {
-                var v = 0;
-                for (final x in b) {
-                  v = (v << 8) | (x & 0xFF);
-                }
-                return v;
+            // 首轮 isFirst，syncMax=15；CU recovery.dart:281 tries<5）
+            final items = <({int nt1, int ks1, int par, int nr, int ar})>[];
+            int be(List<int> b) {
+              var v = 0;
+              for (final x in b) {
+                v = (v << 8) | (x & 0xFF);
               }
-              for (var t = 0; t < 5 && darkKey == null; t++) {
-                checkStop();
-                progress.value = '破解密钥：Darkside攻击中 采集样本${t + 1}/5...';
-                final res = await _dev.cmdMf1AcquireDarkside(
-                    block: 3, keyType: KeyType.keyB, isFirst: t == 0, syncMax: 15);
+              return v;
+            }
+
+            for (var t = 0; t < 5 && darkKey == null; t++) {
+              checkStop();
+              progress.value = '破解密钥：Darkside攻击中 采集样本${t + 1}/5...';
+              final res = await _dev.cmdMf1AcquireDarkside(
+                block: 3,
+                keyType: KeyType.keyB,
+                isFirst: t == 0,
+                syncMax: 15,
+              );
               if (res.status != 0 || res.uid == null) {
                 LogService.instance.log(
-                    '[解卡] Darkside采集失败样本${t + 1} status=${res.status}');
+                  '[解卡] Darkside采集失败样本${t + 1} status=${res.status}',
+                );
                 throw DeviceException(
-                    -1, 'Darkside采集失败 (status=${res.status})');
+                  -1,
+                  'Darkside采集失败 (status=${res.status})',
+                );
               }
               // 大端组装（对齐 CU bytesToU32/bytesToU64 字段序 uid/nt1/par/ks1/nr/ar）
               items.add((
@@ -1292,38 +1472,46 @@ class _IcTabState extends State<IcTab> {
                 ar: be(res.ar!),
               ));
               final keys = await NativeRecovery.darkside(
-                  uid: uidInt, items: items);
+                uid: uidInt,
+                items: items,
+              );
               LogService.instance.log(
-                  '[解卡] Darkside C库恢复 ${items.length}条样本, 候选${keys.length}个');
+                '[解卡] Darkside C库恢复 ${items.length}条样本, 候选${keys.length}个',
+              );
               for (final k in keys) {
                 checkStop();
                 final khex = _int6Hex(k);
                 final ok = await _dev.cmdMf1CheckBlockKey(
-                    block: 3, keyType: KeyType.keyB, key: _hex(khex));
+                  block: 3,
+                  keyType: KeyType.keyB,
+                  key: _hex(khex),
+                );
                 if (ok) {
                   darkKey = k;
                   LogService.instance.log(
-                      '[解卡] Darkside候选验证命中 key=$khex (样本${items.length}条)');
+                    '[解卡] Darkside候选验证命中 key=$khex (样本${items.length}条)',
+                  );
                   break;
                 }
               }
             }
             if (darkKey == null) {
-              throw DeviceException(-1,
-                  'Darkside攻击穷尽5条样本未破出密钥, 卡片可能防Darkside');
+              throw DeviceException(-1, 'Darkside攻击穷尽5条样本未破出密钥, 卡片可能防Darkside');
             }
           } else {
             darkKey = await Crypto1.darkside(
               (isFirst) async {
                 checkStop();
                 // isFirst 实为轮次索引(l)，0 时为首轮(isFirst=true)
-                progress.value =
-                    '破解密钥：Darkside攻击中 第${isFirst + 1}/256轮...';
+                progress.value = '破解密钥：Darkside攻击中 第${isFirst + 1}/256轮...';
                 if (isFirst % 16 == 0) {
                   LogService.instance.log('[解卡] Darkside采集轮${isFirst + 1}');
                 }
                 final res = await _dev.cmdMf1AcquireDarkside(
-                    block: 3, keyType: KeyType.keyB, isFirst: isFirst == 0);
+                  block: 3,
+                  keyType: KeyType.keyB,
+                  isFirst: isFirst == 0,
+                );
                 if (res.status == 0) {
                   return {
                     'uid': res.uid!,
@@ -1338,19 +1526,26 @@ class _IcTabState extends State<IcTab> {
                 // NO_NAK_SENT=3/TAG_CHANGED=4，非OK单轮即终止（单轮失败即无漏洞卡，
                 // 重试无意义），LUCKY_AUTH_OK 幸运碰撞数据同样不可用
                 LogService.instance.log(
-                    '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 2=LUCKY_AUTH_OK)');
+                  '[解卡] Darkside采集失败轮${isFirst + 1} status=${res.status} (0=OK, 2=LUCKY_AUTH_OK)',
+                );
                 if (res.status == 2) {
                   throw DeviceException(-1, 'LUCKY_AUTH_OK');
                 }
                 throw DeviceException(
-                    -1, '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥 (status=${res.status})');
+                  -1,
+                  '该卡片为无漏洞全加密卡，请使用侦测功能获取密钥 (status=${res.status})',
+                );
               },
               (key) async {
                 final ok = await _dev.cmdMf1CheckBlockKey(
-                    block: 3, keyType: KeyType.keyB, key: key);
+                  block: 3,
+                  keyType: KeyType.keyB,
+                  key: key,
+                );
                 if (ok) {
                   LogService.instance.log(
-                      '[解卡] Darkside候选验证命中 key=${_hexStr(key)}');
+                    '[解卡] Darkside候选验证命中 key=${_hexStr(key)}',
+                  );
                 }
                 return ok;
               },
@@ -1369,7 +1564,8 @@ class _IcTabState extends State<IcTab> {
           crackTick.value++;
           progress.value = '破解密钥：破解出一个密钥，进入半加密卡破解流程...';
           LogService.instance.log(
-              '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyB=$darkHex, 进入半加密流程');
+            '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyB=$darkHex, 进入半加密流程',
+          );
         } catch (e) {
           // 透传具体失败原因（对齐 CU：Darkside 非致命，回落后续 backdoor-nested/
           // 逐扇区；仅在真正无任何可恢复密钥时由下方守卫报错）
@@ -1378,7 +1574,9 @@ class _IcTabState extends State<IcTab> {
           // 诊断卡 PRNG 类型，辅助判断是否因 syncMax/采样问题误判
           try {
             final dp = await _dev.cmdMf1TestPrngType();
-            LogService.instance.log('[解卡] Darkside失败后 PRNG分型=$dp (0=static 1=weak 2=hard)');
+            LogService.instance.log(
+              '[解卡] Darkside失败后 PRNG分型=$dp (0=static 1=weak 2=hard)',
+            );
           } catch (_) {}
           progress.value = '破解密钥：Darkside不可用($e)，尝试其它恢复方式...';
           // 不 return：CU recoverKeys 在 Darkside 后继续 backdoor-nested 与逐扇区
@@ -1391,19 +1589,24 @@ class _IcTabState extends State<IcTab> {
       // 普通认证，或真加密后门卡引入 0x64 嵌套 / 静态加密恢复。
       if (backdoorAcq != null && backdoorAcq.atks.isNotEmpty) {
         LogService.instance.log(
-            '[解卡] 前置探测: 后门采集成功(ntEnc动态), 识别为后门卡, 尝试后门key认证');
+          '[解卡] 前置探测: 后门采集成功(ntEnc动态), 识别为后门卡, 尝试后门key认证',
+        );
         String? backdoorHit;
         for (final sk in _backdoorKeys) {
           checkStop();
           if (await _dev.cmdMf1CheckBlockKey(
-              block: 0, keyType: KeyType.keyA, key: _hex(sk))) {
+            block: 0,
+            keyType: KeyType.keyA,
+            key: _hex(sk),
+          )) {
             backdoorHit = sk;
             break;
           }
         }
         if (backdoorHit != null) {
           LogService.instance.log(
-              '[解卡] 后门key=$backdoorHit 普通认证命中扇区0 keyA, 走常规流程(PRNG分型)');
+            '[解卡] 后门key=$backdoorHit 普通认证命中扇区0 keyA, 走常规流程(PRNG分型)',
+          );
           sectorKeys[0].hasKeyA = true;
           sectorKeys[0].keyA = backdoorHit;
           eSector = 0;
@@ -1420,20 +1623,29 @@ class _IcTabState extends State<IcTab> {
           // 复用上文 Darkside 前测得的 prng（对齐 CU 只测一次 getMf1NTLevel）
           if (prng == 1) {
             LogService.instance.log(
-                '[解卡] 后门key认证未命中, WEAK卡走0x64后门认证nested(对齐CU backdoor nested)');
+              '[解卡] 后门key认证未命中, WEAK卡走0x64后门认证nested(对齐CU backdoor nested)',
+            );
             progress.value = '破解密钥：后门卡弱随机嵌套攻击...';
             String? rec;
             try {
               rec = await _crackSectorKey(
-                  uidInt, 0, KeyType.keyA, 1,
-                  0, KeyType.keyA, _backdoorKeys.first,
-                  progress: progress, checkStop: checkStop,
-                  authKeyType: KeyType.backdoor,
-                  verifySectorKeys: sectorKeys);
+                uidInt,
+                0,
+                KeyType.keyA,
+                1,
+                0,
+                KeyType.keyA,
+                _backdoorKeys.first,
+                progress: progress,
+                checkStop: checkStop,
+                authKeyType: KeyType.backdoor,
+                verifySectorKeys: sectorKeys,
+              );
             } catch (_) {}
             if (rec != null) {
               LogService.instance.log(
-                  '[解卡] 0x64后门nested恢复扇区0 keyA=$rec, 走常规流程');
+                '[解卡] 0x64后门nested恢复扇区0 keyA=$rec, 走常规流程',
+              );
               sectorKeys[0].hasKeyA = true;
               sectorKeys[0].keyA = rec;
               eSector = 0;
@@ -1444,15 +1656,13 @@ class _IcTabState extends State<IcTab> {
               crackTick.value++;
               // 不 return，落到下方逐扇区 PRNG 分型流程
             } else {
-              LogService.instance.log(
-                  '[解卡] 0x64后门nested未恢复, 走backdoor静态加密恢复');
+              LogService.instance.log('[解卡] 0x64后门nested未恢复, 走backdoor静态加密恢复');
               // 对齐 CU recoverKeys:377 升级 prng=backdoor，落到逐扇区
               // staticEncryptedNested 分支统一处理（不再于此提前返回）
               prng = 3;
             }
           } else {
-            LogService.instance.log(
-                '[解卡] 后门key认证未命中, 走backdoor静态加密恢复');
+            LogService.instance.log('[解卡] 后门key认证未命中, 走backdoor静态加密恢复');
             // 对齐 CU recoverKeys:377（validKeyType可能仍为-1但 hasBackdoor）：
             // 升级 prng=backdoor 落到逐扇区 staticEncryptedNested 分支
             prng = 3;
@@ -1465,7 +1675,9 @@ class _IcTabState extends State<IcTab> {
       //   则 prng=backdoor。nfctool 静态加密卡已在 3gen 路由返回，故 isStaticEncrypted 恒为
       //   false，此处只需处理「无任何已知密钥但有后门采集数据」的情况（真后门解密卡）。
       if (backdoorAcq != null && eSector == -1) {
-        LogService.instance.log('[解卡] 无已知密钥但有后门采集数据, 升级 prng=backdoor 逐扇区静态加密恢复');
+        LogService.instance.log(
+          '[解卡] 无已知密钥但有后门采集数据, 升级 prng=backdoor 逐扇区静态加密恢复',
+        );
         prng = 3;
       }
 
@@ -1473,8 +1685,7 @@ class _IcTabState extends State<IcTab> {
       // 出密钥）且 prng!=backdoor 时，报无可用密钥错误终止，避免下游以无效 eSector 运行
       if (eSector == -1 && prng != 3) {
         progress.value = '破解失败：未恢复出任何密钥，无法逐扇区破解';
-        LogService.instance.log(
-            '[解卡] 无任何已知密钥(Darkside/backdoor均未奏效), 终止逐扇区破解');
+        LogService.instance.log('[解卡] 无任何已知密钥(Darkside/backdoor均未奏效), 终止逐扇区破解');
         if (mounted) Navigator.of(context).pop();
         _toast('破解失败：未能恢复出任何密钥。若卡曾被反复认证，请离开读卡器10秒后重放再试');
         return sectorKeys;
@@ -1490,18 +1701,18 @@ class _IcTabState extends State<IcTab> {
       // prng==3 是后门转换值，走下方 staticEncryptedNested 分支
       if (prng == 2) {
         progress.value = '解卡片：该卡片为国产兼容卡\n正在本地Hardnested破解...';
-        LogService.instance.log(
-            '[解卡] HARD卡进入本地Hardnested流程(纯本地计算, 无云端)');
+        LogService.instance.log('[解卡] HARD卡进入本地Hardnested流程(纯本地计算, 无云端)');
         await _crackHardnestedLocal(
-            uid: uid,
-            uidInt: uidInt,
-            eSector: eSector,
-            eKeyType: eKeyType,
-            eKeyHex: eKeyHex,
-            sectorKeys: sectorKeys,
-            progress: progress,
-            crackTick: crackTick,
-            checkStop: checkStop);
+          uid: uid,
+          uidInt: uidInt,
+          eSector: eSector,
+          eKeyType: eKeyType,
+          eKeyHex: eKeyHex,
+          sectorKeys: sectorKeys,
+          progress: progress,
+          crackTick: crackTick,
+          checkStop: checkStop,
+        );
         if (mounted) Navigator.of(context).pop();
         return sectorKeys;
       }
@@ -1510,15 +1721,16 @@ class _IcTabState extends State<IcTab> {
       if (hardnestedNotifier.value) {
         LogService.instance.log('[_crackCard] WEAK hardnested local mode');
         await _crackHardnestedLocal(
-            uid: uid,
-            uidInt: uidInt,
-            eSector: eSector,
-            eKeyType: eKeyType,
-            eKeyHex: eKeyHex,
-            sectorKeys: sectorKeys,
-            progress: progress,
-            crackTick: crackTick,
-            checkStop: checkStop);
+          uid: uid,
+          uidInt: uidInt,
+          eSector: eSector,
+          eKeyType: eKeyType,
+          eKeyHex: eKeyHex,
+          sectorKeys: sectorKeys,
+          progress: progress,
+          crackTick: crackTick,
+          checkStop: checkStop,
+        );
         if (mounted) Navigator.of(context).pop();
         return sectorKeys;
       }
@@ -1529,13 +1741,15 @@ class _IcTabState extends State<IcTab> {
       // nfctool _crackBackdoorNested 内部按扇区聚合等价实现。
       if (prng == 3) {
         LogService.instance.log(
-            '[解卡] PRNG=backdoor: 逐扇区 StaticEncryptedNested 恢复(对齐CU 后门卡逐扇区)');
+          '[解卡] PRNG=backdoor: 逐扇区 StaticEncryptedNested 恢复(对齐CU 后门卡逐扇区)',
+        );
         await _crackBackdoorNested(
-            acq: backdoorAcq!,
-            sectorKeys: sectorKeys,
-            progress: progress,
-            crackTick: crackTick,
-            checkStop: checkStop);
+          acq: backdoorAcq!,
+          sectorKeys: sectorKeys,
+          progress: progress,
+          crackTick: crackTick,
+          checkStop: checkStop,
+        );
         if (mounted) Navigator.of(context).pop();
         return sectorKeys;
       }
@@ -1544,10 +1758,11 @@ class _IcTabState extends State<IcTab> {
       final prngName = prng >= 2
           ? 'HARD硬加密(PRNG不可预测, 无本地漏洞, 走Hardnested采集计算)'
           : prng == 1
-              ? 'WEAK弱随机(PRNG可预测, 有嵌套漏洞)'
-              : 'STATIC静态(固定nonce, 有静态漏洞)';
+          ? 'WEAK弱随机(PRNG可预测, 有嵌套漏洞)'
+          : 'STATIC静态(固定nonce, 有静态漏洞)';
       LogService.instance.log(
-          '[解卡] PRNG分型=$prng -> $prngName; 已知密钥: 扇区$eSector ${eKeyType.label}=$eKeyHex');
+        '[解卡] PRNG分型=$prng -> $prngName; 已知密钥: 扇区$eSector ${eKeyType.label}=$eKeyHex',
+      );
       for (var s = 0; s < sectorKeys.length; s++) {
         checkStop();
         if (!sectorKeys[s].hasKeyA) {
@@ -1556,9 +1771,17 @@ class _IcTabState extends State<IcTab> {
               : '破解密钥：弱随机卡，正在破解扇区$s keyA...';
           try {
             final rec = await _crackSectorKey(
-                uidInt, s, KeyType.keyA, prng, eSector, eKeyType, eKeyHex,
-                progress: progress, checkStop: checkStop,
-                verifySectorKeys: sectorKeys);
+              uidInt,
+              s,
+              KeyType.keyA,
+              prng,
+              eSector,
+              eKeyType,
+              eKeyHex,
+              progress: progress,
+              checkStop: checkStop,
+              verifySectorKeys: sectorKeys,
+            );
             if (rec != null) {
               sectorKeys[s].hasKeyA = true;
               sectorKeys[s].keyA = rec;
@@ -1580,9 +1803,17 @@ class _IcTabState extends State<IcTab> {
               : '破解密钥：弱随机卡，正在破解扇区$s keyB...';
           try {
             final rec = await _crackSectorKey(
-                uidInt, s, KeyType.keyB, prng, eSector, eKeyType, eKeyHex,
-                progress: progress, checkStop: checkStop,
-                verifySectorKeys: sectorKeys);
+              uidInt,
+              s,
+              KeyType.keyB,
+              prng,
+              eSector,
+              eKeyType,
+              eKeyHex,
+              progress: progress,
+              checkStop: checkStop,
+              verifySectorKeys: sectorKeys,
+            );
             if (rec != null) {
               sectorKeys[s].hasKeyB = true;
               sectorKeys[s].keyB = rec;
@@ -1610,18 +1841,19 @@ class _IcTabState extends State<IcTab> {
         if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
           allFound = false;
           missing.add(
-              '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
+            '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})',
+          );
         }
       }
       if (allFound) {
-        LogService.instance.log(
-            '[解卡] 全部${sectorKeys.length}扇区A/B密钥破解成功');
+        LogService.instance.log('[解卡] 全部${sectorKeys.length}扇区A/B密钥破解成功');
         progress.value = '解卡片：破解成功，已重新标记密钥信息.';
         if (mounted) Navigator.of(context).pop();
         _toast('破解成功');
       } else {
         LogService.instance.log(
-            '[解卡] 破解失败, 未破扇区: ${missing.join(', ')} (各扇区失败原因见上方[解卡]日志)');
+          '[解卡] 破解失败, 未破扇区: ${missing.join(', ')} (各扇区失败原因见上方[解卡]日志)',
+        );
         progress.value = '解卡片：破解失败，部分扇区密钥未找到';
         if (mounted) Navigator.of(context).pop();
         _toast('破解失败，部分扇区密钥未找到（已写入找到的密钥）');
@@ -1642,10 +1874,14 @@ class _IcTabState extends State<IcTab> {
       // 本次解卡得到的密钥（扇区状态中已破解的 keyA/keyB）
       final gainedKeys = <String>[];
       for (final sk in sectorKeys) {
-        if (sk.hasKeyA && sk.keyA.length == 12 && !gainedKeys.contains(sk.keyA)) {
+        if (sk.hasKeyA &&
+            sk.keyA.length == 12 &&
+            !gainedKeys.contains(sk.keyA)) {
           gainedKeys.add(sk.keyA);
         }
-        if (sk.hasKeyB && sk.keyB.length == 12 && !gainedKeys.contains(sk.keyB)) {
+        if (sk.hasKeyB &&
+            sk.keyB.length == 12 &&
+            !gainedKeys.contains(sk.keyB)) {
           gainedKeys.add(sk.keyB);
         }
       }
@@ -1663,10 +1899,18 @@ class _IcTabState extends State<IcTab> {
 
   /// 对单个扇区恢复密钥（支持 keyA/keyB，对齐小程序 Crack() 逐扇区破解）
   Future<String?> _crackSectorKey(
-      int uidInt, int sector, KeyType targetKeyType, int prng,
-      int eSector, KeyType eKeyType, String eKeyHex,
-      {ValueNotifier<String>? progress, void Function()? checkStop,
-      KeyType? authKeyType, List<SectorKeyState>? verifySectorKeys}) async {
+    int uidInt,
+    int sector,
+    KeyType targetKeyType,
+    int prng,
+    int eSector,
+    KeyType eKeyType,
+    String eKeyHex, {
+    ValueNotifier<String>? progress,
+    void Function()? checkStop,
+    KeyType? authKeyType,
+    List<SectorKeyState>? verifySectorKeys,
+  }) async {
     void stop() => checkStop?.call();
     final eKey = _hex(eKeyHex);
     // WEAK 采集认证用的 keyType：后门卡传 0x64（对齐 CU backdoor nested），
@@ -1675,65 +1919,90 @@ class _IcTabState extends State<IcTab> {
     final keyTypeBit = targetKeyType == KeyType.keyA ? 2 : 1;
     final keyTypeStr = targetKeyType == KeyType.keyA ? 'keyA' : 'keyB';
     LogService.instance.log(
-        '[解卡] 扇区$sector $keyTypeStr: ${prng == 0 ? '静态嵌套' : '弱随机嵌套'}攻击 (依据: 扇区$eSector 已知密钥)');
+      '[解卡] 扇区$sector $keyTypeStr: ${prng == 0 ? '静态嵌套' : '弱随机嵌套'}攻击 (依据: 扇区$eSector 已知密钥)',
+    );
 
     if (prng == 0) {
       // STATIC 嵌套：检查 nt2 区分1代/2代卡
       final res = await _dev.cmdMf1AcquireStaticNested(
-          block: eSector * 4,
-          keyType: eKeyType,
-          key: eKey,
-          targetBlock: sector * 4,
-          targetKeyType: targetKeyType);
+        block: eSector * 4,
+        keyType: eKeyType,
+        key: eKey,
+        targetBlock: sector * 4,
+        targetKeyType: targetKeyType,
+      );
       final atks = res.atks
           .map((a) => {'nt1': _bytesInt(a.$1), 'nt2': _bytesInt(a.$2)})
           .toList();
       if (atks.isEmpty) {
         LogService.instance.log(
-            '[解卡] 扇区$sector $keyTypeStr 解不开: 静态嵌套未采集到数据(设备通信异常)');
+          '[解卡] 扇区$sector $keyTypeStr 解不开: 静态嵌套未采集到数据(设备通信异常)',
+        );
         return null;
       }
       final nt1 = atks[0]['nt1']!;
       final nt2 = atks[0]['nt2']!;
-      LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr STATIC nt1=$nt1 nt2=$nt2');
-      final is1Gen = atks.length > 1 &&
+      LogService.instance.log(
+        '[_crackSectorKey] sector=$sector $keyTypeStr STATIC nt1=$nt1 nt2=$nt2',
+      );
+      final is1Gen =
+          atks.length > 1 &&
           Crypto1.toUint32(nt2).toRadixString(16) ==
               Crypto1.toUint32(atks[1]['nt2']!).toRadixString(16);
       LogService.instance.log(
-          '[解卡] 扇区$sector $keyTypeStr: 静态卡${is1Gen ? '1代(加密nonce固定) -> HardNested候选生成' : '2代(加密nonce变化) -> staticnested状态恢复'}');
+        '[解卡] 扇区$sector $keyTypeStr: 静态卡${is1Gen ? '1代(加密nonce固定) -> HardNested候选生成' : '2代(加密nonce变化) -> staticnested状态恢复'}',
+      );
       if (!is1Gen) {
         // 2代卡：nt2 不一致，staticnested + 暴力验证
-        progress?.value = '破解密钥：静态卡，正在恢复扇区$sector $keyTypeStr候选状态（约1分钟，请耐心等待）...';
+        progress?.value =
+            '破解密钥：静态卡，正在恢复扇区$sector $keyTypeStr候选状态（约1分钟，请耐心等待）...';
         final recovered = NativeRecovery.available && atks.length >= 2
             ? NativeRecovery.staticNested(
                 uid: uidInt,
                 keyType: targetKeyType.value,
-                nt0: atks[0]['nt1']!, nt0Enc: atks[0]['nt2']!,
-                nt1: atks[1]['nt1']!, nt1Enc: atks[1]['nt2']!)
+                nt0: atks[0]['nt1']!,
+                nt0Enc: atks[0]['nt2']!,
+                nt1: atks[1]['nt1']!,
+                nt1Enc: atks[1]['nt2']!,
+              )
             : await Crypto1.staticNestedInIsolate(
-                uid: uidInt, keyType: targetKeyType.value, atks: atks);
-        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}');
+                uid: uidInt,
+                keyType: targetKeyType.value,
+                atks: atks,
+              );
+        LogService.instance.log(
+          '[_crackSectorKey] sector=$sector $keyTypeStr 2gen recovered=${recovered.length}',
+        );
         if (recovered.isEmpty) {
           LogService.instance.log(
-              '[解卡] 扇区$sector $keyTypeStr 解不开: staticnested恢复候选为0(采集数据质量差)');
+            '[解卡] 扇区$sector $keyTypeStr 解不开: staticnested恢复候选为0(采集数据质量差)',
+          );
         }
         return _verifyCandidates(sector, keyTypeBit, recovered);
       }
       // 1代卡：nt2 一致，HardNested + 暴力验证
       final hardRes = await _dev.cmdMf1AcquireHardNested(
-          block: eSector * 4, keyType: eKeyType, key: eKey,
-          targetBlock: sector * 4, targetKeyType: targetKeyType);
+        block: eSector * 4,
+        keyType: eKeyType,
+        key: eKey,
+        targetBlock: sector * 4,
+        targetKeyType: targetKeyType,
+      );
       if (hardRes.isEmpty) {
         LogService.instance.log(
-            '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested未采集到数据(设备通信异常)');
+          '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested未采集到数据(设备通信异常)',
+        );
         return null;
       }
       final par = hardRes.first.par;
       final candidates = _generateKeysFromHardNested(uidInt, nt1, nt2, par);
-      LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr 1gen candidates=${candidates.length}');
+      LogService.instance.log(
+        '[_crackSectorKey] sector=$sector $keyTypeStr 1gen candidates=${candidates.length}',
+      );
       if (candidates.isEmpty) {
         LogService.instance.log(
-            '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested候选为0(parity校验全部失败, 采集数据质量差)');
+          '[解卡] 扇区$sector $keyTypeStr 解不开: HardNested候选为0(parity校验全部失败, 采集数据质量差)',
+        );
       }
       return _verifyCandidates(sector, keyTypeBit, candidates);
     }
@@ -1741,7 +2010,9 @@ class _IcTabState extends State<IcTab> {
       // WEAK 嵌套：重试5次 + 暴力验证
       for (var retry = 0; retry < 5; retry++) {
         stop();
-        LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry START');
+        LogService.instance.log(
+          '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry START',
+        );
         try {
           // 对齐小程序：每对采集独立「测 dist + acquire」，各自用当轮 dist 恢复后合并。
           // 多次采样提供不同 (nt,par) 约束，能收窄单对的 keystream 歧义到真 key；
@@ -1752,17 +2023,25 @@ class _IcTabState extends State<IcTab> {
           for (var r = 0; r < acqRounds; r++) {
             stop();
             final distRes = await _dev.cmdMf1TestNtDistance(
-                block: eSector * 4, keyType: acquireKeyType, key: eKey);
+              block: eSector * 4,
+              keyType: acquireKeyType,
+              key: eKey,
+            );
             final dist = _bytesInt(distRes.dist.sublist(0, 4));
             final uid = _bytesInt(distRes.uid.sublist(0, 4));
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry round=$r dist=$dist nestedUid=$uid');
+            LogService.instance.log(
+              '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry round=$r dist=$dist nestedUid=$uid',
+            );
             final nested = await _dev.cmdMf1AcquireNested(
-                block: eSector * 4,
-                keyType: acquireKeyType,
-                key: eKey,
-                targetBlock: sector * 4,
-                targetKeyType: targetKeyType);
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry round=$r nested.length=${nested.length}');
+              block: eSector * 4,
+              keyType: acquireKeyType,
+              key: eKey,
+              targetBlock: sector * 4,
+              targetKeyType: targetKeyType,
+            );
+            LogService.instance.log(
+              '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry round=$r nested.length=${nested.length}',
+            );
             if (nested.length >= 2) {
               // 每对采集含 2 条(1 对)，各自携带当轮 dist
               for (final a in nested) {
@@ -1779,7 +2058,8 @@ class _IcTabState extends State<IcTab> {
             }
           }
           // 对齐小程序：每轮重试追加进度点
-          progress?.value = '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
+          progress?.value =
+              '破解密钥：弱随机卡，正在破解扇区$sector $keyTypeStr${'.' * (retry + 1)}';
           List<int> recovered;
           var nativePath = false;
           if (NativeRecovery.available && samples.length >= 2) {
@@ -1796,63 +2076,97 @@ class _IcTabState extends State<IcTab> {
                 if (!merged.contains(cands[i])) merged.add(cands[i]);
               }
             }
+
             for (var i = 0; i + 1 < samples.length; i += 2) {
               stop();
               final s0 = samples[i];
               final s1 = samples[i + 1];
-              mergeTop(NativeRecovery.nested(
+              mergeTop(
+                NativeRecovery.nested(
                   uid: s0.uid,
                   dist: s0.dist,
-                  nt0: s0.atk['nt1']!, nt0Enc: s0.atk['nt2']!, par0: s0.atk['par']!,
-                  nt1: s1.atk['nt1']!, nt1Enc: s1.atk['nt2']!, par1: s1.atk['par']!));
+                  nt0: s0.atk['nt1']!,
+                  nt0Enc: s0.atk['nt2']!,
+                  par0: s0.atk['par']!,
+                  nt1: s1.atk['nt1']!,
+                  nt1Enc: s1.atk['nt2']!,
+                  par1: s1.atk['par']!,
+                ),
+              );
             }
             if (samples.length.isOdd) {
               stop();
               final s0 = samples.last;
               final s1 = samples.first;
-              mergeTop(NativeRecovery.nested(
+              mergeTop(
+                NativeRecovery.nested(
                   uid: s0.uid,
                   dist: s0.dist,
-                  nt0: s0.atk['nt1']!, nt0Enc: s0.atk['nt2']!, par0: s0.atk['par']!,
-                  nt1: s1.atk['nt1']!, nt1Enc: s1.atk['nt2']!, par1: s1.atk['par']!));
+                  nt0: s0.atk['nt1']!,
+                  nt0Enc: s0.atk['nt2']!,
+                  par0: s0.atk['par']!,
+                  nt1: s1.atk['nt1']!,
+                  nt1Enc: s1.atk['nt2']!,
+                  par1: s1.atk['par']!,
+                ),
+              );
             }
             recovered = merged;
             nativePath = true;
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native samples=${samples.length} recovered=${recovered.length}');
+            LogService.instance.log(
+              '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry native samples=${samples.length} recovered=${recovered.length}',
+            );
           } else {
             // Dart 路径（native 不可用时回退）。Dart 需要每对独立恢复，
             // 逐对用各自 dist 采集过滤后状态恢复
             final keysPerPair = <List<int>>[];
             for (var i = 0; i + 1 < samples.length; i += 2) {
               stop();
-              progress?.value = '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i ~/ 2 + 1}/${(samples.length / 2).ceil()} 对（每对约半分钟）...';
+              progress?.value =
+                  '破解密钥：弱随机卡，正在恢复扇区$sector $keyTypeStr候选状态 ${i ~/ 2 + 1}/${(samples.length / 2).ceil()} 对（每对约半分钟）...';
               final collected = Crypto1.nestedCollect(
-                  dist: samples[i].dist,
-                  atks: [samples[i].atk, samples[i + 1].atk]);
+                dist: samples[i].dist,
+                atks: [samples[i].atk, samples[i + 1].atk],
+              );
               for (final pair in collected) {
-                final keys = await Crypto1.recoverKeysInIsolate(samples[i].uid, pair);
+                final keys = await Crypto1.recoverKeysInIsolate(
+                  samples[i].uid,
+                  pair,
+                );
                 keysPerPair.add(keys);
               }
             }
             if (samples.length.isOdd) {
               stop();
               final collected = Crypto1.nestedCollect(
-                  dist: samples.last.dist,
-                  atks: [samples.last.atk, samples.first.atk]);
+                dist: samples.last.dist,
+                atks: [samples.last.atk, samples.first.atk],
+              );
               for (final pair in collected) {
-                final keys = await Crypto1.recoverKeysInIsolate(samples.last.uid, pair);
+                final keys = await Crypto1.recoverKeysInIsolate(
+                  samples.last.uid,
+                  pair,
+                );
                 keysPerPair.add(keys);
               }
             }
             recovered = Crypto1.nestedMerge(keysPerPair, top: 5000);
-            LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry samples=${samples.length} recovered=${recovered.length}');
+            LogService.instance.log(
+              '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry samples=${samples.length} recovered=${recovered.length}',
+            );
           }
           if (recovered.isEmpty) {
             LogService.instance.log(
-                '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选交集为空(采集样本质量差), 重试');
+              '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选交集为空(采集样本质量差), 重试',
+            );
           } else {
-            var found = await _verifyCandidates(sector, keyTypeBit, recovered,
-                sectorKeys: verifySectorKeys, use2015: true);
+            var found = await _verifyCandidates(
+              sector,
+              keyTypeBit,
+              recovered,
+              sectorKeys: verifySectorKeys,
+              use2015: true,
+            );
             // native C 恢复候选全验证失败时，追加一次 Dart 恢复兜底(读全32bit par，
             // 已对拍过正确)。C nested 对部分卡(如 dist 抖动偏大)恢复出的单候选
             // 是 keystream 歧义解而非真 key，Dart 同一批 samples 收敛结果不同，
@@ -1861,40 +2175,54 @@ class _IcTabState extends State<IcTab> {
               final keysPerPair = <List<int>>[];
               for (var i = 0; i + 1 < samples.length; i += 2) {
                 stop();
-                progress?.value = '破解密钥：弱随机卡，Dart 兜底恢复扇区$sector ${i ~/ 2 + 1}/${(samples.length / 2).ceil()} 对...';
+                progress?.value =
+                    '破解密钥：弱随机卡，Dart 兜底恢复扇区$sector ${i ~/ 2 + 1}/${(samples.length / 2).ceil()} 对...';
                 final collected = Crypto1.nestedCollect(
-                    dist: samples[i].dist,
-                    atks: [samples[i].atk, samples[i + 1].atk]);
+                  dist: samples[i].dist,
+                  atks: [samples[i].atk, samples[i + 1].atk],
+                );
                 for (final pair in collected) {
                   keysPerPair.add(
-                      await Crypto1.recoverKeysInIsolate(samples[i].uid, pair));
+                    await Crypto1.recoverKeysInIsolate(samples[i].uid, pair),
+                  );
                 }
               }
               if (samples.length.isOdd) {
                 stop();
                 final collected = Crypto1.nestedCollect(
-                    dist: samples.last.dist,
-                    atks: [samples.last.atk, samples.first.atk]);
+                  dist: samples.last.dist,
+                  atks: [samples.last.atk, samples.first.atk],
+                );
                 for (final pair in collected) {
-                  keysPerPair.add(await Crypto1.recoverKeysInIsolate(
-                      samples.last.uid, pair));
+                  keysPerPair.add(
+                    await Crypto1.recoverKeysInIsolate(samples.last.uid, pair),
+                  );
                 }
               }
               final dartKeys = Crypto1.nestedMerge(keysPerPair, top: 5000);
               if (dartKeys.isNotEmpty) {
                 LogService.instance.log(
-                    '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dart fallback recovered=${dartKeys.length}');
-                found = await _verifyCandidates(sector, keyTypeBit, dartKeys,
-                    sectorKeys: verifySectorKeys, use2015: true);
+                  '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry dart fallback recovered=${dartKeys.length}',
+                );
+                found = await _verifyCandidates(
+                  sector,
+                  keyTypeBit,
+                  dartKeys,
+                  sectorKeys: verifySectorKeys,
+                  use2015: true,
+                );
               }
             }
             // 验证失败说明本轮采集样本质量差（候选交集为空），继续重试采集
             if (found != null) return found;
             LogService.instance.log(
-                '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选${recovered.length}个全部验证失败(采集样本质量差), 重试');
+              '[解卡] 扇区$sector $keyTypeStr 第${retry + 1}轮候选${recovered.length}个全部验证失败(采集样本质量差), 重试',
+            );
           }
         } catch (e) {
-          LogService.instance.log('[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry ERROR=$e');
+          LogService.instance.log(
+            '[_crackSectorKey] sector=$sector $keyTypeStr WEAK retry=$retry ERROR=$e',
+          );
           // 设备通信超时（status=-2）视为瞬时异常，进入下一轮重新采集；
           // 直接 rethrow 会让单个扇区密钥因一次抖动永久放弃，其余 4 轮重试形同虚设
           if (e is DeviceException && e.status == -2) continue;
@@ -1902,7 +2230,8 @@ class _IcTabState extends State<IcTab> {
         }
       }
       LogService.instance.log(
-          '[解卡] 扇区$sector $keyTypeStr 解不开: 弱随机嵌套5轮重试全部失败(PRNG距离抖动过大或卡异常), 该扇区放弃');
+        '[解卡] 扇区$sector $keyTypeStr 解不开: 弱随机嵌套5轮重试全部失败(PRNG距离抖动过大或卡异常), 该扇区放弃',
+      );
     }
     return null;
   }
@@ -1915,25 +2244,31 @@ class _IcTabState extends State<IcTab> {
   /// status!=0->null 语义，不中断）。use2015=false 走 2012 多槽 mask 提速，
   /// 仅词典批量(_checkCrackedKeys)等确定安全场景使用。
   Future<String?> _verifyCandidates(
-      int sector, int keyTypeBit, List<int> candidates,
-      {int chunkSize = 32, List<SectorKeyState>? sectorKeys,
-      bool use2015 = true}) async {
+    int sector,
+    int keyTypeBit,
+    List<int> candidates, {
+    int chunkSize = 32,
+    List<SectorKeyState>? sectorKeys,
+    bool use2015 = true,
+  }) async {
     if (candidates.isEmpty) {
-      LogService.instance.log('[_verifyCandidates] sector=$sector candidates empty');
+      LogService.instance.log(
+        '[_verifyCandidates] sector=$sector candidates empty',
+      );
       return null;
     }
-    LogService.instance.log('[_verifyCandidates] sector=$sector candidates=${candidates.length} chunkSize=$chunkSize use2015=$use2015');
+    LogService.instance.log(
+      '[_verifyCandidates] sector=$sector candidates=${candidates.length} chunkSize=$chunkSize use2015=$use2015',
+    );
     final isKeyA = keyTypeBit == 2;
     final slot = sector * 2 + (isKeyA ? 0 : 1);
-    final keys = candidates
-        .map((k) {
-          final buf = Uint8List(6);
-          final bd = ByteData.sublistView(buf);
-          bd.setUint16(0, (k >> 32) & 0xFFFF, Endian.big);
-          bd.setUint32(2, k & 0xFFFFFFFF, Endian.big);
-          return buf;
-        })
-        .toList();
+    final keys = candidates.map((k) {
+      final buf = Uint8List(6);
+      final bd = ByteData.sublistView(buf);
+      bd.setUint16(0, (k >> 32) & 0xFFFF, Endian.big);
+      bd.setUint32(2, k & 0xFFFFFFFF, Endian.big);
+      return buf;
+    }).toList();
     if (use2015) {
       // 对齐 CU checkKeysOnSector：2015 mf1CheckKeysOnBlock 单块(trailer)逐 chunk，
       // status!=0 视为未命中返回 null 继续，命中返回 mf1AuthMultipleKeys 数据[1:]
@@ -1942,13 +2277,20 @@ class _IcTabState extends State<IcTab> {
       for (var i = 0; i < keys.length; i += chunkSize) {
         final end = (i + chunkSize > keys.length) ? keys.length : i + chunkSize;
         final found = await _dev.cmdMf1CheckKeysOfBlock(
-            block: block, keyType: keyType, keys: keys.sublist(i, end));
+          block: block,
+          keyType: keyType,
+          keys: keys.sublist(i, end),
+        );
         if (found != null && found.length == 6) {
-          LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(found)} (2015)');
+          LogService.instance.log(
+            '[_verifyCandidates] sector=$sector FOUND key=${_hexStr(found)} (2015)',
+          );
           return _hexStr(found);
         }
       }
-      LogService.instance.log('[_verifyCandidates] sector=$sector NOT FOUND (2015)');
+      LogService.instance.log(
+        '[_verifyCandidates] sector=$sector NOT FOUND (2015)',
+      );
       return null;
     }
     // 对齐 2012 mf1CheckKeysOfSectors（容忍错 key，返回命中，不抛 status=6）。
@@ -1957,7 +2299,9 @@ class _IcTabState extends State<IcTab> {
     // 传入了全卡 sectorKeys 时复用全缺失槽 mask（多槽并行，实测远快于单槽串行，
     // 与 _checkCrackedKeys 同样 30 秒级），命中后查目标槽；否则退化为单槽。
     final byteIdx = sector >> 2;
-    final slotBit = isKeyA ? 2 << (6 - sector % 4 * 2) : 1 << (6 - sector % 4 * 2);
+    final slotBit = isKeyA
+        ? 2 << (6 - sector % 4 * 2)
+        : 1 << (6 - sector % 4 * 2);
     final mask = Uint8List(10);
     // 掩码语义：位=1 为已知槽（固件跳过），位=0 为待检查槽，故以全 0xFF 为底再清位
     mask.fillRange(0, 10, 0xFF);
@@ -1971,20 +2315,26 @@ class _IcTabState extends State<IcTab> {
       mask[byteIdx] &= ~slotBit;
     }
     final res = await _dev.cmdMf1CheckKeysOfSectors(
-        keys: keys, mask: mask, chunkSize: chunkSize);
+      keys: keys,
+      mask: mask,
+      chunkSize: chunkSize,
+    );
     final hit = res.sectorKeys[slot];
     if (hit != null && hit.length == 6) {
-      LogService.instance.log('[_verifyCandidates] sector=$sector FOUND key=${_hexStr(hit)}');
+      LogService.instance.log(
+        '[_verifyCandidates] sector=$sector FOUND key=${_hexStr(hit)}',
+      );
       return _hexStr(hit);
     }
-    LogService.instance.log('[_verifyCandidates] sector=$sector NOT FOUND (found bit=0)');
+    LogService.instance.log(
+      '[_verifyCandidates] sector=$sector NOT FOUND (found bit=0)',
+    );
     return null;
   }
 
   /// 1代卡 HardNested 密钥生成（对齐小程序 generate_keys：从 nt1^nt2 恢复候选密钥）
   /// 从 HardNested 数据生成候选密钥（对齐小程序 generate_keys）
-  List<int> _generateKeysFromHardNested(
-      int uidInt, int nt1, int nt2, int par) {
+  List<int> _generateKeysFromHardNested(int uidInt, int nt1, int nt2, int par) {
     final ks = nt1 ^ uidInt;
     final diff = nt1 ^ nt2;
     final states = Crypto1.lfsrRecovery32(diff, ks);
@@ -2009,7 +2359,6 @@ class _IcTabState extends State<IcTab> {
       ((raw >> 2) & 1) * 100 +
       ((raw >> 1) & 1) * 10 +
       (raw & 1);
-
 
   /// 双卡破解（对齐小程序 Crack_with2cards：两张同系统不同UID的卡）
   /// 候选生成用 NativeRecovery.staticEncryptedNested（对齐后门恢复：
@@ -2054,7 +2403,8 @@ class _IcTabState extends State<IcTab> {
       for (final sk in specialKeys) {
         try {
           final res = await _dev.cmdMf1AcquireStaticEncryptedNested(
-              key: _hex(sk));
+            key: _hex(sk),
+          );
           if (res.atks.isNotEmpty) {
             enc1 = res;
             break;
@@ -2062,16 +2412,14 @@ class _IcTabState extends State<IcTab> {
         } catch (_) {}
       }
       if (enc1 == null) {
-        throw DeviceException(1,
-            '破解失败，只有第一、三代无漏洞卡支持双卡破解！');
+        throw DeviceException(1, '破解失败，只有第一、三代无漏洞卡支持双卡破解！');
       }
 
       // 等待用户换卡（对齐小程序：100秒超时）
       progress.value = '双卡破解：请读取第二张卡...';
       Uint8List? uid2;
       for (var i = 0; i < 100; i++) {
-        progress.value =
-            '双卡破解：请读取第二张卡，用时${i}s...';
+        progress.value = '双卡破解：请读取第二张卡，用时${i}s...';
         try {
           final tags2 = await _dev.cmdHf14aScan();
           if (tags2.isNotEmpty) {
@@ -2095,7 +2443,8 @@ class _IcTabState extends State<IcTab> {
       for (final sk in specialKeys) {
         try {
           final res = await _dev.cmdMf1AcquireStaticEncryptedNested(
-              key: _hex(sk));
+            key: _hex(sk),
+          );
           if (res.atks.isNotEmpty) {
             enc2 = res;
             break;
@@ -2103,8 +2452,7 @@ class _IcTabState extends State<IcTab> {
         } catch (_) {}
       }
       if (enc2 == null) {
-        throw DeviceException(1,
-            '破解失败，第二张卡不支持双卡破解！');
+        throw DeviceException(1, '破解失败，第二张卡不支持双卡破解！');
       }
 
       // 逐扇区：双卡候选密钥求交集后验证（对齐小程序 generate_keys + intersection）
@@ -2127,9 +2475,12 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
-      Future<void> crackSlot(int sector, KeyType keyType,
-          (int, KeyType, int, int, int) atk1,
-          (int, KeyType, int, int, int) atk2) async {
+      Future<void> crackSlot(
+        int sector,
+        KeyType keyType,
+        (int, KeyType, int, int, int) atk1,
+        (int, KeyType, int, int, int) atk2,
+      ) async {
         // nt16 补全为完整 32 位明文 nt（对齐 _crackBackdoorNested/CU general.dart:89）
         int fullNt(int nt16) =>
             ((nt16 << 16) | Crypto1.prngSuccessor(nt16, 16)) & 0xFFFFFFFF;
@@ -2138,15 +2489,17 @@ class _IcTabState extends State<IcTab> {
         final nt1 = fullNt(nt16a);
         final nt2 = fullNt(nt16b);
         final cands1 = NativeRecovery.staticEncryptedNested(
-            uid: uid1Int,
-            nt: nt1,
-            ntEnc: ntEncA,
-            ntParEnc: _parityToInt(parA));
+          uid: uid1Int,
+          nt: nt1,
+          ntEnc: ntEncA,
+          ntParEnc: _parityToInt(parA),
+        );
         final cands2 = NativeRecovery.staticEncryptedNested(
-            uid: uid2Int,
-            nt: nt2,
-            ntEnc: ntEncB,
-            ntParEnc: _parityToInt(parB));
+          uid: uid2Int,
+          nt: nt2,
+          ntEnc: ntEncB,
+          ntParEnc: _parityToInt(parB),
+        );
         if (cands1.isEmpty || cands2.isEmpty) return;
         final set2 = cands2.toSet();
         final inter = cands1.where(set2.contains).toSet();
@@ -2155,7 +2508,10 @@ class _IcTabState extends State<IcTab> {
         for (final k in inter) {
           final keyHex = _int6Hex(k);
           final valid = await _dev.cmdMf1CheckBlockKey(
-              block: block, keyType: keyType, key: _hex(keyHex));
+            block: block,
+            keyType: keyType,
+            key: _hex(keyHex),
+          );
           if (valid) {
             if (keyType == KeyType.keyA) {
               sectorKeys[sector].hasKeyA = true;
@@ -2180,7 +2536,11 @@ class _IcTabState extends State<IcTab> {
         }
         if (!sectorKeys[s].hasKeyB) {
           await crackSlot(
-              s, KeyType.keyB, enc1.atks[s * 2 + 1], enc2.atks[s * 2 + 1]);
+            s,
+            KeyType.keyB,
+            enc1.atks[s * 2 + 1],
+            enc2.atks[s * 2 + 1],
+          );
         }
       }
 
@@ -2271,31 +2631,34 @@ class _IcTabState extends State<IcTab> {
       // 采集单槽位：staticnested 出 nt1/nt2 + hardnested 出 par
       Future<(int, int, int)> acquireSlot(int sector, KeyType kt) async {
         final sn = await _dev.cmdMf1AcquireStaticNested(
-            block: eSector * 4,
-            keyType: eKeyType,
-            key: _hex(eKeyHex),
-            targetBlock: sector * 4,
-            targetKeyType: kt);
+          block: eSector * 4,
+          keyType: eKeyType,
+          key: _hex(eKeyHex),
+          targetBlock: sector * 4,
+          targetKeyType: kt,
+        );
         final hard = await _dev.cmdMf1AcquireHardNested(
-            block: eSector * 4,
-            keyType: eKeyType,
-            key: _hex(eKeyHex),
-            targetBlock: sector * 4,
-            targetKeyType: kt);
+          block: eSector * 4,
+          keyType: eKeyType,
+          key: _hex(eKeyHex),
+          targetBlock: sector * 4,
+          targetKeyType: kt,
+        );
         return (
           _bytesInt(sn.atks[0].$1),
           _bytesInt(sn.atks[0].$2),
-          hard.isEmpty ? 0 : hard.first.par
+          hard.isEmpty ? 0 : hard.first.par,
         );
       }
 
       // 预检：1 代卡加密 nonce 固定（两次采集 nt2 一致，对齐小程序）
       final check = await _dev.cmdMf1AcquireStaticNested(
-          block: eSector * 4,
-          keyType: eKeyType,
-          key: _hex(eKeyHex),
-          targetBlock: 0,
-          targetKeyType: KeyType.keyA);
+        block: eSector * 4,
+        keyType: eKeyType,
+        key: _hex(eKeyHex),
+        targetBlock: 0,
+        targetKeyType: KeyType.keyA,
+      );
       if (check.atks.length > 1 &&
           _hexStr(check.atks[0].$2) != _hexStr(check.atks[1].$2)) {
         throw DeviceException(1, '破解失败，请注意，只有第一、三代无漏洞卡支持双卡破解！');
@@ -2362,14 +2725,27 @@ class _IcTabState extends State<IcTab> {
           if (a1 == null) continue;
           progress.value = '双卡破解：正在读取卡2，扇区$s ${kt.label}...';
           final a2 = await acquireSlot(s, kt);
-          final cands1 = _generateKeysFromHardNested(uid1Int, a1.$1, a1.$2, a1.$3);
-          final cands2 = _generateKeysFromHardNested(uid2Int, a2.$1, a2.$2, a2.$3);
+          final cands1 = _generateKeysFromHardNested(
+            uid1Int,
+            a1.$1,
+            a1.$2,
+            a1.$3,
+          );
+          final cands2 = _generateKeysFromHardNested(
+            uid2Int,
+            a2.$1,
+            a2.$2,
+            a2.$3,
+          );
           final set2 = cands2.toSet();
           final inter = cands1.where(set2.contains).toSet();
           for (final k in inter) {
             final keyHex = _int6Hex(k);
             final valid = await _dev.cmdMf1CheckBlockKey(
-                block: s * 4, keyType: kt, key: _hex(keyHex));
+              block: s * 4,
+              keyType: kt,
+              key: _hex(keyHex),
+            );
             if (valid) {
               if (kt == KeyType.keyA) {
                 sectorKeys[s].hasKeyA = true;
@@ -2414,9 +2790,13 @@ class _IcTabState extends State<IcTab> {
   bool _nuidXorValid() {
     final b0 = _app.card.sectors[0].blocks[0].data;
     if (b0.length < 10) return false;
-    final nums = [0, 2, 4, 6, 8]
-        .map((i) => int.parse(b0.substring(i, i + 2), radix: 16))
-        .toList();
+    final nums = [
+      0,
+      2,
+      4,
+      6,
+      8,
+    ].map((i) => int.parse(b0.substring(i, i + 2), radix: 16)).toList();
     return (nums[0] ^ nums[1] ^ nums[2] ^ nums[3]) == nums[4];
   }
 
@@ -2491,7 +2871,7 @@ class _IcTabState extends State<IcTab> {
         ...(all[name] ?? '')
             .split('\n')
             .map((e) => e.trim())
-            .where((k) => k.length == 12)
+            .where((k) => k.length == 12),
       ];
       var added = 0;
       for (final k in keys) {
@@ -2502,7 +2882,9 @@ class _IcTabState extends State<IcTab> {
       }
       if (added == 0) return;
       await _app.storage.saveKey(name, merged.join('\n'));
-      LogService.instance.log('[密钥文件] default_keys.txt 新增 $added 个密钥（共 ${merged.length}）');
+      LogService.instance.log(
+        '[密钥文件] default_keys.txt 新增 $added 个密钥（共 ${merged.length}）',
+      );
     } catch (_) {}
   }
 
@@ -2550,7 +2932,8 @@ class _IcTabState extends State<IcTab> {
     // native 库不可用时无法进行 Hardnested 计算，直接结束
     if (!NativeRecovery.available) {
       LogService.instance.log(
-          '[解卡] 本地Hardnested不可用: native计算库加载失败(需rebuild安装librecovery.so)');
+        '[解卡] 本地Hardnested不可用: native计算库加载失败(需rebuild安装librecovery.so)',
+      );
       progress.value = '解卡片：本地计算库不可用，无法进行Hardnested破解';
       _toast('本地计算库不可用，请重新安装应用');
       return;
@@ -2562,14 +2945,15 @@ class _IcTabState extends State<IcTab> {
         checkStop();
         if (!sectorKeys[s].hasKeyA) {
           final key = await _hardnestedLocal(
-              uidInt: uidInt,
-              eSector: eSector,
-              eKeyType: eKeyType,
-              eKeyHex: eKeyHex,
-              sector: s,
-              targetType: KeyType.keyA,
-              progress: progress,
-              checkStop: checkStop);
+            uidInt: uidInt,
+            eSector: eSector,
+            eKeyType: eKeyType,
+            eKeyHex: eKeyHex,
+            sector: s,
+            targetType: KeyType.keyA,
+            progress: progress,
+            checkStop: checkStop,
+          );
           if (key != null) {
             await _checkCrackedKeys([_hex(key)], sectorKeys);
             crackTick.value++;
@@ -2579,14 +2963,15 @@ class _IcTabState extends State<IcTab> {
         checkStop();
         if (!sectorKeys[s].hasKeyB) {
           final key = await _hardnestedLocal(
-              uidInt: uidInt,
-              eSector: eSector,
-              eKeyType: eKeyType,
-              eKeyHex: eKeyHex,
-              sector: s,
-              targetType: KeyType.keyB,
-              progress: progress,
-              checkStop: checkStop);
+            uidInt: uidInt,
+            eSector: eSector,
+            eKeyType: eKeyType,
+            eKeyHex: eKeyHex,
+            sector: s,
+            targetType: KeyType.keyB,
+            progress: progress,
+            checkStop: checkStop,
+          );
           if (key != null) {
             await _checkCrackedKeys([_hex(key)], sectorKeys);
             crackTick.value++;
@@ -2603,7 +2988,8 @@ class _IcTabState extends State<IcTab> {
     for (var s = 0; s < 16; s++) {
       if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
         missing.add(
-            '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
+          '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})',
+        );
       }
     }
     if (missing.isEmpty) {
@@ -2611,7 +2997,8 @@ class _IcTabState extends State<IcTab> {
       _toast('破解成功');
     } else {
       LogService.instance.log(
-          '[解卡] 本地Hardnested结束, 未破扇区: ${missing.join(', ')} (计算未找到密钥或采集质量差, 各扇区原因见上方[解卡]日志)');
+        '[解卡] 本地Hardnested结束, 未破扇区: ${missing.join(', ')} (计算未找到密钥或采集质量差, 各扇区原因见上方[解卡]日志)',
+      );
       progress.value = '解卡片：本地破解完成，部分扇区密钥未找到';
       _toast('部分扇区密钥未找到（已写入找到的密钥）');
     }
@@ -2644,8 +3031,14 @@ class _IcTabState extends State<IcTab> {
     final bySector = <int, Map<int, (int, int, int)>>{};
     for (final a in acq.atks) {
       final (sector, keyType, nt16, ntEnc, rawPar) = a;
-      bySector.putIfAbsent(sector, () => <int, (int, int, int)>{})
-        [keyType == KeyType.keyA ? 0 : 1] = (fullNt(nt16), ntEnc, rawPar);
+      bySector.putIfAbsent(
+        sector,
+        () => <int, (int, int, int)>{},
+      )[keyType == KeyType.keyA ? 0 : 1] = (
+        fullNt(nt16),
+        ntEnc,
+        rawPar,
+      );
     }
 
     // 候选约 3.5 万 -> 对齐 CU filterKeys 先做 A/B seednt 交集过滤压到可验证规模
@@ -2663,17 +3056,20 @@ class _IcTabState extends State<IcTab> {
               uid: uidInt,
               nt: ntA.$1,
               ntEnc: ntA.$2,
-              ntParEnc: _parityToInt(ntA.$3))
+              ntParEnc: _parityToInt(ntA.$3),
+            )
           : const <int>[];
       final candsB = ntB != null
           ? NativeRecovery.staticEncryptedNested(
               uid: uidInt,
               nt: ntB.$1,
               ntEnc: ntB.$2,
-              ntParEnc: _parityToInt(ntB.$3))
+              ntParEnc: _parityToInt(ntB.$3),
+            )
           : const <int>[];
       LogService.instance.log(
-          '[解卡] 后门恢复 扇区$sector: A候选=${candsA.length} B候选=${candsB.length}');
+        '[解卡] 后门恢复 扇区$sector: A候选=${candsA.length} B候选=${candsB.length}',
+      );
       // A/B 均有且都未解时用 seednt 交集过滤（CU filterKeys）
       List<int> keysA = candsA;
       List<int> keysB = candsB;
@@ -2682,7 +3078,8 @@ class _IcTabState extends State<IcTab> {
         keysA = f.$1;
         keysB = f.$2;
         LogService.instance.log(
-            '[解卡] 后门恢复 扇区$sector: filterKeys后 A=${keysA.length} B=${keysB.length}');
+          '[解卡] 后门恢复 扇区$sector: filterKeys后 A=${keysA.length} B=${keysB.length}',
+        );
       }
       // 上卡验证（严格对齐 CU checkKeysOnSector：按目标扇区 2015 mf1CheckKeysOnBlock
       // 单块逐chunk，status!=0->null 不中断，命中返回；缺对侧/已解一侧单侧验证）
@@ -2695,7 +3092,11 @@ class _IcTabState extends State<IcTab> {
         progress.value =
             '解卡片：后门恢复扇区$sector ${pair.$1 == 0 ? 'keyA' : 'keyB'}...';
         final hit = await _verifyCandidates(
-            sector, pair.$1 == 0 ? 2 : 1, cands, use2015: true);
+          sector,
+          pair.$1 == 0 ? 2 : 1,
+          cands,
+          use2015: true,
+        );
         if (hit != null) {
           if (pair.$1 == 0) {
             sectorKeys[sector].hasKeyA = true;
@@ -2705,7 +3106,8 @@ class _IcTabState extends State<IcTab> {
             sectorKeys[sector].keyB = hit;
           }
           LogService.instance.log(
-              '[解卡] 后门恢复 扇区$sector ${pair.$1 == 0 ? 'keyA' : 'keyB'} 命中 key=$hit');
+            '[解卡] 后门恢复 扇区$sector ${pair.$1 == 0 ? 'keyA' : 'keyB'} 命中 key=$hit',
+          );
         }
         crackTick.value++;
         _appendKeysFromSectors(sectorKeys);
@@ -2715,7 +3117,8 @@ class _IcTabState extends State<IcTab> {
     for (var s = 0; s < 16; s++) {
       if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
         missing.add(
-            '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
+          '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})',
+        );
       }
     }
     if (missing.isEmpty) {
@@ -2723,7 +3126,8 @@ class _IcTabState extends State<IcTab> {
       _toast('破解成功');
     } else {
       LogService.instance.log(
-          '[解卡] 后门恢复完成, 未破: ${missing.join(', ')} (候选验证失败, 见上方[解卡]日志)');
+        '[解卡] 后门恢复完成, 未破: ${missing.join(', ')} (候选验证失败, 见上方[解卡]日志)',
+      );
       progress.value = '解卡片：后门恢复完成，部分扇区密钥未找到';
       _toast('部分扇区密钥未找到（已写入找到的密钥）');
     }
@@ -2742,15 +3146,17 @@ class _IcTabState extends State<IcTab> {
     required void Function() checkStop,
   }) async {
     final pairs = await _collectHardnestedData(
-        eSector: eSector,
-        eKeyType: eKeyType,
-        eKeyHex: eKeyHex,
-        sector: sector,
-        targetType: targetType,
-        progress: progress,
-        checkStop: checkStop);
+      eSector: eSector,
+      eKeyType: eKeyType,
+      eKeyHex: eKeyHex,
+      sector: sector,
+      targetType: targetType,
+      progress: progress,
+      checkStop: checkStop,
+    );
     final buf = _buildHardNestedBuf(uidInt, pairs);
-    progress.value = '解卡片：本地 Hardnested 计算扇区$sector ${targetType.label}\n可能需要几分钟，请勿断开设备...';
+    progress.value =
+        '解卡片：本地 Hardnested 计算扇区$sector ${targetType.label}\n可能需要几分钟，请勿断开设备...';
     // 可杀 isolate：轮询停止标记，点停止立即终止 C 计算
     final job = NativeRecovery.hardNestedStart(buf);
     var key = 0;
@@ -2765,18 +3171,23 @@ class _IcTabState extends State<IcTab> {
     }
     if (key == 0) {
       LogService.instance.log(
-          '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算未找到密钥(候选空间缩减不足或采集质量差), 该扇区放弃');
+        '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算未找到密钥(候选空间缩减不足或采集质量差), 该扇区放弃',
+      );
       return null;
     }
     final keyHex = key.toRadixString(16).padLeft(12, '0');
     LogService.instance.log(
-        '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算找到密钥=$keyHex');
+      '[解卡] 扇区$sector ${targetType.label}: 本地Hardnested计算找到密钥=$keyHex',
+    );
     return keyHex;
   }
 
   /// PM3 nonce 缓冲：6 字节头（uid 大端 + 2 占位）+ 每条 9 字节（nt/ntEnc/par），
   /// 与 native hardnested.c read_nonces 格式对齐
-  Uint8List _buildHardNestedBuf(int uidInt, List<Mf1AcquireHardNestedRes> pairs) {
+  Uint8List _buildHardNestedBuf(
+    int uidInt,
+    List<Mf1AcquireHardNestedRes> pairs,
+  ) {
     final buf = Uint8List(6 + pairs.length * 9);
     final bd = ByteData(buf.length);
     bd.setUint32(0, uidInt & 0xFFFFFFFF);
@@ -2801,8 +3212,25 @@ class _IcTabState extends State<IcTab> {
     required void Function() checkStop,
   }) async {
     const sumWhitelist = {
-      0, 32, 56, 64, 80, 96, 104, 112, 120, 128,
-      136, 144, 152, 160, 176, 192, 200, 224, 256
+      0,
+      32,
+      56,
+      64,
+      80,
+      96,
+      104,
+      112,
+      120,
+      128,
+      136,
+      144,
+      152,
+      160,
+      176,
+      192,
+      200,
+      224,
+      256,
     };
     final eKey = _hex(eKeyHex);
     final seen = List<bool>.filled(256, false);
@@ -2815,13 +3243,15 @@ class _IcTabState extends State<IcTab> {
       progress.value =
           '破解密钥：该卡片为国产兼容卡\n正在获取扇区：$sector ${targetType.label}的数据.\n已获取$count/256个有效数据...';
       final data = await _dev.cmdMf1AcquireHardNested(
-          block: eSector * 4,
-          keyType: eKeyType,
-          key: eKey,
-          targetBlock: sector * 4,
-          targetKeyType: targetType);
+        block: eSector * 4,
+        keyType: eKeyType,
+        key: eKey,
+        targetBlock: sector * 4,
+        targetKeyType: targetType,
+      );
       LogService.instance.log(
-          '[_collectHardnestedData] sector=$sector ${targetType.label} batch=${data.length} uniq=$count');
+        '[_collectHardnestedData] sector=$sector ${targetType.label} batch=${data.length} uniq=$count',
+      );
       pairs.addAll(data);
       for (final a in data) {
         final nt = _bytesInt(a.nt);
@@ -2830,7 +3260,9 @@ class _IcTabState extends State<IcTab> {
         if (!seen[hb]) {
           seen[hb] = true;
           count++;
-          sum += Crypto1.evenParity32((nt & 0xff000000) | ((a.par >> 4) & 0x08));
+          sum += Crypto1.evenParity32(
+            (nt & 0xff000000) | ((a.par >> 4) & 0x08),
+          );
         }
         final hb2 = (ntEnc >> 24) & 255;
         if (!seen[hb2]) {
@@ -2843,7 +3275,8 @@ class _IcTabState extends State<IcTab> {
         if (!sumWhitelist.contains(sum) && attempts < 3) {
           attempts++;
           LogService.instance.log(
-              '[解卡] 扇区$sector ${targetType.label}: 采集质量差(sum8=$sum 不在白名单), 重采($attempts/3)');
+            '[解卡] 扇区$sector ${targetType.label}: 采集质量差(sum8=$sum 不在白名单), 重采($attempts/3)',
+          );
           seen.fillRange(0, 256, false);
           count = 0;
           sum = 0;
@@ -2852,10 +3285,12 @@ class _IcTabState extends State<IcTab> {
         }
         if (!sumWhitelist.contains(sum)) {
           LogService.instance.log(
-              '[解卡] 扇区$sector ${targetType.label}: 重采3次sum8仍异常($sum), 放行上传(可能影响恢复成功率)');
+            '[解卡] 扇区$sector ${targetType.label}: 重采3次sum8仍异常($sum), 放行上传(可能影响恢复成功率)',
+          );
         }
         LogService.instance.log(
-            '[_collectHardnestedData] sector=$sector sum=$sum attempts=$attempts done, pairs=${pairs.length}');
+          '[_collectHardnestedData] sector=$sector sum=$sum attempts=$attempts done, pairs=${pairs.length}',
+        );
         return pairs;
       }
     }
@@ -2871,7 +3306,8 @@ class _IcTabState extends State<IcTab> {
       final count = await _dev.cmdMf1GetDetectionCount();
       if (count < 2) {
         throw Exception(
-            '侦测数据不足，请将设备当做门禁卡至门禁处刷卡，刷卡不少于两次\n（次数越多成功率越高，次数过多会增加计算时间）');
+          '侦测数据不足，请将设备当做门禁卡至门禁处刷卡，刷卡不少于两次\n（次数越多成功率越高，次数过多会增加计算时间）',
+        );
       }
       if (!mounted) return;
       progress = ValueNotifier<String>('读取数据： 0 / $count');
@@ -2879,7 +3315,10 @@ class _IcTabState extends State<IcTab> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => CrackProgressDialog(
-            title: '算密钥...', progress: progress, onCancel: null),
+          title: '算密钥...',
+          progress: progress,
+          onCancel: null,
+        ),
       );
       final logs = <Mf1DetectionLog>[];
       while (logs.length < count) {
@@ -2892,7 +3331,9 @@ class _IcTabState extends State<IcTab> {
       for (final l in logs) {
         groups
             .putIfAbsent(
-                '${_hexStr(l.uid)}-${l.block}-${l.isKeyB ? 1 : 0}', () => [])
+              '${_hexStr(l.uid)}-${l.block}-${l.isKeyB ? 1 : 0}',
+              () => [],
+            )
             .add(l);
       }
 
@@ -2965,8 +3406,7 @@ class _IcTabState extends State<IcTab> {
       for (final k in added) {
         if (!uniq.contains(k)) uniq.add(k);
       }
-      final fresh =
-          uniq.where((k) => !_keys.contains(k)).toList();
+      final fresh = uniq.where((k) => !_keys.contains(k)).toList();
       if (fresh.isEmpty) {
         _toast('算得密钥均已存在');
         return;
@@ -3011,7 +3451,10 @@ class _IcTabState extends State<IcTab> {
           _toast('dump 大小无效：${data.length} 字节');
           return;
         }
-        lines = List.generate(64, (b) => _hexStr(data.sublist(b * 16, b * 16 + 16)));
+        lines = List.generate(
+          64,
+          (b) => _hexStr(data.sublist(b * 16, b * 16 + 16)),
+        );
       }
       if (lines.length < 64) {
         _toast('数据行数不足 64');
@@ -3053,18 +3496,50 @@ class _IcTabState extends State<IcTab> {
 
   Future<void> _manageData() async {
     final names = await _app.storage.getCardNames();
-    if (names.isEmpty) {
-      _toast('暂无已保存的 Dump');
-      return;
-    }
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
         child: ListView(
           children: [
-            const ListTile(title: Text('已保存的 Dump', style: TextStyle(fontWeight: FontWeight.w600))),
-            ...names.entries.map((e) => ListTile(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  ActionButton(
+                    label: '导入文件',
+                    icon: Icons.download,
+                    color: Colors.grey,
+                    onTap: _importCard,
+                  ),
+                  const SizedBox(width: 8),
+                  ActionButton(
+                    label: '导出文件',
+                    icon: Icons.upload,
+                    color: Colors.grey,
+                    onTap: _exportCard,
+                  ),
+                ],
+              ),
+            ),
+            const ListTile(
+              title: Text(
+                '已保存的 Dump',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (names.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  '暂无已保存的 Dump',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              )
+            else
+              ...names.entries.map(
+                (e) => ListTile(
                   title: Text(e.key),
                   onTap: () async {
                     Navigator.pop(ctx);
@@ -3082,7 +3557,11 @@ class _IcTabState extends State<IcTab> {
                         },
                       ),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.grey, size: 18),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.grey,
+                          size: 18,
+                        ),
                         tooltip: '删除',
                         onPressed: () async {
                           await _app.storage.delCard(e.key);
@@ -3092,7 +3571,8 @@ class _IcTabState extends State<IcTab> {
                       ),
                     ],
                   ),
-                )),
+                ),
+              ),
           ],
         ),
       ),
@@ -3103,7 +3583,12 @@ class _IcTabState extends State<IcTab> {
   Future<void> _loadDump(String name) async {
     try {
       final text = await _app.storage.getCard(name);
-      final lines = text.trim().split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final lines = text
+          .trim()
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
       if (lines.length < 64) {
         _toast('数据行数不足 64');
         return;
@@ -3133,60 +3618,68 @@ class _IcTabState extends State<IcTab> {
           children: [
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('更多功能',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              child: Text(
+                '更多功能',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
             ),
             const Divider(height: 1),
             ListTile(
-                leading: const Icon(Icons.cleaning_services),
-                title: const Text('格式化'),
-                subtitle: const Text('擦除全部扇区（UID 卡免密写）'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _formatCard();
-                }),
+              leading: const Icon(Icons.cleaning_services),
+              title: const Text('格式化'),
+              subtitle: const Text('擦除全部扇区（UID 卡免密写）'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _formatCard();
+              },
+            ),
             ListTile(
-                leading: const Icon(Icons.edit),
-                title: const Text('修改卡号'),
-                subtitle: const Text('写入新的 UID/SAK/ATQA'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _changeUid();
-                }),
+              leading: const Icon(Icons.edit),
+              title: const Text('修改卡号'),
+              subtitle: const Text('写入新的 UID/SAK/ATQA'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _changeUid();
+              },
+            ),
             ListTile(
-                leading: const Icon(Icons.lock),
-                title: const Text('锁UFUID'),
-                subtitle: const Text('锁定 UFUID 卡（不可逆）'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _lockUfuidFlow();
-                }),
+              leading: const Icon(Icons.lock),
+              title: const Text('锁UFUID'),
+              subtitle: const Text('锁定 UFUID 卡（不可逆）'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _lockUfuidFlow();
+              },
+            ),
             ListTile(
-                leading: const Icon(Icons.restart_alt),
-                title: const Text('重置UID'),
-                subtitle: const Text('重置 UID 卡为出厂数据'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _runChip(_dev.wipeUid);
-                }),
+              leading: const Icon(Icons.restart_alt),
+              title: const Text('重置UID'),
+              subtitle: const Text('重置 UID 卡为出厂数据'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _runChip(_dev.wipeUid);
+              },
+            ),
             ListTile(
-                leading: const Icon(Icons.style),
-                title: const Text('双卡破解'),
-                subtitle: const Text('使用两张卡片破解扇区密钥'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _dualCrack();
-                }),
+              leading: const Icon(Icons.style),
+              title: const Text('双卡破解'),
+              subtitle: const Text('使用两张卡片破解扇区密钥'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _dualCrack();
+              },
+            ),
             const Divider(height: 1),
             ListTile(
-                leading: const Icon(Icons.analytics_outlined),
-                title: const Text('电梯卡分析'),
-                subtitle: const Text('云端分析电梯卡数据结构'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _liftAnalyze();
-                }),
+              leading: const Icon(Icons.analytics_outlined),
+              title: const Text('电梯卡分析'),
+              subtitle: const Text('云端分析电梯卡数据结构'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _liftAnalyze();
+              },
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -3195,17 +3688,17 @@ class _IcTabState extends State<IcTab> {
   }
 
   /// 通用卡操作包装（连接检查 + 进度）
-  Future<bool> _runChip(Future<void> Function() task,
-      {String successText = '操作完成'}) async {
+  Future<bool> _runChip(
+    Future<void> Function() task, {
+    String successText = '操作完成',
+  }) async {
     try {
       if (!_app.connected) throw Exception('设备未连接');
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const CrackProgressDialog(
-          title: '执行中...',
-          onCancel: null,
-        ),
+        builder: (ctx) =>
+            const CrackProgressDialog(title: '执行中...', onCancel: null),
       );
       try {
         await task();
@@ -3227,31 +3720,47 @@ class _IcTabState extends State<IcTab> {
       builder: (ctx) => AlertDialog(
         title: const Text('确定要检测UFUID卡吗？', style: TextStyle(fontSize: 16)),
         content: const Text(
-            '即将检测该卡是否支持UFUID卡锁卡指令，继续吗?\n'
-            'tips.1 UFUID卡锁定前功能和UID卡一致.\n'
-            'tips.2 UFUID卡锁定后变成普通卡,且操作不可逆.\n'
-            'tips.3 UFUID卡锁定需二次确认,请放心操作.'),
+          '即将检测该卡是否支持UFUID卡锁卡指令，继续吗?\n'
+          'tips.1 UFUID卡锁定前功能和UID卡一致.\n'
+          'tips.2 UFUID卡锁定后变成普通卡,且操作不可逆.\n'
+          'tips.3 UFUID卡锁定需二次确认,请放心操作.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
     if (askDetect != true || !mounted) return;
-    final detected = await _runChip(_dev.detectUfuid,
-        successText: '检测通过：该卡为UFUID卡');
+    final detected = await _runChip(
+      _dev.detectUfuid,
+      successText: '检测通过：该卡为UFUID卡',
+    );
     if (!detected || !mounted) return;
     final askLock = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('确定要锁定UFUID吗？', style: TextStyle(fontSize: 16)),
         content: const Text(
-            '发现UFUID卡,即将锁定该卡,继续吗?\n'
-            'tips.1 UFUID卡锁定前功能和UID卡一致.\n'
-            'tips.2 UFUID卡锁定后变成普通卡,且操作不可逆.'),
+          '发现UFUID卡,即将锁定该卡,继续吗?\n'
+          'tips.1 UFUID卡锁定前功能和UID卡一致.\n'
+          'tips.2 UFUID卡锁定后变成普通卡,且操作不可逆.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
@@ -3267,8 +3776,14 @@ class _IcTabState extends State<IcTab> {
         title: const Text('格式化卡片', style: TextStyle(fontSize: 16)),
         content: const Text('将擦除全部扇区数据（保留 UID），操作不可恢复。确认执行？'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
@@ -3286,13 +3801,15 @@ class _IcTabState extends State<IcTab> {
     final cracked = await _crackCard();
     final keys = <int, (Uint8List?, Uint8List?)>{};
     for (final sk in cracked) {
-      final a = (sk.hasKeyA &&
+      final a =
+          (sk.hasKeyA &&
               sk.keyA.length == 12 &&
               sk.keyA != 'ffffffffffff' &&
               sk.keyA != '000000000000')
           ? _hex(sk.keyA)
           : null;
-      final b = (sk.hasKeyB &&
+      final b =
+          (sk.hasKeyB &&
               sk.keyB.length == 12 &&
               sk.keyB != 'ffffffffffff' &&
               sk.keyB != '000000000000')
@@ -3343,10 +3860,8 @@ class _IcTabState extends State<IcTab> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const CrackProgressDialog(
-        title: '格式化中...',
-        onCancel: null,
-      ),
+      builder: (ctx) =>
+          const CrackProgressDialog(title: '格式化中...', onCancel: null),
     );
     final failedBlocks = <int>[];
     try {
@@ -3368,7 +3883,11 @@ class _IcTabState extends State<IcTab> {
           for (final (kt, key) in tryKeys) {
             try {
               await _dev.cmdMf1WriteBlock(
-                  block: block, keyType: kt, key: key, data: _hex(data));
+                block: block,
+                keyType: kt,
+                key: key,
+                data: _hex(data),
+              );
               wrote = true;
               break;
             } on DeviceException {
@@ -3382,8 +3901,7 @@ class _IcTabState extends State<IcTab> {
       if (failedBlocks.isEmpty) {
         _toast('格式化完成');
       } else {
-        LogService.instance.log(
-            '[格式化] ACL受限未写入块: ${failedBlocks.join(', ')}');
+        LogService.instance.log('[格式化] ACL受限未写入块: ${failedBlocks.join(', ')}');
         _toast('格式化完成，${failedBlocks.length} 个块 ACL 受限未重置');
       }
     } catch (e) {
@@ -3396,16 +3914,18 @@ class _IcTabState extends State<IcTab> {
   Future<void> _changeUid() async {
     final uid = await showDialog<String>(
       context: context,
-      builder: (ctx) => const TextInputDialog(title: '修改卡号', hint: '8 位十六进制 UID'),
+      builder: (ctx) =>
+          const TextInputDialog(title: '修改卡号', hint: '8 位十六进制 UID'),
     );
     if (uid == null || uid.trim().isEmpty) return;
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
       await _dev.writeUid(
-          uid: uid.trim(),
-          sak: _sakCtrl.text.trim(),
-          atqa: _atqaCtrl.text.trim(),
-          keysText: _keyCtrl.text);
+        uid: uid.trim(),
+        sak: _sakCtrl.text.trim(),
+        atqa: _atqaCtrl.text.trim(),
+        keysText: _keyCtrl.text,
+      );
       _toast('卡号写入完成');
       // 刷新当前卡号
       await _readCard();
@@ -3439,8 +3959,14 @@ class _IcTabState extends State<IcTab> {
           title: const Text('双卡破解', style: TextStyle(fontSize: 16)),
           content: const Text('已读取卡1。请放上卡2（目标卡）后点击确定'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('确定'),
+            ),
           ],
         ),
       );
@@ -3451,19 +3977,18 @@ class _IcTabState extends State<IcTab> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => CrackProgressDialog(
-          title: '双卡破解中...',
-          onCancel: () {},
-        ),
+        builder: (ctx) =>
+            CrackProgressDialog(title: '双卡破解中...', onCancel: () {}),
       );
       try {
         // 用卡1的已知密钥对卡2扇区 0 做静态嵌套，校验两张卡
         final checkRes = await _dev.cmdMf1AcquireStaticNested(
-            block: 0,
-            keyType: KeyType.keyA,
-            key: key,
-            targetBlock: 0,
-            targetKeyType: KeyType.keyA);
+          block: 0,
+          keyType: KeyType.keyA,
+          key: key,
+          targetBlock: 0,
+          targetKeyType: KeyType.keyA,
+        );
         if (checkRes.atks.length < 2 ||
             checkRes.atks[0].$2.join() != checkRes.atks[1].$2.join()) {
           throw Exception('破解失败，只有第一、三代无漏洞卡支持双卡破解！');
@@ -3473,11 +3998,12 @@ class _IcTabState extends State<IcTab> {
           final atks = <Map<String, int>>[];
           for (var i = 0; i < 4; i++) {
             final res = await _dev.cmdMf1AcquireStaticNested(
-                block: 0,
-                keyType: KeyType.keyA,
-                key: key,
-                targetBlock: sector * 4,
-                targetKeyType: KeyType.keyA);
+              block: 0,
+              keyType: KeyType.keyA,
+              key: key,
+              targetBlock: sector * 4,
+              targetKeyType: KeyType.keyA,
+            );
             if (res.atks.isNotEmpty) {
               atks.add({
                 'nt1': _bytesInt(res.atks.first.$1),
@@ -3490,10 +4016,16 @@ class _IcTabState extends State<IcTab> {
               ? NativeRecovery.staticNested(
                   uid: uid1,
                   keyType: 96,
-                  nt0: atks[0]['nt1']!, nt0Enc: atks[0]['nt2']!,
-                  nt1: atks[1]['nt1']!, nt1Enc: atks[1]['nt2']!)
+                  nt0: atks[0]['nt1']!,
+                  nt0Enc: atks[0]['nt2']!,
+                  nt1: atks[1]['nt1']!,
+                  nt1Enc: atks[1]['nt2']!,
+                )
               : await Crypto1.staticNestedInIsolate(
-                  uid: uid1, keyType: 96, atks: atks);
+                  uid: uid1,
+                  keyType: 96,
+                  atks: atks,
+                );
           if (recovered.isNotEmpty) {
             results.add(_int6Hex(recovered.first));
           }
@@ -3522,7 +4054,8 @@ class _IcTabState extends State<IcTab> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const CrackProgressDialog(title: '云端分析中...', onCancel: null),
+      builder: (ctx) =>
+          const CrackProgressDialog(title: '云端分析中...', onCancel: null),
     );
     try {
       final dump = _app.card.toDumpText();
@@ -3537,7 +4070,10 @@ class _IcTabState extends State<IcTab> {
             child: Text(result, style: const TextStyle(fontSize: 12)),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('关闭'),
+            ),
           ],
         ),
       );
@@ -3579,9 +4115,13 @@ class _IcTabState extends State<IcTab> {
                       children: [
                         const Padding(
                           padding: EdgeInsets.only(top: 6, left: 4),
-                          child: Text('IC密钥：',
-                              style: TextStyle(
-                                  fontSize: 13, color: Color(0xFF000000))),
+                          child: Text(
+                            'IC密钥：',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF000000),
+                            ),
+                          ),
                         ),
                         Expanded(
                           child: TextField(
@@ -3589,25 +4129,28 @@ class _IcTabState extends State<IcTab> {
                             maxLines: 6,
                             minLines: 4,
                             textAlign: TextAlign.center,
-                             style: TextStyle(
-                                 fontFamily: 'monospace',
-                                 fontSize: 13,
-                                 color: _keysValid
-                                     ? const Color(0xFF333333)
-                                     : Colors.red),
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 13,
+                              color: _keysValid
+                                  ? const Color(0xFF333333)
+                                  : Colors.red,
+                            ),
                             decoration: const InputDecoration(
                               hintText: '一行一个密钥,密钥应为12位16进制数',
-                              hintStyle:
-                                  TextStyle(color: Color(0xFF999999), fontSize: 12),
+                              hintStyle: TextStyle(
+                                color: Color(0xFF999999),
+                                fontSize: 12,
+                              ),
                               border: InputBorder.none,
                               isDense: true,
                             ),
-                             onChanged: (t) {
-                               _app.card.keys = t;
-                               setState(() => _validateKeys(t));
-                             },
-                            ),
+                            onChanged: (t) {
+                              _app.card.keys = t;
+                              setState(() => _validateKeys(t));
+                            },
                           ),
+                        ),
                         Column(
                           children: [
                             IconButton(
@@ -3638,40 +4181,63 @@ class _IcTabState extends State<IcTab> {
                   child: Row(
                     children: [
                       _infoField(
-                          Text(_isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
-                               style: TextStyle(
-                                   fontSize: 8,
-                                   color: _isStandardM1
-                                       ? Colors.green
-                                       : const Color(0xFFE53935))),
-                          _uidCtrl, '卡号应为8位16进制数',
-                           validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
-                           okColor: '#9933FF',
-                           fieldWidth: 70),
-                       const SizedBox(width: 4),
-                       _infoField(
- const Text('SAK:',
-                                style: TextStyle(
-                                    fontSize: 8, color: Color(0xFF666666))),
-                           _sakCtrl, '08',
-                           validRegex: r'^([0-9A-Fa-f]{2}\s*)+$',
-                           fieldWidth: 20),
-                       const SizedBox(width: 4),
-                       _infoField(
- const Text('ATQA:',
-                                style: TextStyle(
-                                    fontSize: 8, color: Color(0xFF666666))),
-                           _atqaCtrl, '0004',
-                           validRegex: r'^([0-9A-Fa-f]{4}\s*)+$',
-                           fieldWidth: 40),
+                        Text(
+                          _isStandardM1 ? '标准M1卡:' : '非标准M1卡:',
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: _isStandardM1
+                                ? Colors.green
+                                : const Color(0xFFE53935),
+                          ),
+                        ),
+                        _uidCtrl,
+                        '卡号应为8位16进制数',
+                        validRegex: r'^([0-9A-Fa-f]{8}\s*)+$',
+                        okColor: '#9933FF',
+                        fieldWidth: 70,
+                      ),
+                      const SizedBox(width: 4),
+                      _infoField(
+                        const Text(
+                          'SAK:',
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: Color(0xFF666666),
+                          ),
+                        ),
+                        _sakCtrl,
+                        '08',
+                        validRegex: r'^([0-9A-Fa-f]{2}\s*)+$',
+                        fieldWidth: 20,
+                      ),
+                      const SizedBox(width: 4),
+                      _infoField(
+                        const Text(
+                          'ATQA:',
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: Color(0xFF666666),
+                          ),
+                        ),
+                        _atqaCtrl,
+                        '0004',
+                        validRegex: r'^([0-9A-Fa-f]{4}\s*)+$',
+                        fieldWidth: 40,
+                      ),
                       const SizedBox(width: 4),
                       if (_atsCtrl.text.isNotEmpty)
                         _infoField(
-const Text('ATS:',
-                                 style: TextStyle(
-                                     fontSize: 8, color: Color(0xFF666666))),
-                            _atsCtrl, '',
-                            fieldWidth: 120),
+                          const Text(
+                            'ATS:',
+                            style: TextStyle(
+                              fontSize: 8,
+                              color: Color(0xFF666666),
+                            ),
+                          ),
+                          _atsCtrl,
+                          '',
+                          fieldWidth: 120,
+                        ),
                     ],
                   ),
                 ),
@@ -3700,10 +4266,9 @@ const Text('ATS:',
               _sideBtn('双卡破解', Icons.contactless, _crackWith2Cards, primary),
               _sideBtn('读卡槽', Icons.memory, _readSlot, primary),
               _sideBtn('写卡槽', Icons.memory, _writeSlot, primary),
-              _sideBtn('存卡库', Icons.library_add, _saveToLibrary, primary),
+              _sideBtn('导出', Icons.library_add, _exportToLibrary, primary),
+              _sideBtn('导入', Icons.library_books, _importFromLibrary, primary),
               _sideBtn('算密钥', Icons.calculate, _mfkey, primary),
-              _sideBtn('导入', Icons.download, _importCard, primary),
-              _sideBtn('导出', Icons.upload, _exportCard, primary),
               _sideBtn('管理数据', Icons.folder, _manageData, primary),
               _sideBtn('更多功能', Icons.more_horiz, _moreFeatures, primary),
               const SizedBox(height: 8),
@@ -3732,14 +4297,20 @@ const Text('ATS:',
           children: [
             for (var i = 0; i < 8; i++)
               ChoiceChip(
-                label: Text('卡槽 ${i + 1}', style: const TextStyle(fontSize: 12)),
+                label: Text(
+                  '卡槽 ${i + 1}',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 selected: i == _slotPage,
                 onSelected: (_) => Navigator.pop(ctx, i),
               ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
         ],
       ),
     );
@@ -3770,9 +4341,11 @@ const Text('ATS:',
         try {
           final block = await _dev.cmdMf1EmuReadBlock(sector * 4, 4);
           if (block.length >= 64) {
-            final blocks = List<BlockData>.generate(4, (i) => BlockData(
-                data: _hexStr(
-                    block.sublist(i * 16, (i + 1) * 16))));
+            final blocks = List<BlockData>.generate(
+              4,
+              (i) =>
+                  BlockData(data: _hexStr(block.sublist(i * 16, (i + 1) * 16))),
+            );
             sectors[sector] = SectorData(blocks: blocks);
             // 从 trailer(块3) 提取密钥回填（对齐小程序 btnEmuRead 的 btnKeysGrab）
             final kA = _hexStr(block.sublist(48, 54));
@@ -3809,15 +4382,21 @@ const Text('ATS:',
   bool get _isStandardM1 => _sakCtrl.text.trim() == '08';
 
   /// 对齐小程序卡片信息：前缀标签 + 无边框输入框 + 实时格式校验变色
-  Widget _infoField(Widget prefix, TextEditingController ctrl, String hint,
-      {String? validRegex, String? okColor, double fieldWidth = 60}) {
+  Widget _infoField(
+    Widget prefix,
+    TextEditingController ctrl,
+    String hint, {
+    String? validRegex,
+    String? okColor,
+    double fieldWidth = 60,
+  }) {
     final ok = validRegex == null || RegExp(validRegex).hasMatch(ctrl.text);
     final fail = const Color(0xFFE53935);
     final Color? textColor = !ok
         ? fail
         : (okColor != null
-            ? Color(int.parse(okColor.replaceFirst('#', '0xFF')))
-            : null);
+              ? Color(int.parse(okColor.replaceFirst('#', '0xFF')))
+              : null);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Row(
@@ -3831,10 +4410,15 @@ const Text('ATS:',
               controller: ctrl,
               onChanged: (_) => setState(() {}),
               style: TextStyle(
-                   fontSize: 8, color: textColor ?? const Color(0xFF333333)),
+                fontSize: 8,
+                color: textColor ?? const Color(0xFF333333),
+              ),
               decoration: InputDecoration(
                 hintText: hint,
-                hintStyle: const TextStyle(color: Color(0xFF999999), fontSize: 8),
+                hintStyle: const TextStyle(
+                  color: Color(0xFF999999),
+                  fontSize: 8,
+                ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 4),
                 border: InputBorder.none,
@@ -3847,17 +4431,27 @@ const Text('ATS:',
     );
   }
 
-  Widget _sideBtn(String label, IconData icon, VoidCallback? onTap, Color color) {
+  Widget _sideBtn(
+    String label,
+    IconData icon,
+    VoidCallback? onTap,
+    Color color,
+  ) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: SizedBox(
         width: 96,
         child: ActionButton(
-            label: label,
-            icon: icon,
-            color: color,
-            onTap: onTap,
-            enabled: _app.connected || label == '导入' || label == '管理数据'),
+          label: label,
+          icon: icon,
+          color: color,
+          onTap: onTap,
+          enabled:
+              _app.connected ||
+              label == '导入' ||
+              label == '导出' ||
+              label == '管理数据',
+        ),
       ),
     );
   }
@@ -3869,8 +4463,8 @@ const Text('ATS:',
       context: context,
       backgroundColor: Colors.white,
       isScrollControlled: true,
-      builder: (ctx) => KeyFileSheet(
-          storage: _app.storage, cardUid: _app.card.uid),
+      builder: (ctx) =>
+          KeyFileSheet(storage: _app.storage, cardUid: _app.card.uid),
     );
     if (sel == null || !mounted) return;
     setState(() {
@@ -3915,8 +4509,10 @@ class _SectorTableState extends State<_SectorTable> {
   }
 
   Future<void> _editSector(int s) async {
-    final ctrls =
-        List.generate(4, (b) => TextEditingController(text: _blockHex(s, b)));
+    final ctrls = List.generate(
+      4,
+      (b) => TextEditingController(text: _blockHex(s, b)),
+    );
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -3929,15 +4525,24 @@ class _SectorTableState extends State<_SectorTable> {
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(
                   children: [
-                    Text('块$b', style: const TextStyle(fontSize: 12, color: Color(0xFF666666))),
+                    Text(
+                      '块$b',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: TextField(
                         controller: ctrls[b],
                         style: TextStyle(
-                            fontSize: 9,
-                            fontFamily: 'monospace',
-                            color: b == 3 ? const Color(0xFF1E88E5) : const Color(0xFF333333)),
+                          fontSize: 9,
+                          fontFamily: 'monospace',
+                          color: b == 3
+                              ? const Color(0xFF1E88E5)
+                              : const Color(0xFF333333),
+                        ),
                         maxLines: 1,
                         decoration: InputDecoration(
                           isDense: true,
@@ -3952,15 +4557,23 @@ class _SectorTableState extends State<_SectorTable> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('保存')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('保存'),
+          ),
         ],
       ),
     );
     var changed = false;
     if (saved == true) {
       for (var b = 0; b < 4; b++) {
-        final clean = ctrls[b].text.replaceAll(RegExp(r'[\s-]'), '').toLowerCase();
+        final clean = ctrls[b].text
+            .replaceAll(RegExp(r'[\s-]'), '')
+            .toLowerCase();
         if (RegExp(r'^[0-9a-f]{32}$').hasMatch(clean)) {
           if (widget.card.sectors[s].blocks[b].data != clean) {
             widget.card.sectors[s].blocks[b].data = clean;
@@ -3982,9 +4595,18 @@ class _SectorTableState extends State<_SectorTable> {
         TextSpan(
           style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
           children: [
-            TextSpan(text: hex.substring(0, 12), style: const TextStyle(color: Color(0xFF4CAF50))),
-            TextSpan(text: hex.substring(12, 20), style: const TextStyle(color: Color(0xFFFF9800))),
-            TextSpan(text: hex.substring(20), style: const TextStyle(color: Color(0xFF4CAF50))),
+            TextSpan(
+              text: hex.substring(0, 12),
+              style: const TextStyle(color: Color(0xFF4CAF50)),
+            ),
+            TextSpan(
+              text: hex.substring(12, 20),
+              style: const TextStyle(color: Color(0xFFFF9800)),
+            ),
+            TextSpan(
+              text: hex.substring(20),
+              style: const TextStyle(color: Color(0xFF4CAF50)),
+            ),
           ],
         ),
         maxLines: 1,
@@ -3996,15 +4618,28 @@ class _SectorTableState extends State<_SectorTable> {
         TextSpan(
           style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
           children: [
-            TextSpan(text: hex.substring(0, 8), style: const TextStyle(color: Color(0xFF9C27B0))),
-            TextSpan(text: hex.substring(8, 16), style: const TextStyle(color: Color(0xFF333333))),
-            TextSpan(text: hex.substring(16), style: const TextStyle(color: Color(0xFFFFEB3B))),
+            TextSpan(
+              text: hex.substring(0, 8),
+              style: const TextStyle(color: Color(0xFF9C27B0)),
+            ),
+            TextSpan(
+              text: hex.substring(8, 16),
+              style: const TextStyle(color: Color(0xFF333333)),
+            ),
+            TextSpan(
+              text: hex.substring(16),
+              style: const TextStyle(color: Color(0xFFFFEB3B)),
+            ),
           ],
         ),
         maxLines: 1,
       );
     }
-    return Text(hex, maxLines: 1, style: const TextStyle(fontSize: 12, fontFamily: 'monospace'));
+    return Text(
+      hex,
+      maxLines: 1,
+      style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+    );
   }
 
   @override
@@ -4041,9 +4676,13 @@ class _SectorTableState extends State<_SectorTable> {
                               : const Color(0xFFBBBBBB),
                         ),
                         const SizedBox(width: 6),
-                        Text('扇区 $s',
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(
+                          '扇区 $s',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -4057,9 +4696,13 @@ class _SectorTableState extends State<_SectorTable> {
                         children: [
                           SizedBox(
                             width: 30,
-                            child: Text('块$b',
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.grey[500])),
+                            child: Text(
+                              '块$b',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey[500],
+                              ),
+                            ),
                           ),
                           Expanded(
                             child: SizedBox(
@@ -4113,5 +4756,4 @@ int _bytesInt(Uint8List b) {
   return ByteData.sublistView(padded).getUint32(0);
 }
 
-String _int6Hex(int v) =>
-    v.toRadixString(16).padLeft(12, '0').substring(0, 12);
+String _int6Hex(int v) => v.toRadixString(16).padLeft(12, '0').substring(0, 12);

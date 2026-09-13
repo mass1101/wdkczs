@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../../models/enums.dart';
 import '../../models/models.dart';
+import '../../services/card_library.dart';
 import '../../services/device_service.dart';
 import '../../state/app_controller.dart';
 import '../dialogs/text_input_dialog.dart';
@@ -67,14 +68,20 @@ class _IdTabState extends State<IdTab> {
           children: [
             for (var i = 0; i < 8; i++)
               ChoiceChip(
-                label: Text('卡槽 ${i + 1}', style: const TextStyle(fontSize: 12)),
+                label: Text(
+                  '卡槽 ${i + 1}',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 selected: i == _slotPage,
                 onSelected: (_) => Navigator.pop(ctx, i),
               ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
         ],
       ),
     );
@@ -100,7 +107,9 @@ class _IdTabState extends State<IdTab> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
   }
 
   void _syncHex(String dec) {
@@ -124,12 +133,14 @@ class _IdTabState extends State<IdTab> {
   Future<void> _readCard() async {
     try {
       await _dev.assureDeviceMode(DeviceMode.reader);
-      
+
       // 1. 尝试读取 EM4100
       try {
         final res = await _dev.cmdEm410xScan();
         if (res.id.length != 5) throw DeviceException(1, '未发现卡片');
-        final hex = res.id.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        final hex = res.id
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
         setState(() {
           _hexCtrl.text = hex.toLowerCase();
           _syncDec(hex);
@@ -142,7 +153,7 @@ class _IdTabState extends State<IdTab> {
       } on DeviceException catch (e) {
         if (e.status != 96) rethrow; // 96 = invalid param, 继续尝试其他类型
       }
-      
+
       // 2. 尝试读取 HID Prox
       try {
         final res = await _dev.cmdHidProxScan();
@@ -153,14 +164,15 @@ class _IdTabState extends State<IdTab> {
           _syncDec(hex);
           _app.idCard.setCard(hex);
           _cardType = 'HID Prox';
-          _cardTypeDetail = 'format: ${res.format}, FC: ${res.fc}, CN: ${res.cn}, OEM: ${res.oem}';
+          _cardTypeDetail =
+              'format: ${res.format}, FC: ${res.fc}, CN: ${res.cn}, OEM: ${res.oem}';
         });
         _toast('读到 HID Prox ID：${_app.idCard.idCardDec}');
         return;
       } on DeviceException catch (e) {
         if (e.status != 96) rethrow;
       }
-      
+
       // 3. 都未识别
       setState(() {
         _cardType = '';
@@ -171,7 +183,7 @@ class _IdTabState extends State<IdTab> {
       _toast('读卡失败: $e');
     }
   }
-  
+
   /// 将 HID Prox 数据转换为 hex 字符串
   String _hidProxToHex(HidProxScanRes res) {
     // HID Prox 16-bit format: OEM(2) + FC(4) + CN(2)
@@ -231,7 +243,7 @@ class _IdTabState extends State<IdTab> {
     final hex = _hexCtrl.text.trim().toLowerCase();
     if (hex.isEmpty || !RegExp(r'^[0-9a-f]{10}$').hasMatch(hex)) {
       _toast('请输入有效的 10 位十六进制卡号');
-        return;
+      return;
     }
     final slot = await _pickSlot();
     if (slot == null) return;
@@ -318,13 +330,19 @@ class _IdTabState extends State<IdTab> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const ListTile(
-                  title: Text('已保存 ID 卡',
-                      style: TextStyle(fontWeight: FontWeight.w600))),
+                title: Text(
+                  '已保存 ID 卡',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
               Expanded(
                 child: _cards.isEmpty
                     ? const ListTile(
-                        title: Text('暂无保存的卡片',
-                            style: TextStyle(color: Colors.grey)))
+                        title: Text(
+                          '暂无保存的卡片',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
                     : ListView.builder(
                         shrinkWrap: true,
                         itemCount: _cards.length,
@@ -345,16 +363,19 @@ class _IdTabState extends State<IdTab> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.edit_outlined,
-                                      color: Colors.grey),
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    color: Colors.grey,
+                                  ),
                                   tooltip: '重命名',
                                   onPressed: () async {
                                     final name = await showDialog<String>(
                                       context: context,
                                       builder: (dctx) => TextInputDialog(
-                                          title: '重命名',
-                                          hint: '卡片名称',
-                                          initial: c.name),
+                                        title: '重命名',
+                                        hint: '卡片名称',
+                                        initial: c.name,
+                                      ),
                                     );
                                     if (name == null || name.trim().isEmpty) {
                                       return;
@@ -365,8 +386,10 @@ class _IdTabState extends State<IdTab> {
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete_outline,
-                                      color: Colors.grey),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.grey,
+                                  ),
                                   onPressed: () async {
                                     setState(() => _cards.removeAt(i));
                                     await _app.storage.saveIdCards(_cards);
@@ -396,19 +419,29 @@ class _IdTabState extends State<IdTab> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => TextInputDialog(
-          title: '卡片名称',
-          hint: '请输入卡片名称',
-          initial: '卡${_cards.length + 1}'),
+        title: '卡片名称',
+        hint: '请输入卡片名称',
+        initial: '卡${_cards.length + 1}',
+      ),
     );
     if (name == null) return;
+    final cardName = name.trim().isEmpty ? '卡${_cards.length}' : name.trim();
     setState(() {
-      _cards = [
-        ..._cards,
-        IdCardItem(id: hex, name: name.trim().isEmpty ? '卡${_cards.length}' : name.trim()),
-      ];
+      _cards = [..._cards, IdCardItem(id: hex, name: cardName)];
     });
     await _app.storage.saveIdCards(_cards);
-    _toast('已保存到列表');
+    // 同步导入到卡库：按 UID+卡型去重，已存在则复用原 id 刷新名称
+    final tag = _cardType == 'HID Prox' ? TagType.hidProx : TagType.em4100;
+    final lib = CardLibraryStorage();
+    final cards = await lib.getCards();
+    final idx = cards.indexWhere(
+      (c) => c.tag == tag && c.uid.replaceAll(RegExp(r'[\s-]'), '') == hex,
+    );
+    final card = idx >= 0
+        ? SaveCard(id: cards[idx].id, uid: hex, name: cardName, tag: tag)
+        : SaveCard(uid: hex, name: cardName, tag: tag);
+    await lib.upsertCard(card);
+    _toast('已保存到列表，并导入卡库');
   }
 
   // ========== UI ==========
@@ -436,7 +469,10 @@ class _IdTabState extends State<IdTab> {
                             child: Row(
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFE3F2FD),
                                     borderRadius: BorderRadius.circular(4),
@@ -468,10 +504,18 @@ class _IdTabState extends State<IdTab> {
                             ),
                           ),
                         ],
-                        _numRow('十进制', _decCtrl, '000536875977487',
-                            onChanged: _syncHex),
-                        _numRow('十六进制', _hexCtrl, '0000000000',
-                            onChanged: _syncDec),
+                        _numRow(
+                          '十进制',
+                          _decCtrl,
+                          '000536875977487',
+                          onChanged: _syncHex,
+                        ),
+                        _numRow(
+                          '十六进制',
+                          _hexCtrl,
+                          '0000000000',
+                          onChanged: _syncDec,
+                        ),
                       ],
                     ),
                   ),
@@ -488,7 +532,9 @@ class _IdTabState extends State<IdTab> {
                       style: TextStyle(
                         fontFamily: 'monospace',
                         fontSize: 13,
-                        color: _keysValid ? const Color(0xFF333333) : Colors.red,
+                        color: _keysValid
+                            ? const Color(0xFF333333)
+                            : Colors.red,
                       ),
                       maxLines: 4,
                       minLines: 4,
@@ -499,12 +545,16 @@ class _IdTabState extends State<IdTab> {
                             .where((e) => e.isNotEmpty)
                             .toList();
                         _keysValid = lines.every(
-                            (e) => RegExp(r'^[0-9a-f]{8}$').hasMatch(e.toLowerCase()));
+                          (e) => RegExp(
+                            r'^[0-9a-f]{8}$',
+                          ).hasMatch(e.toLowerCase()),
+                        );
                         // 防抖自动保存（编辑密钥弹窗已移除，此处为唯一持久化入口）
                         _keysSaveTimer?.cancel();
                         _keysSaveTimer = Timer(
-                            const Duration(milliseconds: 500),
-                            () => _app.storage.saveIdCardKeys(_keysCtrl.text));
+                          const Duration(milliseconds: 500),
+                          () => _app.storage.saveIdCardKeys(_keysCtrl.text),
+                        );
                       }),
                     ),
                   ),
@@ -514,22 +564,34 @@ class _IdTabState extends State<IdTab> {
                     child: _cards.isEmpty
                         ? const Padding(
                             padding: EdgeInsets.all(4),
-                            child: Text('暂无保存的 ID 卡',
-                                style: TextStyle(fontSize: 13, color: Colors.grey)),
+                            child: Text(
+                              '暂无保存的 ID 卡',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
+                            ),
                           )
                         : Column(
                             children: _cards
                                 .take(5)
-                                .map((c) => ListTile(
-                                      dense: true,
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(c.id,
-                                          style: const TextStyle(
-                                              fontSize: 13,
-                                              fontFamily: 'monospace')),
-                                      subtitle: Text(c.name,
-                                          style: const TextStyle(fontSize: 11)),
-                                    ))
+                                .map(
+                                  (c) => ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(
+                                      c.id,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      c.name,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                )
                                 .toList(),
                           ),
                   ),
@@ -543,44 +605,50 @@ class _IdTabState extends State<IdTab> {
               child: Column(
                 children: [
                   ActionButton(
-                      label: '读卡',
-                      icon: Icons.radio_button_checked,
-                      color: primary,
-                      onTap: _readCard,
-                      enabled: _app.connected),
+                    label: '读卡',
+                    icon: Icons.radio_button_checked,
+                    color: primary,
+                    onTap: _readCard,
+                    enabled: _app.connected,
+                  ),
                   const SizedBox(height: 8),
                   ActionButton(
-                      label: '写卡',
-                      icon: Icons.save_alt,
-                      color: primary,
-                      onTap: _writeCard,
-                      enabled: _app.connected),
+                    label: '写卡',
+                    icon: Icons.save_alt,
+                    color: primary,
+                    onTap: _writeCard,
+                    enabled: _app.connected,
+                  ),
                   const SizedBox(height: 8),
                   ActionButton(
-                      label: '读卡槽',
-                      icon: Icons.memory,
-                      color: primary,
-                      onTap: _readSlot,
-                      enabled: _app.connected),
+                    label: '读卡槽',
+                    icon: Icons.memory,
+                    color: primary,
+                    onTap: _readSlot,
+                    enabled: _app.connected,
+                  ),
                   const SizedBox(height: 8),
                   ActionButton(
-                      label: '写卡槽',
-                      icon: Icons.memory,
-                      color: primary,
-                      onTap: _writeSlot,
-                      enabled: _app.connected),
+                    label: '写卡槽',
+                    icon: Icons.memory,
+                    color: primary,
+                    onTap: _writeSlot,
+                    enabled: _app.connected,
+                  ),
                   const SizedBox(height: 8),
                   ActionButton(
-                      label: '卡列表',
-                      icon: Icons.list,
-                      color: primary,
-                      onTap: _showCardList),
+                    label: '卡列表',
+                    icon: Icons.list,
+                    color: primary,
+                    onTap: _showCardList,
+                  ),
                   const SizedBox(height: 8),
                   ActionButton(
-                      label: '添加到列表',
-                      icon: Icons.add,
-                      color: primary,
-                      onTap: _addCard),
+                    label: '添加到列表',
+                    icon: Icons.add,
+                    color: primary,
+                    onTap: _addCard,
+                  ),
                   const SizedBox(height: 16),
                 ],
               ),
@@ -591,16 +659,23 @@ class _IdTabState extends State<IdTab> {
     );
   }
 
-  Widget _numRow(String label, TextEditingController ctrl, String hint,
-      {ValueChanged<String>? onChanged}) {
+  Widget _numRow(
+    String label,
+    TextEditingController ctrl,
+    String hint, {
+    ValueChanged<String>? onChanged,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
           SizedBox(
-              width: 64,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
+            width: 64,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+            ),
+          ),
           Expanded(
             child: TextField(
               controller: ctrl,
@@ -609,8 +684,13 @@ class _IdTabState extends State<IdTab> {
               decoration: InputDecoration(
                 hintText: hint,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 8,
+                  horizontal: 8,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
             ),
           ),

@@ -388,6 +388,9 @@ class SaveFolder {
 
 /// 卡库持久化（对齐 CU SharedPreferencesProvider.savedCards/folders）
 class CardLibraryStorage {
+  /// 卡库写入后的回调（由启动时注册，用于触发云端增量备份）
+  static Future<void> Function()? onCardsChanged;
+
   static const _kCards = 'nfctool_lib_cards';
   static const _kFolders = 'nfctool_lib_folders';
 
@@ -413,16 +416,19 @@ class CardLibraryStorage {
   Future<void> saveCards(List<SaveCard> cards) async {
     final p = await _p;
     await p.setStringList(_kCards, cards.map((c) => c.toJson()).toList());
+    await onCardsChanged?.call();
   }
 
   Future<void> upsertCard(SaveCard card) async {
     final cards = await getCards();
     final i = cards.indexWhere((c) => c.id == card.id);
+    // 内容未变则沿用旧时间戳，避免增量备份把未改动的卡当成变更
+    card.updatedAt = (i >= 0 && cards[i].contentEquals(card))
+        ? cards[i].updatedAt
+        : DateTime.now();
     if (i >= 0) {
-      card.updatedAt = DateTime.now();
       cards[i] = card;
     } else {
-      card.updatedAt = DateTime.now();
       cards.add(card);
     }
     await saveCards(cards);

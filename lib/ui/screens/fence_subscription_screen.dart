@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../main.dart';
 import '../../services/fence_subscription.dart';
@@ -11,7 +10,8 @@ class FenceSubscriptionScreen extends StatefulWidget {
   const FenceSubscriptionScreen({super.key});
 
   @override
-  State<FenceSubscriptionScreen> createState() => _FenceSubscriptionScreenState();
+  State<FenceSubscriptionScreen> createState() =>
+      _FenceSubscriptionScreenState();
 }
 
 class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
@@ -79,8 +79,9 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-          content: Text(msg), duration: const Duration(seconds: 4)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 4)),
+      );
   }
 
   Future<void> _showCreateDialog() async {
@@ -119,7 +120,10 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
     if (!mounted) return;
     try {
       final fences = await FenceSubscriptionApi.fetchFences(
-          code: sub.code, chipId: chipId, dataPassword: dataPassword ?? '');
+        code: sub.code,
+        chipId: chipId,
+        dataPassword: dataPassword ?? '',
+      );
       if (!mounted) return;
       final provider = (_app ??= AppScope.instance.controller).geofence;
       var imported = 0;
@@ -142,7 +146,7 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
     try {
       final fence = Geofence.fromJson(json);
       return Geofence(
-        id: const Uuid().v4(),
+        id: newGeofenceId(),
         name: fence.name,
         label: fence.label,
         slotNumber: fence.slotNumber,
@@ -260,7 +264,11 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
     );
     if (confirmed != true || !mounted) return;
     try {
-      await FenceSubscriptionApi.delete(sub.code, chipId, controller.text.trim());
+      await FenceSubscriptionApi.delete(
+        sub.code,
+        chipId,
+        controller.text.trim(),
+      );
       if (!mounted) return;
       _toast('订阅已删除');
       await _load();
@@ -299,10 +307,7 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: [
-                _buildSubscribedTab(),
-                _buildCreatedTab(),
-              ],
+              children: [_buildSubscribedTab(), _buildCreatedTab()],
             ),
           ),
         ],
@@ -381,7 +386,10 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
         children: [
           Icon(Icons.fence, size: 40, color: Colors.grey.shade400),
           const SizedBox(height: 8),
-          Text(message, style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+          Text(
+            message,
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+          ),
         ],
       ),
     );
@@ -396,7 +404,11 @@ class _FenceSubscriptionScreenState extends State<FenceSubscriptionScreen>
           children: [
             Icon(Icons.cloud_off, size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(fontSize: 13), textAlign: TextAlign.center),
+            Text(
+              _error!,
+              style: const TextStyle(fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _load,
@@ -498,7 +510,11 @@ class _SubscriptionTile extends StatelessWidget {
             ),
           if (onDelete != null)
             IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 20,
+                color: Colors.red,
+              ),
               onPressed: onDelete,
               tooltip: '删除',
             ),
@@ -512,7 +528,8 @@ class _JoinSubscriptionDialog extends StatefulWidget {
   const _JoinSubscriptionDialog();
 
   @override
-  State<_JoinSubscriptionDialog> createState() => _JoinSubscriptionDialogState();
+  State<_JoinSubscriptionDialog> createState() =>
+      _JoinSubscriptionDialogState();
 }
 
 class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
@@ -543,7 +560,10 @@ class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 12),
+            ),
           ],
         ],
       ),
@@ -555,7 +575,11 @@ class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
         TextButton(
           onPressed: _loading ? null : _next,
           child: _loading
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('下一步'),
         ),
       ],
@@ -672,7 +696,10 @@ class _AuthorizedJoinDialogState extends State<_AuthorizedJoinDialog> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
             ],
           ],
         ),
@@ -685,7 +712,11 @@ class _AuthorizedJoinDialogState extends State<_AuthorizedJoinDialog> {
         TextButton(
           onPressed: _loading ? null : _join,
           child: _loading
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('订阅'),
         ),
       ],
@@ -735,7 +766,8 @@ class _CreateSubscriptionDialog extends StatefulWidget {
   const _CreateSubscriptionDialog();
 
   @override
-  State<_CreateSubscriptionDialog> createState() => _CreateSubscriptionDialogState();
+  State<_CreateSubscriptionDialog> createState() =>
+      _CreateSubscriptionDialogState();
 }
 
 class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
@@ -870,7 +902,8 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
               label: '管理密码',
               controller: _adminPasswordController,
               obscure: _showAdminPassword,
-              onToggle: () => setState(() => _showAdminPassword = !_showAdminPassword),
+              onToggle: () =>
+                  setState(() => _showAdminPassword = !_showAdminPassword),
               helperText: '至少6个字符，删除订阅时使用',
             ),
             const SizedBox(height: 4),
@@ -879,7 +912,8 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
                 label: '数据密码',
                 controller: _dataPasswordController,
                 obscure: _showDataPassword,
-                onToggle: () => setState(() => _showDataPassword = !_showDataPassword),
+                onToggle: () =>
+                    setState(() => _showDataPassword = !_showDataPassword),
                 helperText: '至少6个字符，订阅者加入时使用',
               ),
             const SizedBox(height: 16),
@@ -918,31 +952,42 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
             ),
             const SizedBox(height: 6),
             if (_allFences.isEmpty)
-              Text('暂无围栏数据', style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
+              Text(
+                '暂无围栏数据',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+              )
             else
-              ..._allFences.map((fence) => CheckboxListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    title: Text(
-                      '${fence.name}${fence.label.isNotEmpty ? ' (${fence.label})' : ''}',
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    subtitle: Text('槽位 ${fence.slotNumber}', style: const TextStyle(fontSize: 11)),
-                    value: _selectedFences.contains(fence),
-                    onChanged: (checked) {
-                      setState(() {
-                        if (checked == true) {
-                          _selectedFences.add(fence);
-                        } else {
-                          _selectedFences.remove(fence);
-                        }
-                      });
-                    },
-                  )),
+              ..._allFences.map(
+                (fence) => CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  title: Text(
+                    '${fence.name}${fence.label.isNotEmpty ? ' (${fence.label})' : ''}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    '槽位 ${fence.slotNumber}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  value: _selectedFences.contains(fence),
+                  onChanged: (checked) {
+                    setState(() {
+                      if (checked == true) {
+                        _selectedFences.add(fence);
+                      } else {
+                        _selectedFences.remove(fence);
+                      }
+                    });
+                  },
+                ),
+              ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
             ],
           ],
         ),
@@ -955,7 +1000,11 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
         TextButton(
           onPressed: _loading ? null : _create,
           child: _loading
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('创建'),
         ),
       ],
@@ -992,7 +1041,11 @@ class _ModeSegment extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null && selected) ...[
-              Icon(icon, size: 16, color: selected ? colorScheme.onPrimary : colorScheme.onSurface),
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? colorScheme.onPrimary : colorScheme.onSurface,
+              ),
               const SizedBox(width: 4),
             ],
             Text(

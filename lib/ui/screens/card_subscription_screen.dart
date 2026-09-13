@@ -1,9 +1,8 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../../main.dart';
-import '../../services/card_backup.dart' show cloudJsonToSaveCard;
+import '../../services/card_backup.dart'
+    show cloudJsonToSaveCard, saveCardToJsonForUpload;
 import '../../services/card_library.dart';
 import '../../services/card_subscription.dart';
 import '../../state/app_controller.dart';
@@ -81,8 +80,9 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-          content: Text(msg), duration: const Duration(seconds: 4)));
+      ..showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 4)),
+      );
   }
 
   Future<void> _showCreateDialog() async {
@@ -121,7 +121,10 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
     if (!mounted) return;
     try {
       final cards = await CardSubscriptionApi.fetchCards(
-          code: sub.code, chipId: chipId, dataPassword: dataPassword ?? '');
+        code: sub.code,
+        chipId: chipId,
+        dataPassword: dataPassword ?? '',
+      );
       if (!mounted) return;
       final lib = CardLibraryStorage();
       var imported = 0;
@@ -247,7 +250,11 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
     );
     if (confirmed != true || !mounted) return;
     try {
-      await CardSubscriptionApi.delete(sub.code, chipId, controller.text.trim());
+      await CardSubscriptionApi.delete(
+        sub.code,
+        chipId,
+        controller.text.trim(),
+      );
       if (!mounted) return;
       _toast('订阅已删除');
       await _load();
@@ -286,10 +293,7 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: [
-                _buildSubscribedTab(),
-                _buildCreatedTab(),
-              ],
+              children: [_buildSubscribedTab(), _buildCreatedTab()],
             ),
           ),
         ],
@@ -368,7 +372,10 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
         children: [
           Icon(Icons.credit_card, size: 40, color: Colors.grey.shade400),
           const SizedBox(height: 8),
-          Text(message, style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+          Text(
+            message,
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+          ),
         ],
       ),
     );
@@ -383,7 +390,11 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
           children: [
             Icon(Icons.cloud_off, size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(fontSize: 13), textAlign: TextAlign.center),
+            Text(
+              _error!,
+              style: const TextStyle(fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _load,
@@ -485,7 +496,11 @@ class _SubscriptionTile extends StatelessWidget {
             ),
           if (onDelete != null)
             IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 20,
+                color: Colors.red,
+              ),
               onPressed: onDelete,
               tooltip: '删除',
             ),
@@ -499,7 +514,8 @@ class _JoinSubscriptionDialog extends StatefulWidget {
   const _JoinSubscriptionDialog();
 
   @override
-  State<_JoinSubscriptionDialog> createState() => _JoinSubscriptionDialogState();
+  State<_JoinSubscriptionDialog> createState() =>
+      _JoinSubscriptionDialogState();
 }
 
 class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
@@ -530,7 +546,10 @@ class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 12),
+            ),
           ],
         ],
       ),
@@ -542,7 +561,11 @@ class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
         TextButton(
           onPressed: _loading ? null : _next,
           child: _loading
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('下一步'),
         ),
       ],
@@ -659,7 +682,10 @@ class _AuthorizedJoinDialogState extends State<_AuthorizedJoinDialog> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
             ],
           ],
         ),
@@ -672,7 +698,11 @@ class _AuthorizedJoinDialogState extends State<_AuthorizedJoinDialog> {
         TextButton(
           onPressed: _loading ? null : _join,
           child: _loading
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('订阅'),
         ),
       ],
@@ -722,7 +752,8 @@ class _CreateSubscriptionDialog extends StatefulWidget {
   const _CreateSubscriptionDialog();
 
   @override
-  State<_CreateSubscriptionDialog> createState() => _CreateSubscriptionDialogState();
+  State<_CreateSubscriptionDialog> createState() =>
+      _CreateSubscriptionDialogState();
 }
 
 class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
@@ -819,9 +850,7 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
       _error = null;
     });
     try {
-      final payload = _selectedCards
-          .map((c) => _toSubscriptionCardJson(c))
-          .toList();
+      final payload = _selectedCards.map(saveCardToJsonForUpload).toList();
       final code = await CardSubscriptionApi.create(
         name: name,
         description: _descriptionController.text.trim(),
@@ -840,24 +869,6 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
         _error = e.toString();
       });
     }
-  }
-
-  Map<String, dynamic> _toSubscriptionCardJson(SaveCard card) {
-    // 上传采用 CU CardSave JSON 形状（字节数组），与 card_backup 一致
-    final data = card.data
-        .map((hex) => storageHexToBytes(hex).toList())
-        .toList();
-    return {
-      'id': card.id,
-      'uid': card.uid,
-      'sak': card.sak,
-      'atqa': card.atqa.isEmpty ? <int>[] : storageHexToBytes(card.atqa).toList(),
-      'ats': card.ats.isEmpty ? <int>[] : storageHexToBytes(card.ats).toList(),
-      'name': card.name,
-      'tag': card.tag.value,
-      'data': data,
-      if (card.folderId != null) 'folderId': card.folderId,
-    };
   }
 
   String _tagLabel(SaveCard card) {
@@ -892,7 +903,8 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
               label: '管理密码',
               controller: _adminPasswordController,
               obscure: _showAdminPassword,
-              onToggle: () => setState(() => _showAdminPassword = !_showAdminPassword),
+              onToggle: () =>
+                  setState(() => _showAdminPassword = !_showAdminPassword),
               helperText: '至少6个字符，删除订阅时使用',
             ),
             const SizedBox(height: 4),
@@ -901,7 +913,8 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
                 label: '数据密码',
                 controller: _dataPasswordController,
                 obscure: _showDataPassword,
-                onToggle: () => setState(() => _showDataPassword = !_showDataPassword),
+                onToggle: () =>
+                    setState(() => _showDataPassword = !_showDataPassword),
                 helperText: '至少6个字符，订阅者加入时使用',
               ),
             const SizedBox(height: 16),
@@ -940,31 +953,39 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
             ),
             const SizedBox(height: 6),
             if (_allCards.isEmpty)
-              Text('暂无卡片数据', style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
+              Text(
+                '暂无卡片数据',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+              )
             else
-              ..._allCards.map((card) => CheckboxListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    title: Text(
-                      card.name,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    subtitle: Text('${card.uid} · ${_tagLabel(card)}', style: const TextStyle(fontSize: 11)),
-                    value: _selectedCards.contains(card),
-                    onChanged: (checked) {
-                      setState(() {
-                        if (checked == true) {
-                          _selectedCards.add(card);
-                        } else {
-                          _selectedCards.remove(card);
-                        }
-                      });
-                    },
-                  )),
+              ..._allCards.map(
+                (card) => CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  title: Text(card.name, style: const TextStyle(fontSize: 13)),
+                  subtitle: Text(
+                    '${card.uid} · ${_tagLabel(card)}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  value: _selectedCards.contains(card),
+                  onChanged: (checked) {
+                    setState(() {
+                      if (checked == true) {
+                        _selectedCards.add(card);
+                      } else {
+                        _selectedCards.remove(card);
+                      }
+                    });
+                  },
+                ),
+              ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
             ],
           ],
         ),
@@ -977,7 +998,11 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
         TextButton(
           onPressed: _loading ? null : _create,
           child: _loading
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('创建'),
         ),
       ],
@@ -1014,7 +1039,11 @@ class _ModeSegment extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null && selected) ...[
-              Icon(icon, size: 16, color: selected ? colorScheme.onPrimary : colorScheme.onSurface),
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? colorScheme.onPrimary : colorScheme.onSurface,
+              ),
               const SizedBox(width: 4),
             ],
             Text(
@@ -1029,14 +1058,4 @@ class _ModeSegment extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 便捷：hex 字符串转字节（避免直接依赖 StorageService 内部实现）
-Uint8List storageHexToBytes(String hex) {
-  final clean = hex.replaceAll(RegExp(r'[\s-]'), '');
-  final bytes = Uint8List(clean.length ~/ 2);
-  for (var i = 0; i < bytes.length; i++) {
-    bytes[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
-  }
-  return bytes;
 }

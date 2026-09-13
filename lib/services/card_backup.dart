@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -81,8 +83,12 @@ TagType? _tagByName(String? name) {
 
 /// 将 nfcapp SaveCard 序列化为 CU CardSave JSON 形状（字节数组版），并附 bin_data。
 Map<String, dynamic> _saveCardToCuJson(SaveCard card) {
-  final atqa = card.atqa.isEmpty ? <int>[] : StorageService.hexToBytes(card.atqa).toList();
-  final ats = card.ats.isEmpty ? <int>[] : StorageService.hexToBytes(card.ats).toList();
+  final atqa = card.atqa.isEmpty
+      ? <int>[]
+      : StorageService.hexToBytes(card.atqa).toList();
+  final ats = card.ats.isEmpty
+      ? <int>[]
+      : StorageService.hexToBytes(card.ats).toList();
   final data = card.data
       .map((hex) => StorageService.hexToBytes(hex).toList())
       .toList();
@@ -110,7 +116,7 @@ Map<String, dynamic> _saveCardToCuJson(SaveCard card) {
         'ultralightCounters': card.ultralightCounters,
     },
     if (card.folderId != null) 'folderId': card.folderId,
-    'color': card.colorValue,
+    'color': colorToHex(card.colorValue),
     if (card.updatedAt != null) 'updatedAt': card.updatedAt!.toIso8601String(),
   };
 
@@ -152,7 +158,9 @@ SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
     // 兼容 CU 返回：含 id 且 data 为 List 时按 CU 形状解析
     if (map.containsKey('id') && map['data'] is List) {
       final data = map['data'] as List<dynamic>;
-      final tag = TagType.from((map['tag'] as num?)?.toInt() ?? 0);
+      final tag =
+          _tagByName(map['tag_type'] as String?) ??
+          TagType.from((map['tag'] as num?)?.toInt() ?? 0);
       final extra = (map['extra'] as Map<String, dynamic>?) ?? const {};
       final sign = (extra['ultralightSignature'] as List<dynamic>? ?? []);
       final ver = (extra['ultralightVersion'] as List<dynamic>? ?? []);
@@ -174,12 +182,12 @@ SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
         }).toList(),
         ultralightVersion: _bytesToHex(ver),
         ultralightSignature: _bytesToHex(sign),
-        ultralightCounters:
-            counters.map((e) => (e as num).toInt()).toList(),
+        ultralightCounters: counters.map((e) => (e as num).toInt()).toList(),
         folderId: map['folderId'] as String?,
-        colorValue: (map['color'] as num?)?.toInt() ?? 0xFFFF5722,
-        updatedAt:
-            map['updatedAt'] == null ? null : DateTime.tryParse(map['updatedAt'] as String),
+        colorValue: _colorToInt(map['color']),
+        updatedAt: map['updatedAt'] == null
+            ? null
+            : DateTime.tryParse(map['updatedAt'] as String),
       );
     }
     // 仅含 tag_type 的基础条目
@@ -200,22 +208,29 @@ SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
   }
 }
 
-String _bytesToHex(List<dynamic> bytes) =>
-    bytes.map((b) => (b as num).toInt().toRadixString(16).padLeft(2, '0')).join();
+String _bytesToHex(List<dynamic> bytes) => bytes
+    .map((b) => (b as num).toInt().toRadixString(16).padLeft(2, '0'))
+    .join();
 
-/// 生成备份 Token（对齐 CU generateBackupToken）
-String generateBackupToken() {
-  final rnd = _Random();
-  final bytes = List<int>.generate(32, (_) => rnd.nextInt(256));
-  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+/// 卡库 int 颜色 → CU 的 `#RRGGBB` 字符串（CU 上传/还原都用 hex 串）
+String colorToHex(int color) =>
+    '#${(color & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+/// 解析 CU hex 串或本地 int 两种颜色写法
+int _colorToInt(Object? value) {
+  if (value is num) return value.toInt();
+  final s = (value as String?)?.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
+  if (s != null && s.length >= 6) {
+    return 0xFF000000 | int.parse(s.substring(s.length - 6), radix: 16);
+  }
+  return 0xFFFF5722;
 }
 
-class _Random {
-  int _state = DateTime.now().microsecondsSinceEpoch & 0x7fffffff;
-  int nextInt(int max) {
-    _state = (_state * 1103515245 + 12345) & 0x7fffffff;
-    return _state % max;
-  }
+/// 生成备份 Token（对齐 CU generateBackupToken：安全随机 32 字节）
+String generateBackupToken() {
+  final rnd = Random.secure();
+  final bytes = List<int>.generate(32, (_) => rnd.nextInt(256));
+  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }
 
 Future<String> _resolveChipId(StorageService storage, {String? chipId}) async {
@@ -230,6 +245,7 @@ Future<bool> uploadCards(
   StorageService storage,
   List<SaveCard> cards, {
   String? chipId,
+  Map<String, dynamic>? deviceStatus,
 }) async {
   final id = await _resolveChipId(storage, chipId: chipId);
   if (id.isEmpty) return false;
@@ -238,6 +254,8 @@ Future<bool> uploadCards(
   final payload = <String, dynamic>{
     'chip_id': id,
     'cards': cardsPayload,
+    if (deviceStatus != null && deviceStatus.isNotEmpty)
+      'device_status': deviceStatus,
   };
 
   var backupToken = await storage.getBackupToken();
@@ -263,28 +281,52 @@ Future<bool> uploadCards(
   }
 }
 
+Timer? _autoBackupTimer;
+
+/// 卡库写入后调度增量备份（2 秒防抖，对齐 CU setCards 自动备份）
+Future<void> scheduleAutoBackup([StorageService? storage]) async {
+  _autoBackupTimer?.cancel();
+  _autoBackupTimer = Timer(const Duration(seconds: 2), () async {
+    await backupCards(storage ?? StorageService());
+  });
+}
+
+/// 注册卡库写入后自动增量备份（启动时调用一次）
+void installAutoBackupHook() {
+  CardLibraryStorage.onCardsChanged = () => scheduleAutoBackup();
+}
+
 /// 增量备份：仅上传有改动的卡片（对齐 CU backupCards）
 Future<int> backupCards(
   StorageService storage, {
-  required List<SaveCard> all,
-  required Map<String, DateTime> lastBackup,
+  List<SaveCard>? all,
+  Map<String, DateTime>? lastBackup,
   String? chipId,
+  Map<String, dynamic>? deviceStatus,
   bool Function(int uploaded)? onComplete,
 }) async {
-  final toUpload = all.where((card) {
-    final last = lastBackup[card.id];
-    if (last == null) return true;
+  // 未显式传入时自读卡库与上次备份时间（供自动增量备份复用）
+  final cards = all ?? await CardLibraryStorage().getCards();
+  final last = lastBackup ?? await storage.getCardLastBackupMap();
+  final toUpload = cards.where((card) {
+    final lb = last[card.id];
+    if (lb == null) return true;
     final updated = card.updatedAt;
     if (updated == null) return true;
-    return updated.isAfter(last);
+    return updated.isAfter(lb);
   }).toList();
 
   if (toUpload.isEmpty) return 0;
 
-  final ok = await uploadCards(storage, toUpload, chipId: chipId);
+  final ok = await uploadCards(
+    storage,
+    toUpload,
+    chipId: chipId,
+    deviceStatus: deviceStatus,
+  );
   if (ok) {
     final now = DateTime.now();
-    final updated = Map<String, DateTime>.from(lastBackup);
+    final updated = <String, DateTime>{...last};
     for (final card in toUpload) {
       updated[card.id] = now;
     }
@@ -299,12 +341,18 @@ Future<BackupResult> backupAllCardsToCloud(
   StorageService storage, {
   required List<SaveCard> all,
   String? chipId,
+  Map<String, dynamic>? deviceStatus,
 }) async {
   final id = await _resolveChipId(storage, chipId: chipId);
   if (id.isEmpty) return const BackupResult(success: false, uploaded: 0);
   if (all.isEmpty) return const BackupResult(success: true, uploaded: 0);
 
-  final ok = await uploadCards(storage, all, chipId: chipId);
+  final ok = await uploadCards(
+    storage,
+    all,
+    chipId: chipId,
+    deviceStatus: deviceStatus,
+  );
   if (ok) {
     final now = DateTime.now();
     final updated = await storage.getCardLastBackupMap();
@@ -373,29 +421,56 @@ class MergeResult {
 }
 
 MergeResult mergeCloudCards(
-    List<SaveCard> local, List<CloudCard> cloud, int failed) {
-  final localById = {for (final c in local) c.id: c};
-  final cloudIds = {for (final c in cloud) c.card.id};
+  List<SaveCard> local,
+  List<CloudCard> cloud,
+  int failed,
+) {
   final merged = <SaveCard>[];
+  final usedLocal = <String>{};
   var added = 0;
   var updated = 0;
   var kept = 0;
 
+  for (final cc in cloud) {
+    final c = cc.card;
+    var match = local
+        .where((lc) => !usedLocal.contains(lc.id) && lc.id == c.id)
+        .firstOrNull;
+    if (match == null) {
+      final key = _uidKey(c);
+      if (key.isNotEmpty) {
+        match = local
+            .where((lc) => !usedLocal.contains(lc.id) && _uidKey(lc) == key)
+            .firstOrNull;
+      }
+    }
+    if (match != null) {
+      usedLocal.add(match.id);
+      merged.add(c.copy()..id = match.id);
+      updated++;
+    } else {
+      merged.add(c);
+      added++;
+    }
+  }
   for (final lc in local) {
-    if (cloudIds.contains(lc.id)) continue;
+    if (usedLocal.contains(lc.id)) continue;
     merged.add(lc);
     kept++;
   }
-  for (final cc in cloud) {
-    final c = cc.card;
-    if (localById.containsKey(c.id)) {
-      updated++;
-    } else {
-      added++;
-    }
-    merged.add(c);
-  }
 
   return MergeResult(
-      cards: merged, added: added, updated: updated, kept: kept, failed: failed);
+    cards: merged,
+    added: added,
+    updated: updated,
+    kept: kept,
+    failed: failed,
+  );
+}
+
+/// 卡身份键：卡型 + 去空白 UID。云端与本地 id 不同（CU 用 uuid）时按此识别同一张卡
+String _uidKey(SaveCard c) {
+  final uid = c.uid.replaceAll(RegExp(r'[\s-]'), '').toLowerCase();
+  if (uid.isEmpty) return '';
+  return '${c.tag.name}:$uid';
 }

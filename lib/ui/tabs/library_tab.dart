@@ -822,52 +822,134 @@ class _LibraryTabState extends State<LibraryTab> {
     return chipId;
   }
 
+  /// 二次确认对话框（对齐 CU backupCardToCloud/backupCardsFromCloud 的 alert）
+  Future<bool> _confirm(String title, String message, String label) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(label),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// 全屏 loading 遮罩执行任务
+  Future<void> _runBusy(String hint, Future<void> Function() task) async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    navigator.push(
+      DialogRoute<void>(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.transparent,
+        builder: (_) => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(),
+              ),
+              const SizedBox(height: 12),
+              Text(hint),
+            ],
+          ),
+        ),
+      ),
+    );
+    try {
+      await task();
+    } finally {
+      if (navigator.mounted) navigator.pop();
+    }
+  }
+
+  /// 采集设备状态随备份一起上传（对齐 CU collectDeviceStatus）
+  Future<Map<String, dynamic>> _collectDeviceStatus() async {
+    final status = <String, dynamic>{};
+    try {
+      status['firmware_version'] = await _app.device.cmdGetAppVersion();
+    } catch (_) {}
+    try {
+      status['git_version'] = await _app.device.cmdGetGitVersion();
+    } catch (_) {}
+    status['fence_enabled'] = _app.geofence.userEnabled;
+    return status;
+  }
+
   Future<void> _cloudBackup() async {
     if (_cards.isEmpty) {
       _toast('卡库为空，无需备份');
       return;
     }
+    if (!await _confirm(
+      '备份到云端',
+      '将把卡库中的 ${_cards.length} 张卡片上传到云端服务器。',
+      '备份',
+    )) {
+      return;
+    }
     final chipId = await _ensureChipId();
     if (chipId.isEmpty) {
       _toast('未设置芯片编号');
       return;
     }
-    _toast('正在备份到云端...');
-    final result = await backupAllCardsToCloud(
-      _app.storage,
-      all: _cards,
-      chipId: chipId,
-    );
-    _toast(result.success ? '备份成功：${result.uploaded} 张卡片' : '备份失败，请检查网络或服务器');
+    final status = await _collectDeviceStatus();
+    await _runBusy('正在备份到云端...', () async {
+      final result = await backupAllCardsToCloud(
+        _app.storage,
+        all: _cards,
+        chipId: chipId,
+        deviceStatus: status,
+      );
+      if (!mounted) return;
+      _toast(result.success ? '备份成功：${result.uploaded} 张卡片' : '备份失败，请检查网络或服务器');
+    });
   }
 
   Future<void> _cloudRestore() async {
-    final storage = _app.storage;
-    final chipId = await _ensureChipId();
-    if (chipId.isEmpty) {
-      _toast('未设置芯片编号');
+    if (!await _confirm('从云端还原', '将从云端拉取备份并与本地卡库合并，同一张卡以云端内容为准。', '还原')) {
       return;
     }
+    final storage = _app.storage;
+    final chipId = await _ensureChipId();
+    if (chipId.isEmpty) return;
     final token = await storage.getBackupToken();
     if (token.isEmpty) {
       _toast('尚无备份记录，请先备份');
       return;
     }
-    _toast('正在从云端拉取...');
-    final cloud = await fetchCloudCards(storage, chipId: chipId);
-    if (!mounted) return;
-    if (cloud == null) {
-      _toast('还原失败或无备份数据');
-      return;
-    }
-    if (cloud.$1.isEmpty) {
-      _toast('云端没有可还原的卡片');
-      return;
-    }
-    final result = mergeCloudCards(_cards, cloud.$1, cloud.$2);
-    await CardLibraryStorage().saveCards(result.cards);
-    await _reload();
-    _toast('还原完成：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}');
+    await _runBusy('正在从云端拉取...', () async {
+      final cloud = await fetchCloudCards(storage, chipId: chipId);
+      if (!mounted) return;
+      if (cloud == null) {
+        _toast('还原失败或无备份数据');
+        return;
+      }
+      if (cloud.$1.isEmpty) {
+        _toast('云端没有可还原的卡片');
+        return;
+      }
+      final result = mergeCloudCards(_cards, cloud.$1, cloud.$2);
+      await _lib.saveCards(result.cards);
+      await _reload();
+      _toast(
+        result.failed > 0
+            ? '还原完成：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}，失败 ${result.failed}'
+            : '还原完成：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}',
+      );
+    });
   }
 }
 

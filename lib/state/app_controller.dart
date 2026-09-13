@@ -8,8 +8,9 @@ import 'package:permission_handler/permission_handler.dart';
 import '../ble/ble_service.dart';
 import '../models/enums.dart';
 import '../models/models.dart';
-import '../services/cloud_service.dart';
+import '../services/card_backup.dart';
 import '../services/card_library.dart';
+import '../services/cloud_service.dart';
 import '../services/device_service.dart';
 import '../services/dfu_zip.dart';
 import '../services/geofence_provider.dart';
@@ -30,6 +31,7 @@ class AppController extends ChangeNotifier {
     final geo = GeofenceProvider();
     geofence = geo;
     device.init();
+    installAutoBackupHook();
     ble.status.addListener(_onBleStatus);
     _initGeofence();
   }
@@ -51,14 +53,16 @@ class AppController extends ChangeNotifier {
   List<(bool, bool)> enabledSlots = List.generate(8, (_) => (false, false));
   List<(String?, String?)> slotNames = List.generate(8, (_) => (null, null));
   List<(int, int)> slotTypes = List.generate(8, (_) => (0, 4));
-  List<Mf1EmuSettings> slotEmuSettings =
-      List.generate(8, (_) => Mf1EmuSettings(
-            detection: false,
-            gen1a: false,
-            gen2: false,
-            antiColl: true,
-            write: 0,
-          ));
+  List<Mf1EmuSettings> slotEmuSettings = List.generate(
+    8,
+    (_) => Mf1EmuSettings(
+      detection: false,
+      gen1a: false,
+      gen2: false,
+      antiColl: true,
+      write: 0,
+    ),
+  );
 
   int tabIndex = 0;
   int currentSlot = 0;
@@ -86,6 +90,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _onBleStatus() {
+    if (connected) {
+      scheduleAutoBackup(storage);
+    }
     notifyListeners();
   }
 
@@ -134,9 +141,12 @@ class AppController extends ChangeNotifier {
         final raw = await device.cmdMf1EmuReadBlock(sector * 4, 4);
         if (raw.length < 64) return null;
         for (var b = 0; b < 4; b++) {
-          blocks.add(raw.sublist(b * 16, b * 16 + 16)
-              .map((x) => x.toRadixString(16).padLeft(2, '0'))
-              .join());
+          blocks.add(
+            raw
+                .sublist(b * 16, b * 16 + 16)
+                .map((x) => x.toRadixString(16).padLeft(2, '0'))
+                .join(),
+          );
         }
       }
     } catch (_) {
@@ -275,8 +285,10 @@ class AppController extends ChangeNotifier {
   }
 
   /// DFU 固件刷写（进入 DFU → 解析固件包 → 传输镜像）
-  Future<void> dfuUpdateFromUrl(String url,
-      {void Function(int offset, int size)? onProgress}) async {
+  Future<void> dfuUpdateFromUrl(
+    String url, {
+    void Function(int offset, int size)? onProgress,
+  }) async {
     final httpRes = await _httpGetBytes(url);
     final zip = DfuZip(httpRes);
     final image = zip.getAppImage();
@@ -291,7 +303,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<Uint8List> _httpGetBytes(String url) async {
-    final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
+    final res = await http
+        .get(Uri.parse(url))
+        .timeout(const Duration(seconds: 30));
     if (res.statusCode != 200) {
       throw Exception('下载固件失败: HTTP ${res.statusCode}');
     }
@@ -307,8 +321,7 @@ class AppController extends ChangeNotifier {
   void refreshUi() => notifyListeners();
 
   Future<void> loadSlotEmuSettings(int slot) async {
-    if (slot < enabledSlots.length &&
-        enabledSlots[slot].$1 /* hf */) {
+    if (slot < enabledSlots.length && enabledSlots[slot].$1 /* hf */ ) {
       await device.cmdSlotSetActive(slot);
       final s = await device.cmdMf1GetEmuSettings();
       slotEmuSettings[slot] = s;
@@ -317,8 +330,14 @@ class AppController extends ChangeNotifier {
   }
 
   /// 更新指定槽的模拟配置（Mf1EmuSettings 不可变，复制新对象）
-  void updateSlotEmu(int slot,
-      {bool? detection, bool? gen1a, bool? gen2, bool? antiColl, int? write}) {
+  void updateSlotEmu(
+    int slot, {
+    bool? detection,
+    bool? gen1a,
+    bool? gen2,
+    bool? antiColl,
+    int? write,
+  }) {
     final cur = slotEmuSettings[slot];
     slotEmuSettings[slot] = Mf1EmuSettings(
       detection: detection ?? cur.detection,
@@ -336,7 +355,7 @@ class AppController extends ChangeNotifier {
     try {
       await device.cmdSlotSetActive(slot);
       currentSlot = slot;
-      if (enabledSlots[slot].$1 /* hf */) {
+      if (enabledSlots[slot].$1 /* hf */ ) {
         final s = await device.cmdMf1GetEmuSettings();
         slotEmuSettings[slot] = s;
         final anti = await device.cmdHf14aGetAntiCollData();

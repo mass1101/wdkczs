@@ -9,7 +9,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../helpers/coordinate_converter.dart';
 import '../../main.dart';
@@ -1211,7 +1210,7 @@ class _FenceEditPageState extends State<FenceEditPage>
       return;
     }
     final fence = Geofence(
-      id: widget.fence?.id ?? const Uuid().v4(),
+      id: widget.fence?.id ?? newGeofenceId(),
       name: _nameController.text.trim(),
       label: _labelController.text.trim(),
       slotNumber: _slotNumber,
