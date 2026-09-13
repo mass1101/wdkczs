@@ -63,6 +63,7 @@ const List<String> kCrackKeys = [
   'a396efa4e24f',
   'a31667a8cec1',
   '518b3354e760',
+  '73b9836cf168',
 ];
 
 /// 卡槽数据（对应逆向 slots 单条）

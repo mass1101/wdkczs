@@ -31,11 +31,12 @@ class _IcTabState extends State<IcTab> {
   AppController get _app => AppScope.instance.controller;
   DeviceService get _dev => _app.device;
 
-  /// 国产卡后门密钥（Gen2/CUID 采集与认证试探共用）
+  /// 国产卡后门密钥（Gen2/CUID 采集与认证试探共用，对齐 CU gMifareClassicBackdoorKeysList）
   static const List<String> _backdoorKeys = [
     'A396EFA4E24F',
     'A31667A8CEC1',
-    '518B3354E760'
+    '518B3354E760',
+    '73B9836CF168',
   ];
 
   final _uidCtrl = TextEditingController();
@@ -133,34 +134,94 @@ class _IcTabState extends State<IcTab> {
   /// 返回 true 表示仍有未找到的密钥
   /// onProgress：每块（32 把）结果解析并合并后触发，参数为已处理的 key 数量游标（断点续破）
   /// 全卡单次批量检测（cmd mf1CheckKeysOfSectors），普通 M1 卡一次命令扫全部
-  /// 未标记槽位，比对逐扇区批量快且稳定（1849ff3 实测正常）
+  /// 字典验证：逐扇区、逐 keyType 用 cmdMf1CheckKeysOfBlock（=CU mf1AuthMultipleKeys）
+  /// 对每个扇区 trailer 块分块扫字典，命中即标记并立即 recheckKey 传播到后续扇区。
+  /// 完全对齐 CU checkKeys() + checkKeysOnSector() + recheckKey() 的命令与流程，
+  /// 替换原来的全卡 mask 批量 cmdMf1CheckKeysOfSectors。
   Future<bool> _checkCrackedKeys(
       List<Uint8List> keys, List<SectorKeyState> sectorKeys,
       {void Function(int processedKeys)? onProgress}) async {
     if (keys.isEmpty) {
       return sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
     }
-    final mask = Uint8List(10);
-    mask.fillRange(0, 10, 0xFF);
-    for (var s = 0; s < 16; s++) {
-      if (!sectorKeys[s].hasKeyA) mask[s >> 2] ^= 2 << (6 - s % 4 * 2);
-      if (!sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
+    // 对齐 CU checkKeysOnSector：BLE 连接每批 32 把（nfctool 走 BLE）
+    const chunkSize = 32;
+    var processed = 0;
+    final total = keys.length * sectorKeys.length * 2;
+    for (var s = 0; s < sectorKeys.length; s++) {
+      final trailer = 4 * s + 3;
+      for (var kt = 0; kt < 2; kt++) {
+        final kType = kt == 0 ? KeyType.keyA : KeyType.keyB;
+        // 对齐 CU：getSectorState(sector,keyType) found/disabled 则跳过
+        final alreadyHave =
+            kt == 0 ? sectorKeys[s].hasKeyA : sectorKeys[s].hasKeyB;
+        if (alreadyHave) {
+          processed += keys.length;
+          continue;
+        }
+        for (var i = 0; i < keys.length; i += chunkSize) {
+          final end = (i + chunkSize) < keys.length ? (i + chunkSize) : keys.length;
+          final batch = keys.sublist(i, end);
+          processed += batch.length;
+          final hit = await _dev.cmdMf1CheckKeysOfBlock(
+              block: trailer, keyType: kType, keys: batch);
+          if (onProgress != null && total > 0) {
+            // 进度 = 已扫 key×扇区×2 组占总扫描量的比例折算，作为实时进度/停止检查
+            onProgress((processed * keys.length) ~/ total);
+          }
+          if (hit != null) {
+            // 对齐 CU setKeyAsFound
+            if (kt == 0) {
+              sectorKeys[s].hasKeyA = true;
+              sectorKeys[s].keyA = _hexStr(hit);
+            } else {
+              sectorKeys[s].hasKeyB = true;
+              sectorKeys[s].keyB = _hexStr(hit);
+            }
+            LogService.instance.log(
+                '[_checkCrackedKeys] sector=$s keyType=$kType hit=${_hexStr(hit)}');
+            // 对齐 CU checkKeysOnSector: setKeyAsFound 后立即 recheckKey(key, sector)，
+            // 把刚命中的密钥传播到后续扇区（CU recheckKey 用 mf1Auth 单把认证）
+            await _recheckKeyCU(hit, s, sectorKeys);
+            break;
+          }
+        }
+        if (onProgress != null && total > 0) {
+          onProgress((processed * keys.length) ~/ total);
+        }
+      }
     }
-    LogService.instance.log('[_checkCrackedKeys] keys=${keys.length}, mask=${_hexStr(mask)}');
-    final res = await _dev.cmdMf1CheckKeysOfSectors(
-      keys: keys,
-      mask: mask,
-      onChunk: onProgress == null
-          ? null
-          : (partial, processed) {
-              _mergeSectorKeys(partial, sectorKeys);
-              onProgress(processed);
-            },
-    );
-    LogService.instance.log('[_checkCrackedKeys] found=${_hexStr(res.found)}, sectorKeys=${res.sectorKeys.map((k) => k == null ? 'null' : _hexStr(k)).join(',')}');
-    final anyMissing = _mergeSectorKeys(res, sectorKeys);
+    // 对齐 CU checkKeys 尾部 allKeysExists 判定
+    final anyMissing =
+        sectorKeys.any((sk) => !sk.hasKeyA || !sk.hasKeyB);
     LogService.instance.log('[_checkCrackedKeys] anyMissing=$anyMissing');
     return anyMissing;
+  }
+
+  /// 对齐 CU recovery.recheckKey(key, startingSector)：用单把认证(mf1Auth→cmdMf1CheckBlockKey)
+  /// 把刚找到的密钥依次尝试后续扇区的 keyA/keyB，能通过即标记（多扇区常共用密钥）。
+  Future<void> _recheckKeyCU(Uint8List key, int startSector,
+      List<SectorKeyState> sectorKeys) async {
+    for (var s = startSector; s < sectorKeys.length; s++) {
+      for (var kt = 0; kt < 2; kt++) {
+        final have =
+            kt == 0 ? sectorKeys[s].hasKeyA : sectorKeys[s].hasKeyB;
+        if (have) continue; // CU getSectorState != none 跳过
+        final ok = await _dev.cmdMf1CheckBlockKey(
+            block: 4 * s + 3, keyType: kt == 0 ? KeyType.keyA : KeyType.keyB, key: key);
+        if (ok) {
+          if (kt == 0) {
+            sectorKeys[s].hasKeyA = true;
+            sectorKeys[s].keyA = _hexStr(key);
+          } else {
+            sectorKeys[s].hasKeyB = true;
+            sectorKeys[s].keyB = _hexStr(key);
+          }
+          LogService.instance.log(
+              '[_recheckKeyCU] sector=$s keyType=$kt <- ${_hexStr(key)}');
+        }
+      }
+    }
   }
 
   /// 将批量检查结果合并进扇区密钥状态（幂等，可对累积 partial 重复调用）
@@ -168,7 +229,7 @@ class _IcTabState extends State<IcTab> {
   bool _mergeSectorKeys(
       Mf1CheckKeysOfSectorsRes res, List<SectorKeyState> sectorKeys) {
     var anyMissing = false;
-    for (var s = 0; s < 16; s++) {
+    for (var s = 0; s < sectorKeys.length; s++) {
       if (!sectorKeys[s].hasKeyA) {
         final a = res.sectorKeys[s * 2];
         if (a == null) {
@@ -230,7 +291,7 @@ class _IcTabState extends State<IcTab> {
     // 后续所有命令连锁超时，导致同扇区 keyB 破解被误判失败
     final mask = Uint8List(10);
     mask.fillRange(0, 10, 0xFF);
-    for (var s = 0; s < 16; s++) {
+    for (var s = 0; s < sectorKeys.length; s++) {
       if (sectorKeys[s].hasKeyA) mask[s >> 2] |= 2 << (6 - s % 4 * 2);
       if (sectorKeys[s].hasKeyB) mask[s >> 2] |= 1 << (6 - s % 4 * 2);
     }
@@ -243,7 +304,7 @@ class _IcTabState extends State<IcTab> {
     LogService.instance.log(
         '[_propagateKeys] found=${_hexStr(res.found)} anyMissing=$anyMissing');
     // 对齐 CU checkKeysOnSector 尾部：A 命中读 trailer 免费推导 keyB
-    for (var s = 0; s < 16; s++) {
+    for (var s = 0; s < sectorKeys.length; s++) {
       if (!sectorKeys[s].hasKeyA || sectorKeys[s].hasKeyB) continue;
       final kname = sectorKeys[s].keyA;
       if (kname.isEmpty) continue;
@@ -668,7 +729,13 @@ class _IcTabState extends State<IcTab> {
   Future<List<SectorKeyState>> _crackCard() async {
     final progress = ValueNotifier<String>('验证密钥：寻卡中...');
     final step = ValueNotifier<int>(0);
-    final sectorKeys = List.generate(16, (s) => SectorKeyState(s));
+    // EV1 判定（对齐小程序/CU）：MIFARE Classic EV1(1K) SAK=0x18 含额外
+    // 签名扇区 16/17（块 64-71），其密钥是固定的 EV1 SIGNATURE 保留密钥
+    // （已在扩展字典 kExtendedKeys 中，由批量验证自然点亮，无需预设）。
+    // 扇区数随卡型变化：普通 1K=16，EV1 1K=18（对齐 CU sectorCount(isEV1)）。
+    var sectorCount = 16;
+    var isEV1 = false;
+    List<SectorKeyState> sectorKeys = List.generate(16, (s) => SectorKeyState(s));
     final crackTick = ValueNotifier<int>(0);
     final hardnestedNotifier = ValueNotifier<bool>(false);
     var crackUidHex = '';
@@ -678,10 +745,14 @@ class _IcTabState extends State<IcTab> {
       final tags = await _dev.cmdHf14aScan();
       if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
       final tag = tags.first;
-      if (tag.sakHex != '08') {
+      // SAK=0x08 普通 1K；0x18 MIFARE Classic EV1(1K)。其余非标准 M1 无法破解
+      if (tag.sakHex != '08' && tag.sakHex != '18') {
         _toast('发现非标准M1卡，该卡无法破解');
         return sectorKeys;
       }
+      isEV1 = tag.sakHex == '18';
+      sectorCount = isEV1 ? 18 : 16;
+      sectorKeys = List.generate(sectorCount, (s) => SectorKeyState(s));
       final uid = tag.uid;
       final uidInt = _bytesInt(uid.sublist(0, 4));
 
@@ -812,10 +883,10 @@ class _IcTabState extends State<IcTab> {
         LogService.instance.log('[_crackCard] 3gen uid=$uidInt atks=${encNested.atks.length}');
 
         // 预处理：每扇区 A/B 样本 → nt1/nt2/明文域 par（对齐小程序 resA/resB）
-        final resA = List<Map<String, int>?>.filled(16, null);
-        final resB = List<Map<String, int>?>.filled(16, null);
-        final resAKeys = List<List<int>?>.filled(16, null);
-        final resBKeys = List<List<int>?>.filled(16, null);
+        final resA = List<Map<String, int>?>.filled(sectorCount, null);
+        final resB = List<Map<String, int>?>.filled(sectorCount, null);
+        final resAKeys = List<List<int>?>.filled(sectorCount, null);
+        final resBKeys = List<List<int>?>.filled(sectorCount, null);
         int fixPar(int par, int ntEnc) =>
             (((par >> 3) & 1) ^ Crypto1.oddParity8((ntEnc >> 24) & 255)) << 3 |
             (((par >> 2) & 1) ^ Crypto1.oddParity8((ntEnc >> 16) & 255)) << 2 |
@@ -842,7 +913,7 @@ class _IcTabState extends State<IcTab> {
         Future<void> verifyKeys(List<int> cands) async {
           if (cands.isEmpty) return;
           LogService.instance.log('[_crackCard] 3gen verify candidates=${cands.length}');
-          for (var s = 0; s < 16; s++) {
+          for (var s = 0; s < sectorKeys.length; s++) {
             checkStop();
             if (!sectorKeys[s].hasKeyA) {
               final f = await _verifyCandidates(s, 2, cands);
@@ -865,7 +936,7 @@ class _IcTabState extends State<IcTab> {
 
         // 种子恢复（对齐小程序 CrackAll_bySeedNt）：A 已知推 B，B 已知推 A
         Future<void> crackAllBySeedNt() async {
-          for (var s = 0; s < 16; s++) {
+          for (var s = 0; s < sectorKeys.length; s++) {
             checkStop();
             final ra = resA[s];
             final rb = resB[s];
@@ -967,7 +1038,7 @@ class _IcTabState extends State<IcTab> {
         final allDone = sectorKeys.every((sk) => sk.hasKeyA && sk.hasKeyB);
         if (!allDone) {
           final missing = <String>[];
-          for (var s = 0; s < 16; s++) {
+          for (var s = 0; s < sectorKeys.length; s++) {
             if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
               missing.add(
                   '$s(${!sectorKeys[s].hasKeyA ? 'A' : ''}${!sectorKeys[s].hasKeyB ? 'B' : ''})');
@@ -982,83 +1053,6 @@ class _IcTabState extends State<IcTab> {
         if (mounted) Navigator.of(context).pop();
         _toast(allDone ? '第三代无漏洞卡破解成功' : '部分扇区密钥未恢复');
         return sectorKeys;
-      }
-
-      // 后门卡前置路由（对齐 CU recoverKeys 开头 mfClassicHasBackdoor）：
-      // 采集 ntEnc 动态即后门卡，当场识别路由，跳过 Darkside 数分钟弯路
-      if (backdoorAcq != null && backdoorAcq.atks.isNotEmpty) {
-        LogService.instance.log(
-            '[解卡] 前置探测: 后门采集成功(ntEnc动态), 识别为后门卡, 尝试后门key认证');
-        String? backdoorHit;
-        for (final sk in _backdoorKeys) {
-          checkStop();
-          if (await _dev.cmdMf1CheckBlockKey(
-              block: 0, keyType: KeyType.keyA, key: _hex(sk))) {
-            backdoorHit = sk;
-            break;
-          }
-        }
-        if (backdoorHit != null) {
-          LogService.instance.log(
-              '[解卡] 后门key=$backdoorHit 普通认证命中扇区0 keyA, 走常规流程(字典+PRNG分型)');
-          sectorKeys[0].hasKeyA = true;
-          sectorKeys[0].keyA = backdoorHit;
-          _appendKeysFromSectors(sectorKeys);
-          await _propagateKeys(sectorKeys);
-          crackTick.value++;
-          // 不 return，落到下方字典检查与 PRNG 分型常规流程
-        } else {
-          // 真加密后门卡（后门 key 非真 key）：对齐 CU recovery.dart:314，
-          // WEAK 时用 0x64 后门认证采集嵌套走 nested，比静态加密恢复精准
-          final uidInt = _bytesInt(backdoorAcq.uid.sublist(0, 4));
-          final prng = await _dev.cmdMf1TestPrngType();
-          if (prng == 1) {
-            LogService.instance.log(
-                '[解卡] 后门key认证未命中, WEAK卡走0x64后门认证nested(对齐CU backdoor nested)');
-            progress.value = '破解密钥：后门卡弱随机嵌套攻击...';
-            String? rec;
-            try {
-              rec = await _crackSectorKey(
-                  uidInt, 0, KeyType.keyA, 1,
-                  0, KeyType.keyA, _backdoorKeys.first,
-                  progress: progress, checkStop: checkStop,
-                  authKeyType: KeyType.backdoor,
-                  verifySectorKeys: sectorKeys);
-            } catch (_) {}
-            if (rec != null) {
-              LogService.instance.log(
-                  '[解卡] 0x64后门nested恢复扇区0 keyA=$rec, 走常规流程');
-              sectorKeys[0].hasKeyA = true;
-              sectorKeys[0].keyA = rec;
-              _appendKeysFromSectors(sectorKeys);
-              await _propagateKeys(sectorKeys);
-              crackTick.value++;
-              // 不 return，落到下方字典检查与 PRNG 分型常规流程
-            } else {
-              LogService.instance.log(
-                  '[解卡] 0x64后门nested未恢复, 走backdoor静态加密恢复');
-              await _crackBackdoorNested(
-                  acq: backdoorAcq,
-                  sectorKeys: sectorKeys,
-                  progress: progress,
-                  crackTick: crackTick,
-                  checkStop: checkStop);
-              if (mounted) Navigator.of(context).pop();
-              return sectorKeys;
-            }
-          } else {
-            LogService.instance.log(
-                '[解卡] 后门key认证未命中, 走backdoor静态加密恢复');
-            await _crackBackdoorNested(
-                acq: backdoorAcq,
-                sectorKeys: sectorKeys,
-                progress: progress,
-                crackTick: crackTick,
-                checkStop: checkStop);
-            if (mounted) Navigator.of(context).pop();
-            return sectorKeys;
-          }
-        }
       }
 
       // 验证密钥：验证中...
@@ -1081,7 +1075,7 @@ class _IcTabState extends State<IcTab> {
         if (idx > 0 && idx <= dictKeysHex.length) {
           dictStart = idx;
           final skList = (resume['sectorKeys'] as List?) ?? [];
-          for (var s = 0; s < 16 && s < skList.length; s++) {
+          for (var s = 0; s < sectorKeys.length && s < skList.length; s++) {
             final a = (skList[s] as List)[0] as String?;
             final b = (skList[s] as List)[1] as String?;
             if (a != null && a.isNotEmpty) {
@@ -1148,7 +1142,7 @@ class _IcTabState extends State<IcTab> {
       int eSector = -1;
       KeyType eKeyType = KeyType.keyA;
       String eKeyHex = '';
-      for (var s = 0; s < 16; s++) {
+      for (var s = 0; s < sectorKeys.length; s++) {
         if (sectorKeys[s].hasKeyA && sectorKeys[s].keyA.isNotEmpty) {
           eSector = s;
           eKeyType = KeyType.keyA;
@@ -1163,11 +1157,19 @@ class _IcTabState extends State<IcTab> {
         }
       }
 
-      // 全加密卡：Darkside 攻击块0 keyA
+      // 对齐 CU recoverKeys：getMf1NTLevel 在 Darkside 之前测量 PRNG 分型，
+      // 用于 Darkside 触发条件（prng!=static 才走 Darkside）。后续逐扇区复用。
+      // 可变：CU 会在 validKey 定位后把 prng 升级为 backdoor（阅读后续转换）
+      var prng = await _dev.cmdMf1TestPrngType();
+
+      // 全加密卡：Darkside 攻击（对齐 CU getMf1Darkside(block 0x03, keyB 0x61)，恢复扇区0 keyB）
+      // 对齐 CU recoverKeys 步骤5条件：!hasKey && !isStaticEncrypted && prng!=static。
+      // eSector==-1 即 !hasKey；isStaticEncrypted 卡（ntEnc 静态）已在 3gen 路由返回，
+      // 落到此处必非静态加密；prng!=0(static) 为条件第三项。
       // C 库可用（对齐 CU 官方）：前置探测(syncMax=2) → 5次样本累积(syncMax=15)
       // → PM3 nonce2key C 恢复 → 候选上卡验证
       // C 库不可用（回退小程序 hS.darkside 移植算法）：256轮逐条采集+JS式恢复
-      if (eSector == -1) {
+      if (eSector == -1 && prng != 0) {
         progress.value = '破解密钥：发现全加密卡，检测Darkside漏洞...';
         try {
           int? darkKey;
@@ -1336,8 +1338,8 @@ class _IcTabState extends State<IcTab> {
           LogService.instance.log(
               '[解卡] 全加密卡Darkside攻击成功, 恢复扇区0 keyB=$darkHex, 进入半加密流程');
         } catch (e) {
-          // 透传具体失败原因（对齐小程序 catch 显示采集cb的报错）：
-          // 无漏洞卡/卡无响应/LUCKY_AUTH_OK/256轮穷尽各自可见
+          // 透传具体失败原因（对齐 CU：Darkside 非致命，回落后续 backdoor-nested/
+          // 逐扇区；仅在真正无任何可恢复密钥时由下方守卫报错）
           LogService.instance.log('[解卡] Darkside异常: $e');
           _appendKeysFromSectors(sectorKeys);
           // 诊断卡 PRNG 类型，辅助判断是否因 syncMax/采样问题误判
@@ -1345,19 +1347,115 @@ class _IcTabState extends State<IcTab> {
             final dp = await _dev.cmdMf1TestPrngType();
             LogService.instance.log('[解卡] Darkside失败后 PRNG分型=$dp (0=static 1=weak 2=hard)');
           } catch (_) {}
-          // 后门卡已在开头前置路由（对齐 CU recoverKeys），此处仅剩无后门的全加密卡
-          progress.value = '解卡片：$e';
-          if (mounted) Navigator.of(context).pop();
-          _toast('Darkside攻击失败: $e\n若卡曾被反复认证, 请离开读卡器10秒后重放再试');
-          return sectorKeys;
+          progress.value = '破解密钥：Darkside不可用($e)，尝试其它恢复方式...';
+          // 不 return：CU recoverKeys 在 Darkside 后继续 backdoor-nested 与逐扇区
         }
+      }
+
+      // 后门卡嵌套/静态加密恢复（对齐 CU recoverKeys 步骤6-7：置于 Darkside 之后，
+      // 即先 Darkside 后 backdoor-nested）：
+      // 采集 ntEnc 动态即后门卡。已通过上文 Darkside（若适用）；此处尝试后门 key
+      // 普通认证，或真加密后门卡引入 0x64 嵌套 / 静态加密恢复。
+      if (backdoorAcq != null && backdoorAcq.atks.isNotEmpty) {
+        LogService.instance.log(
+            '[解卡] 前置探测: 后门采集成功(ntEnc动态), 识别为后门卡, 尝试后门key认证');
+        String? backdoorHit;
+        for (final sk in _backdoorKeys) {
+          checkStop();
+          if (await _dev.cmdMf1CheckBlockKey(
+              block: 0, keyType: KeyType.keyA, key: _hex(sk))) {
+            backdoorHit = sk;
+            break;
+          }
+        }
+        if (backdoorHit != null) {
+          LogService.instance.log(
+              '[解卡] 后门key=$backdoorHit 普通认证命中扇区0 keyA, 走常规流程(PRNG分型)');
+          sectorKeys[0].hasKeyA = true;
+          sectorKeys[0].keyA = backdoorHit;
+          eSector = 0;
+          eKeyType = KeyType.keyA;
+          eKeyHex = backdoorHit;
+          _appendKeysFromSectors(sectorKeys);
+          await _propagateKeys(sectorKeys);
+          crackTick.value++;
+          // 不 return，落到下方逐扇区 PRNG 分型流程
+        } else {
+          // 真加密后门卡（后门 key 非真 key）：对齐 CU recovery.dart:314，
+          // WEAK 时用 0x64 后门认证采集嵌套走 nested，比静态加密恢复精准
+          final uidInt = _bytesInt(backdoorAcq.uid.sublist(0, 4));
+          // 复用上文 Darkside 前测得的 prng（对齐 CU 只测一次 getMf1NTLevel）
+          if (prng == 1) {
+            LogService.instance.log(
+                '[解卡] 后门key认证未命中, WEAK卡走0x64后门认证nested(对齐CU backdoor nested)');
+            progress.value = '破解密钥：后门卡弱随机嵌套攻击...';
+            String? rec;
+            try {
+              rec = await _crackSectorKey(
+                  uidInt, 0, KeyType.keyA, 1,
+                  0, KeyType.keyA, _backdoorKeys.first,
+                  progress: progress, checkStop: checkStop,
+                  authKeyType: KeyType.backdoor,
+                  verifySectorKeys: sectorKeys);
+            } catch (_) {}
+            if (rec != null) {
+              LogService.instance.log(
+                  '[解卡] 0x64后门nested恢复扇区0 keyA=$rec, 走常规流程');
+              sectorKeys[0].hasKeyA = true;
+              sectorKeys[0].keyA = rec;
+              eSector = 0;
+              eKeyType = KeyType.keyA;
+              eKeyHex = rec;
+              _appendKeysFromSectors(sectorKeys);
+              await _propagateKeys(sectorKeys);
+              crackTick.value++;
+              // 不 return，落到下方逐扇区 PRNG 分型流程
+            } else {
+              LogService.instance.log(
+                  '[解卡] 0x64后门nested未恢复, 走backdoor静态加密恢复');
+              // 对齐 CU recoverKeys:377 升级 prng=backdoor，落到逐扇区
+              // staticEncryptedNested 分支统一处理（不再于此提前返回）
+              prng = 3;
+            }
+          } else {
+            LogService.instance.log(
+                '[解卡] 后门key认证未命中, 走backdoor静态加密恢复');
+            // 对齐 CU recoverKeys:377（validKeyType可能仍为-1但 hasBackdoor）：
+            // 升级 prng=backdoor 落到逐扇区 staticEncryptedNested 分支
+            prng = 3;
+          }
+        }
+      }
+
+      // 对齐 CU recoverKeys:369-372 prng=backdoor 转换：
+      //   若 (isStaticEncrypted || (validKeyType==-1 && hasBackdoor)) 且 backdoorInfo!=null，
+      //   则 prng=backdoor。nfctool 静态加密卡已在 3gen 路由返回，故 isStaticEncrypted 恒为
+      //   false，此处只需处理「无任何已知密钥但有后门采集数据」的情况（真后门解密卡）。
+      if (backdoorAcq != null && eSector == -1) {
+        LogService.instance.log('[解卡] 无已知密钥但有后门采集数据, 升级 prng=backdoor 逐扇区静态加密恢复');
+        prng = 3;
+      }
+
+      // 对齐 CU recoverKeys:374 守卫：validKeyType==-1（Darkside/backdoor-nested 均未恢复
+      // 出密钥）且 prng!=backdoor 时，报无可用密钥错误终止，避免下游以无效 eSector 运行
+      if (eSector == -1 && prng != 3) {
+        progress.value = '破解失败：未恢复出任何密钥，无法逐扇区破解';
+        LogService.instance.log(
+            '[解卡] 无任何已知密钥(Darkside/backdoor均未奏效), 终止逐扇区破解');
+        if (mounted) Navigator.of(context).pop();
+        _toast('破解失败：未能恢复出任何密钥。若卡曾被反复认证，请离开读卡器10秒后重放再试');
+        return sectorKeys;
       }
 
       // 解卡片：逐扇区破解（对齐小程序 Crack()）
       step.value = 1;
-      final prng = await _dev.cmdMf1TestPrngType();
+      // prng 已在 Darkside 之前通过 cmdMf1TestPrngType 测量（对齐 CU getMf1NTLevel），
+      // 此处复用，不再重复探测。
 
-      if (prng >= 2) {
+      // 对齐 CU recoverKeys 逐扇区 prng==hard 分支（recovery.dart:419-436）：
+      // hard 卡（国产兼容）走本地 Hardnested。注意用 prng==2（非 >=2），
+      // prng==3 是后门转换值，走下方 staticEncryptedNested 分支
+      if (prng == 2) {
         progress.value = '解卡片：该卡片为国产兼容卡\n正在本地Hardnested破解...';
         LogService.instance.log(
             '[解卡] HARD卡进入本地Hardnested流程(纯本地计算, 无云端)');
@@ -1392,6 +1490,23 @@ class _IcTabState extends State<IcTab> {
         return sectorKeys;
       }
 
+      // 对齐 CU recoverKeys 逐扇区 prng==backdoor 分支（recovery.dart:477-535）：
+      // 用后门预采集的每家非 plastic nt 经 staticEncryptedNested 逐扇区恢复
+      // keyA/keyB（filterKeys 交集过滤 + 上卡验证）。CU 在逐扇区循环内按扇区处理，
+      // nfctool _crackBackdoorNested 内部按扇区聚合等价实现。
+      if (prng == 3) {
+        LogService.instance.log(
+            '[解卡] PRNG=backdoor: 逐扇区 StaticEncryptedNested 恢复(对齐CU 后门卡逐扇区)');
+        await _crackBackdoorNested(
+            acq: backdoorAcq!,
+            sectorKeys: sectorKeys,
+            progress: progress,
+            crackTick: crackTick,
+            checkStop: checkStop);
+        if (mounted) Navigator.of(context).pop();
+        return sectorKeys;
+      }
+
       // STATIC (prng==0) 或 WEAK (prng==1)：逐扇区破解 keyA 和 keyB
       final prngName = prng >= 2
           ? 'HARD硬加密(PRNG不可预测, 无本地漏洞, 走Hardnested采集计算)'
@@ -1400,7 +1515,7 @@ class _IcTabState extends State<IcTab> {
               : 'STATIC静态(固定nonce, 有静态漏洞)';
       LogService.instance.log(
           '[解卡] PRNG分型=$prng -> $prngName; 已知密钥: 扇区$eSector ${eKeyType.label}=$eKeyHex');
-      for (var s = 0; s < 16; s++) {
+      for (var s = 0; s < sectorKeys.length; s++) {
         checkStop();
         if (!sectorKeys[s].hasKeyA) {
           progress.value = prng == 0
@@ -1458,7 +1573,7 @@ class _IcTabState extends State<IcTab> {
       // 检查是否全部破解成功（对齐小程序 Check_Crack_isfaild）
       var allFound = true;
       final missing = <String>[];
-      for (var s = 0; s < 16; s++) {
+      for (var s = 0; s < sectorKeys.length; s++) {
         if (!sectorKeys[s].hasKeyA || !sectorKeys[s].hasKeyB) {
           allFound = false;
           missing.add(
@@ -1466,7 +1581,8 @@ class _IcTabState extends State<IcTab> {
         }
       }
       if (allFound) {
-        LogService.instance.log('[解卡] 全部16扇区A/B密钥破解成功');
+        LogService.instance.log(
+            '[解卡] 全部${sectorKeys.length}扇区A/B密钥破解成功');
         progress.value = '解卡片：破解成功，已重新标记密钥信息.';
         if (mounted) Navigator.of(context).pop();
         _toast('破解成功');
@@ -1813,7 +1929,7 @@ class _IcTabState extends State<IcTab> {
     // 掩码语义：位=1 为已知槽（固件跳过），位=0 为待检查槽，故以全 0xFF 为底再清位
     mask.fillRange(0, 10, 0xFF);
     if (sectorKeys != null) {
-      for (var s = 0; s < 16; s++) {
+      for (var s = 0; s < sectorKeys.length; s++) {
         if (sectorKeys[s].hasKeyA) mask[s >> 2] ^= 2 << (6 - s % 4 * 2);
         if (sectorKeys[s].hasKeyB) mask[s >> 2] ^= 1 << (6 - s % 4 * 2);
       }
