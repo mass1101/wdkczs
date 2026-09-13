@@ -1704,7 +1704,7 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     for (var i = 0; i < _counterCount; i++) {
       final counter = _ulCounterCtrls[i].text.trim();
       if (counter.isNotEmpty) {
-        await device.cmdMf0EmuSetCounterData(i, int.parse(counter), false);
+        await device.cmdMf0EmuSetCounterData(i, int.parse(counter), true);
       }
     }
   }
