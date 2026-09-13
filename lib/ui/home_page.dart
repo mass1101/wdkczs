@@ -9,9 +9,10 @@ import '../ui/tabs/ic_tab.dart';
 import '../ui/tabs/id_tab.dart';
 import '../ui/tabs/library_tab.dart';
 import '../ui/tabs/settings_tab.dart';
+import 'screens/geofence_screen.dart';
 import 'widgets/common.dart';
 
-/// 主框架：蓝底标题栏 + 胶囊按钮、三 Tab（IC卡/ID卡/设置）、右下角 FAB
+/// 主框架：蓝底标题栏 + 胶囊按钮、五 Tab（IC卡/ID卡/卡库/电子围栏/设置）、右下角 FAB
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -29,7 +30,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _app = AppScope.instance.controller;
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(() {
       _app.setTab(_tabController.index);
     });
@@ -48,7 +49,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       FlutterOverlayWindow.closeOverlay();
       if (!mounted) return;
       _app.geofence.setOverlayActive(false);
-      _tabController.animateTo(2);
+      _tabController.animateTo(3);
     } else if (event is Map) {
       final type = event['type'];
       if (type == 'overlay_error' || type == 'overlay_info') {
@@ -127,6 +128,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 Tab(text: 'IC卡'),
                 Tab(text: 'ID卡'),
                 Tab(text: '卡库'),
+                Tab(text: '电子围栏'),
                 Tab(text: '设置'),
               ],
             ),
@@ -135,11 +137,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: const [
-                IcTab(),
-                IdTab(),
-                LibraryTab(),
-                SettingsTab(),
+              children: [
+                const IcTab(),
+                const IdTab(),
+                LibraryTab(onOpenGeofence: () => _tabController.animateTo(3)),
+                const GeofenceScreen(),
+                const SettingsTab(),
               ],
             ),
           ),

@@ -110,6 +110,7 @@ Map<String, dynamic> _saveCardToCuJson(SaveCard card) {
         'ultralightCounters': card.ultralightCounters,
     },
     if (card.folderId != null) 'folderId': card.folderId,
+    'color': card.colorValue,
     if (card.updatedAt != null) 'updatedAt': card.updatedAt!.toIso8601String(),
   };
 
@@ -176,6 +177,7 @@ SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
         ultralightCounters:
             counters.map((e) => (e as num).toInt()).toList(),
         folderId: map['folderId'] as String?,
+        colorValue: (map['color'] as num?)?.toInt() ?? 0xFFFF5722,
         updatedAt:
             map['updatedAt'] == null ? null : DateTime.tryParse(map['updatedAt'] as String),
       );
@@ -191,6 +193,7 @@ SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
       tag: tag,
       id: map['id'] as String?,
       folderId: map['folderId'] as String?,
+      colorValue: (map['color'] as num?)?.toInt() ?? 0xFFFF5722,
     );
   } catch (_) {
     return null;

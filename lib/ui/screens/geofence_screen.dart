@@ -1,16 +1,22 @@
+import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../helpers/coordinate_converter.dart';
 import '../../main.dart';
+import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
-import '../widgets/common.dart' show ActionButton;
 
-/// 电子围栏管理页：围栏列表 + 新增/编辑 + 启用开关 + 日志
+/// 电子围栏列表页：全屏地图 + 浮动控件 + 底部可拖拽围栏列表（对齐 CU geofence_list.dart）
 class GeofenceScreen extends StatefulWidget {
   const GeofenceScreen({super.key});
 
@@ -20,17 +26,32 @@ class GeofenceScreen extends StatefulWidget {
 
 class _GeofenceScreenState extends State<GeofenceScreen> {
   late final GeofenceProvider _geo;
+  final MapController _mapController = MapController();
+  bool _useSatellite = false;
+  LatLng _currentPosition = const LatLng(39.9042, 116.4074);
+  bool _positionLoaded = false;
+  bool _followMe = true;
+  String _statusMessage = '';
+
+  String? _dragFenceId;
+  LatLng? _dragStartLatLng;
+  LatLng? _dragHandleLatLng;
+  final Map<String, List<LatLng>> _liveDragPoints = {};
+  String? _selectedFenceId;
+  final _mapReadyCompleter = Completer<void>();
 
   @override
   void initState() {
     super.initState();
     _geo = AppScope.instance.controller.geofence;
     _geo.addListener(_onChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _locateMe());
   }
 
   @override
   void dispose() {
     _geo.removeListener(_onChange);
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -45,321 +66,831 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
       ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Scaffold(
-      appBar: AppBar(title: const Text('电子围栏')),
-      backgroundColor: const Color(0xFFF5F6F8),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          _switchCard(primary),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              ActionButton(label: '新增围栏', icon: Icons.add, onTap: _addFence),
-              const SizedBox(width: 8),
-              ActionButton(label: '检查间隔', icon: Icons.timer, onTap: _setInterval),
-              const SizedBox(width: 8),
-              ActionButton(
-                label: _geo.overlayActive ? '关闭悬浮窗' : '开启悬浮窗',
-                icon: _geo.overlayActive ? Icons.cancel : Icons.picture_in_picture_alt,
-                onTap: _toggleOverlay,
-              ),
-              const SizedBox(width: 8),
-              ActionButton(label: '清空日志', icon: Icons.delete_sweep, onTap: _geo.clearLogs),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_geo.fences.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                  child: Text('暂无围栏，点击「新增围栏」创建',
-                      style: TextStyle(color: Colors.grey))),
-            )
-          else
-            ..._geo.fences.map((f) => _fenceCard(f, primary)),
-          const SizedBox(height: 12),
-          const Text('运行日志', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          if (_geo.logs.isEmpty)
-            const Text('暂无日志', style: TextStyle(color: Colors.grey, fontSize: 12))
-          else
-            ..._geo.logs.reversed.map(
-                (l) => Text(l, style: const TextStyle(fontSize: 12, color: Color(0xFF666666)))),
-        ],
-      ),
-    );
-  }
-
-  Widget _switchCard(Color primary) {
-    return Card(
-      child: SwitchListTile(
-        value: _geo.userEnabled,
-        onChanged: (v) => _geo.setEnabled(v),
-        activeTrackColor: primary,
-        title: const Text('启用电子围栏'),
-        subtitle: Text(
-          _geo.userEnabled
-              ? '检测间隔 ${_geo.checkInterval} 秒 | 命中自动切卡槽/上传卡片'
-              : '检测间隔 ${_geo.checkInterval} 秒',
-          style: const TextStyle(fontSize: 12),
-        ),
-      ),
-    );
-  }
-
-  Widget _fenceCard(Geofence f, Color primary) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 6,
-          backgroundColor: Color(f.colorValue),
-        ),
-        title: Text('${f.name}  →  卡槽 ${f.slotNumber}'),
-        subtitle: Text(
-            '${f.points.length} 个顶点 | ${f.cardLibraryMode ? '卡库模式·' : ''}${f.rollingCode ? '滚动码' : '普通'}',
-            style: const TextStyle(fontSize: 12)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Switch(
-              value: f.enabled,
-              onChanged: (v) => _geo.toggleFence(f.id, v),
-            ),
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'edit') _editFence(f);
-                if (v == 'delete') _deleteFence(f);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'edit', child: Text('编辑')),
-                PopupMenuItem(value: 'delete', child: Text('删除')),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ========== 新增/编辑 ==========
-  Future<void> _addFence() async {
-    if (_geo.lastPosition == null) {
-      _toast('暂无位置，请先启用电子围栏获取定位用于默认坐标');
+  Future<LatLng?> _getGcjPosition() async {
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      return CoordinateConverter.wgs84ToGcj02(
+          LatLng(position.latitude, position.longitude));
+    } catch (_) {
+      return null;
     }
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => _FenceEditPage(provider: _geo, fence: null)),
-    );
   }
 
-  Future<void> _editFence(Geofence f) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => _FenceEditPage(provider: _geo, fence: f)),
-    );
+  Future<void> _locateMe() async {
+    final target = _geo.lastPosition ?? await _getGcjPosition();
+    if (!mounted || target == null) return;
+    setState(() {
+      _currentPosition = target;
+      _positionLoaded = true;
+      _statusMessage = '已定位到当前位置';
+    });
+    await _mapReadyCompleter.future;
+    if (!mounted) return;
+    _mapController.move(target, 16.0);
   }
 
-  Future<void> _deleteFence(Geofence f) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除围栏'),
-        content: Text('确定删除「${f.name}」？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
-        ],
-      ),
-    );
-    if (ok == true) _geo.deleteFence(f.id);
-  }
-
-  Future<void> _setInterval() async {
-    final ctrl = TextEditingController(text: '${_geo.checkInterval}');
-    final v = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('检测间隔（秒）'),
-        content: TextField(
-            controller: ctrl,
-            keyboardType: TextInputType.number,
-            autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text) ?? 30),
-              child: const Text('确定')),
-        ],
-      ),
-    );
-    if (v != null && v >= 5) _geo.setCheckInterval(v);
-  }
-
-  Future<void> _toggleOverlay() async {
+  Future<void> _enterFloatingWindow() async {
     if (_geo.overlayActive) {
       await FlutterOverlayWindow.closeOverlay();
       _geo.setOverlayActive(false);
       return;
     }
-    final granted = await FlutterOverlayWindow.isPermissionGranted();
+    final granted = await Permission.systemAlertWindow.isGranted;
     if (!granted) {
-      final ok = await FlutterOverlayWindow.requestPermission();
-      if (ok != true) {
-        _toast('需要悬浮窗权限才能开启电子围栏悬浮窗');
+      final status = await Permission.systemAlertWindow.request();
+      if (status != PermissionStatus.granted) {
+        _toast('需要悬浮窗权限');
         return;
       }
     }
     if (await Permission.notification.isDenied) {
       await Permission.notification.request();
     }
-    await FlutterOverlayWindow.showOverlay(
-      overlayTitle: '电子围栏',
-      overlayContent: '正在监控围栏位置',
-      enableDrag: true,
-    );
     _geo.setOverlayActive(true);
+    try {
+      await FlutterOverlayWindow.showOverlay(
+        height: 130,
+        width: 210,
+        alignment: OverlayAlignment.topRight,
+        enableDrag: true,
+        positionGravity: PositionGravity.none,
+        overlayTitle: 'NFC围栏',
+        overlayContent: '围栏悬浮窗运行中',
+      );
+    } catch (e) {
+      _geo.addLog('悬浮窗启动异常: $e');
+    }
   }
-}
 
-/// 围栏编辑页：名称/目标卡槽/顶点坐标 + 卡库卡选择
-class _FenceEditPage extends StatefulWidget {
-  final GeofenceProvider provider;
-  final Geofence? fence;
-  const _FenceEditPage({required this.provider, this.fence});
+  List<LatLng> _pointsForFence(Geofence fence) {
+    return _liveDragPoints[fence.id] ?? fence.points;
+  }
+
+  Geofence? _fenceById(String id) {
+    for (final f in _geo.fences) {
+      if (f.id == id) return f;
+    }
+    return null;
+  }
+
+  List<Polygon> _buildPolygons() {
+    final polygons = <Polygon>[];
+    for (final fence in _geo.fences) {
+      final points = _pointsForFence(fence);
+      if (points.length < 3) continue;
+      final color = fence.enabled ? Color(fence.colorValue) : Colors.grey;
+      polygons.add(Polygon(
+        points: points,
+        color: color.withValues(alpha: 0.2),
+        borderColor: color,
+        borderStrokeWidth: 2,
+      ));
+    }
+    return polygons;
+  }
+
+  List<Marker> _buildFenceCenterMarkers() {
+    final markers = <Marker>[];
+    for (final fence in _geo.fences) {
+      final points = _pointsForFence(fence);
+      if (points.isEmpty) continue;
+      final isActive = fence.id == _selectedFenceId;
+      final center = (isActive && _dragHandleLatLng != null)
+          ? _dragHandleLatLng!
+          : _polygonCenter(points);
+      markers.add(Marker(
+        point: center,
+        width: 44,
+        height: 44,
+        child: _FenceDragHandle(
+          fence: fence,
+          active: isActive,
+          onDragStart: () => _startFenceDrag(fence.id, center),
+          onDragDelta: _updateFenceDrag,
+          onDragEnd: _endFenceDrag,
+        ),
+      ));
+    }
+    return markers;
+  }
+
+  void _startFenceDrag(String fenceId, LatLng handleStart) {
+    setState(() {
+      _dragFenceId = fenceId;
+      _selectedFenceId = fenceId;
+      _dragStartLatLng = handleStart;
+      _dragHandleLatLng = handleStart;
+    });
+  }
+
+  void _updateFenceDrag(Offset cumulativeDelta) {
+    final fenceId = _dragFenceId;
+    final start = _dragStartLatLng;
+    if (fenceId == null || start == null) return;
+    final fence = _fenceById(fenceId);
+    if (fence == null) return;
+    final camera = _mapController.camera;
+    final startScreen = camera.latLngToScreenPoint(start);
+    final newScreen = Point(startScreen.x + cumulativeDelta.dx,
+        startScreen.y + cumulativeDelta.dy);
+    final newLatLng = camera.pointToLatLng(newScreen);
+    final latDelta = newLatLng.latitude - start.latitude;
+    final lngDelta = newLatLng.longitude - start.longitude;
+    setState(() {
+      _dragHandleLatLng = newLatLng;
+      _liveDragPoints[fenceId] = fence.points
+          .map((p) => LatLng(p.latitude + latDelta, p.longitude + lngDelta))
+          .toList();
+    });
+  }
+
+  void _endFenceDrag() {
+    final fenceId = _dragFenceId;
+    if (fenceId != null) {
+      final moved = _liveDragPoints[fenceId];
+      final fence = _fenceById(fenceId);
+      if (fence != null && moved != null) {
+        _geo.updateFence(fence.copyWith(points: moved));
+      }
+    }
+    setState(() {
+      _dragFenceId = null;
+      _dragStartLatLng = null;
+      _dragHandleLatLng = null;
+      _liveDragPoints.clear();
+    });
+  }
+
+  void _onMapTap(TapPosition tapPosition, LatLng point) {
+    Geofence? hit;
+    for (final fence in _geo.fences) {
+      if (fence.points.length >= 3 &&
+          GeofenceMatcher.isPointInPolygon(point, fence.points)) {
+        hit = fence;
+      }
+    }
+    setState(() {
+      _selectedFenceId = hit?.id;
+      _dragHandleLatLng = hit != null ? point : null;
+    });
+  }
+
+  LatLng _polygonCenter(List<LatLng> points) {
+    var lat = 0.0;
+    var lng = 0.0;
+    for (final p in points) {
+      lat += p.latitude;
+      lng += p.longitude;
+    }
+    return LatLng(lat / points.length, lng / points.length);
+  }
 
   @override
-  State<_FenceEditPage> createState() => _FenceEditPageState();
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final latest = _geo.lastPosition;
+    if (latest != null && latest != _currentPosition) {
+      _currentPosition = latest;
+      _positionLoaded = true;
+      if (_followMe) {
+        final zoom = _mapController.camera.zoom;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _mapController.move(latest, zoom);
+        });
+      }
+    }
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _currentPosition,
+              initialZoom: 15.0,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
+              ),
+              onMapReady: () {
+                if (!_mapReadyCompleter.isCompleted) {
+                  _mapReadyCompleter.complete();
+                }
+              },
+              onTap: _onMapTap,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: _useSatellite
+                    ? 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}'
+                    : 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+                subdomains: const ['1', '2', '3', '4'],
+                userAgentPackageName: 'com.z.nfc',
+              ),
+              PolygonLayer(polygons: _buildPolygons()),
+              MarkerLayer(markers: _buildFenceCenterMarkers()),
+              if (_positionLoaded)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: _currentPosition,
+                      width: 24,
+                      height: 24,
+                      child: const Icon(Icons.my_location, color: Colors.blue, size: 24),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: (isDark ? Colors.black87 : Colors.white).withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.fence, size: 18, color: primary),
+                      const SizedBox(width: 6),
+                      const Text('电子围栏', style: TextStyle(fontWeight: FontWeight.w600)),
+                      if (_statusMessage.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _statusMessage,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('总开关', style: TextStyle(fontSize: 12)),
+                      Switch(
+                        value: _geo.userEnabled,
+                        onChanged: (v) {
+                          _geo.setEnabled(v);
+                          setState(() => _statusMessage = v ? '围栏已开启' : '围栏已关闭');
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: _buildDiagnostics(isDark),
+          ),
+          Positioned(
+            right: 8,
+            bottom: 120,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'mapType',
+                  onPressed: () {
+                    setState(() {
+                      _useSatellite = !_useSatellite;
+                      _statusMessage = _useSatellite ? '已切换卫星地图' : '已切换普通地图';
+                    });
+                  },
+                  child: Icon(
+                    _useSatellite ? Icons.map_outlined : Icons.satellite_alt_outlined,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'overlay',
+                  backgroundColor: Colors.indigo,
+                  onPressed: _enterFloatingWindow,
+                  tooltip: '悬浮窗模式',
+                  child: const Icon(Icons.picture_in_picture_alt, size: 18),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'follow',
+                  backgroundColor: _followMe ? Colors.blue : null,
+                  onPressed: () {
+                    setState(() {
+                      _followMe = !_followMe;
+                      _statusMessage = _followMe ? '地图跟随已开启' : '地图跟随未开启';
+                    });
+                    if (_followMe) _locateMe();
+                  },
+                  child: Icon(_followMe ? Icons.gps_fixed : Icons.gps_not_fixed),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'locate',
+                  onPressed: _locateMe,
+                  child: const Icon(Icons.my_location),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'addFence',
+                  onPressed: () async {
+                    await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => FenceEditPage(provider: _geo, fence: null),
+                      ),
+                    );
+                  },
+                  child: const Icon(Icons.add),
+                ),
+              ],
+            ),
+          ),
+          _buildBottomSheet(isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiagnostics(bool isDark) {
+    final connected = _geo.connected;
+    final time = _geo.lastPositionTime;
+    final pos = _geo.lastPosition;
+    final matched = _geo.lastMatchedFenceName;
+    final bg = (isDark ? Colors.black87 : Colors.white).withValues(alpha: 0.9);
+    final textStyle = TextStyle(
+      fontSize: 11,
+      color: isDark ? Colors.white : Colors.black87,
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _diagRow(
+            connected ? Icons.link : Icons.link_off,
+            connected ? '设备已连接' : '设备未连接',
+            connected ? Colors.green : Colors.grey,
+            textStyle,
+          ),
+          _diagRow(
+            _geo.monitoring ? Icons.my_location : Icons.location_off,
+            time != null ? '定位 ${_fmtTime(time)}' : '暂无定位',
+            time != null ? Colors.blue : Colors.grey,
+            textStyle,
+          ),
+          if (pos != null)
+            _diagRow(
+              Icons.pin_drop,
+              '坐标 ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
+              Colors.blueGrey,
+              textStyle,
+            ),
+          _diagRow(
+            matched != null ? Icons.fence : Icons.help_outline,
+            matched != null ? '命中: $matched' : '未命中围栏',
+            matched != null ? Colors.orange : Colors.grey,
+            textStyle,
+          ),
+          if (_geo.uploadStatus != null)
+            _diagRow(
+              _geo.uploadStatus == '卡片上传成功' ? Icons.check_circle : Icons.error_outline,
+              _geo.uploadStatus!,
+              _geo.uploadStatus == '卡片上传成功' ? Colors.green : Colors.red,
+              textStyle,
+            ),
+          if (_geo.rollingCodeStatus != null)
+            _diagRow(
+              Icons.sync,
+              _geo.rollingCodeStatus!,
+              Colors.teal,
+              textStyle,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _diagRow(IconData icon, String text, Color color, TextStyle style) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(text, style: style.copyWith(color: color)),
+        ],
+      ),
+    );
+  }
+
+  String _fmtTime(DateTime t) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  Widget _buildBottomSheet(bool isDark) {
+    final fences = _geo.fences;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.12,
+      minChildSize: 0.12,
+      maxChildSize: 0.45,
+      snap: true,
+      snapSizes: const [0.12, 0.45],
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 12,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: CustomScrollView(
+            controller: scrollController,
+            slivers: [
+              SliverToBoxAdapter(
+                child: Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade400,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Text(
+                        '已添加围栏 (${fences.length})',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _showIntervalDialog,
+                        icon: const Icon(Icons.timer_outlined, size: 16),
+                        label: Text('间隔 ${_geo.checkInterval}s',
+                            style: const TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(child: Divider(height: 1)),
+              if (fences.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.fence, size: 40, color: Colors.grey.shade400),
+                        const SizedBox(height: 8),
+                        Text('暂无围栏，点击右下角 + 新建',
+                            style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final fence = fences[index];
+                      return _GeofenceTile(
+                        fence: fence,
+                        onToggle: (v) => _geo.toggleFence(fence.id, v),
+                        onTap: () async {
+                          await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  FenceEditPage(provider: _geo, fence: fence),
+                            ),
+                          );
+                        },
+                        onDelete: () => _confirmDelete(fence),
+                      );
+                    },
+                    childCount: fences.length,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showIntervalDialog() {
+    final controller =
+        TextEditingController(text: _geo.checkInterval.toString());
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('设置检测间隔'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '间隔（秒）',
+            helperText: '最小 5 秒',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              final value = int.tryParse(controller.text);
+              if (value != null && value >= 5) {
+                _geo.setCheckInterval(value);
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDelete(Geofence fence) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除围栏'),
+        content: Text('确定删除围栏"${fence.name}"吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              _geo.deleteFence(fence.id);
+              Navigator.pop(ctx);
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _FenceEditPageState extends State<_FenceEditPage> {
-  late final TextEditingController _name;
-  late final TextEditingController _slot;
-  late final List<TextEditingController> _lat;
-  late final List<TextEditingController> _lng;
-  late bool _cardLibraryMode;
-  late bool _rollingCode;
-  String? _icCardId;
-  late int _colorValue;
-  final MapController _mapController = MapController();
+class _GeofenceTile extends StatelessWidget {
+  final Geofence fence;
+  final void Function(bool) onToggle;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
 
-  List<LatLng> get _currentPoints {
-    final pts = <LatLng>[];
-    for (var i = 0; i < _lat.length; i++) {
-      final lat = double.tryParse(_lat[i].text.trim());
-      final lng = double.tryParse(_lng[i].text.trim());
-      if (lat != null && lng != null) pts.add(LatLng(lat, lng));
-    }
-    return pts;
+  const _GeofenceTile({
+    required this.fence,
+    required this.onToggle,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = fence.enabled ? Color(fence.colorValue) : Colors.grey;
+    return ListTile(
+      dense: true,
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: color,
+        child: const Icon(Icons.fence, size: 18, color: Colors.white),
+      ),
+      title: Text(fence.name,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+      subtitle: Text(
+        '卡槽 ${fence.slotNumber}  |  ${fence.points.length} 个点',
+        style: const TextStyle(fontSize: 12),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Switch(
+            value: fence.enabled,
+            onChanged: onToggle,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: onTap,
+            tooltip: '编辑',
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+            onPressed: onDelete,
+            tooltip: '删除',
+          ),
+        ],
+      ),
+      onTap: onTap,
+    );
   }
+}
+
+class _FenceDragHandle extends StatefulWidget {
+  final Geofence fence;
+  final bool active;
+  final VoidCallback onDragStart;
+  final ValueChanged<Offset> onDragDelta;
+  final VoidCallback onDragEnd;
+
+  const _FenceDragHandle({
+    required this.fence,
+    required this.active,
+    required this.onDragStart,
+    required this.onDragDelta,
+    required this.onDragEnd,
+  });
+
+  @override
+  State<_FenceDragHandle> createState() => _FenceDragHandleState();
+}
+
+class _FenceDragHandleState extends State<_FenceDragHandle> {
+  Offset _cumulativeDelta = Offset.zero;
+
+  @override
+  Widget build(BuildContext context) {
+    return RawGestureDetector(
+      gestures: {
+        EagerGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+          () => EagerGestureRecognizer(),
+          (recognizer) {},
+        ),
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Listener(
+        onPointerDown: (event) {
+          _cumulativeDelta = Offset.zero;
+          widget.onDragStart();
+        },
+        onPointerMove: (event) {
+          _cumulativeDelta += event.delta;
+          widget.onDragDelta(_cumulativeDelta);
+        },
+        onPointerUp: (event) => widget.onDragEnd(),
+        onPointerCancel: (event) => widget.onDragEnd(),
+        child: Container(
+          decoration: BoxDecoration(
+            color: widget.active
+                ? Colors.orange
+                : (widget.fence.enabled ? Color(widget.fence.colorValue) : Colors.grey),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(
+            widget.active ? Icons.open_with : Icons.fence,
+            color: Colors.white,
+            size: 20,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 围栏编辑页：全屏地图 + 表单（对齐 CU geofence_edit.dart）
+class FenceEditPage extends StatefulWidget {
+  final GeofenceProvider provider;
+  final Geofence? fence;
+
+  const FenceEditPage({super.key, required this.provider, this.fence});
+
+  @override
+  State<FenceEditPage> createState() => _FenceEditPageState();
+}
+
+class _FenceEditPageState extends State<FenceEditPage> {
+  final _nameController = TextEditingController();
+  final _labelController = TextEditingController();
+  int _slotNumber = 1;
+  int _colorValue = 0xFF2196F3;
+  List<LatLng> _points = [];
+  final MapController _mapController = MapController();
+  bool _useSatellite = false;
+  bool _cardLibraryMode = false;
+  String? _icCardId;
+  String? _idCardId;
+  bool _rollingCode = false;
+  final _mapReadyCompleter = Completer<void>();
+
+  static const _presetColors = [
+    0xFF2196F3, 0xFFF44336, 0xFF4CAF50, 0xFFFF9800, 0xFF9C27B0,
+    0xFF00BCD4, 0xFFFF5722, 0xFF607D8B, 0xFFE91E63, 0xFF795548,
+  ];
 
   @override
   void initState() {
     super.initState();
-    final f = widget.fence;
-    _name = TextEditingController(text: f?.name ?? '新围栏');
-    _slot = TextEditingController(text: '${f?.slotNumber ?? 1}');
-    final pts = f?.points ??
-        (widget.provider.lastPosition != null
-            ? [widget.provider.lastPosition!]
-            : [LatLng(0, 0)]);
-    _lat = pts.map((p) => TextEditingController(text: p.latitude.toString())).toList();
-    _lng = pts.map((p) => TextEditingController(text: p.longitude.toString())).toList();
-    _cardLibraryMode = f?.cardLibraryMode ?? false;
-    _rollingCode = f?.rollingCode ?? false;
-    _icCardId = f?.icCardId;
-    _colorValue = f?.colorValue ?? 0xFF2196F3;
+    if (widget.fence != null) {
+      _nameController.text = widget.fence!.name;
+      _labelController.text = widget.fence!.label;
+      _slotNumber = widget.fence!.slotNumber;
+      _colorValue = widget.fence!.colorValue;
+      _points = List.from(widget.fence!.points);
+      _cardLibraryMode = widget.fence!.cardLibraryMode;
+      _icCardId = widget.fence!.icCardId;
+      _idCardId = widget.fence!.idCardId;
+      _rollingCode = widget.fence!.rollingCode;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _locateMe());
+    }
   }
 
-  void _addPoint() {
-    setState(() {
-      final p = widget.provider.lastPosition ?? LatLng(0, 0);
-      _lat.add(TextEditingController(text: p.latitude.toString()));
-      _lng.add(TextEditingController(text: p.longitude.toString()));
-    });
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _labelController.dispose();
+    _mapController.dispose();
+    super.dispose();
   }
 
-  void _removePoint(int i) {
-    setState(() {
-      _lat.removeAt(i);
-      _lng.removeAt(i);
-    });
-  }
+  void _addPoint(LatLng point) => setState(() => _points.add(point));
 
-  Future<void> _pickCard() async {
-    final cards = await CardLibraryStorage().getCards();
-    if (!mounted) return;
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('选择绑定的卡库卡片'),
-        children: cards.isEmpty
-            ? const [Padding(padding: EdgeInsets.all(20), child: Text('卡库为空'))]
-            : cards
-                .map((c) => SimpleDialogOption(
-                      onPressed: () => Navigator.pop(ctx, c.id),
-                      child: Text('${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]'),
-                    ))
-                .toList(),
-      ),
-    );
-    if (name != null) setState(() => _icCardId = name);
-  }
+  void _removePoint(int index) => setState(() => _points.removeAt(index));
 
-  Future<void> _save() async {
-    final name = _name.text.trim();
-    final slot = int.tryParse(_slot.text.trim()) ?? 1;
-    if (name.isEmpty) {
+  void _clear() => setState(() => _points.clear());
+
+  void _cancel() => Navigator.pop(context);
+
+  void _save() {
+    if (_points.length < 3) {
+      _toast('至少需要 3 个点才能形成围栏');
+      return;
+    }
+    if (_nameController.text.trim().isEmpty) {
       _toast('请输入围栏名称');
       return;
     }
-    if (slot < 1 || slot > 8) {
-      _toast('卡槽号应在 1-8 之间');
-      return;
-    }
-    final points = <LatLng>[];
-    for (var i = 0; i < _lat.length; i++) {
-      final lat = double.tryParse(_lat[i].text.trim());
-      final lng = double.tryParse(_lng[i].text.trim());
-      if (lat == null || lng == null) {
-        _toast('请检查第 ${i + 1} 个顶点坐标');
-        return;
-      }
-      points.add(LatLng(lat, lng));
-    }
-    if (points.length < 3) {
-      _toast('围栏至少需要 3 个顶点');
-      return;
-    }
-    final existing = widget.fence;
-    if (existing != null) {
-      widget.provider.updateFence(existing.copyWith(
-        name: name,
-        slotNumber: slot,
-        points: points,
-        colorValue: _colorValue,
-        cardLibraryMode: _cardLibraryMode,
-        icCardId: _cardLibraryMode ? _icCardId : null,
-        rollingCode: _cardLibraryMode && _rollingCode,
-      ));
+    final fence = Geofence(
+      id: widget.fence?.id ?? const Uuid().v4(),
+      name: _nameController.text.trim(),
+      label: _labelController.text.trim(),
+      slotNumber: _slotNumber,
+      enabled: widget.fence?.enabled ?? true,
+      points: List.from(_points),
+      colorValue: _colorValue,
+      cardLibraryMode: _cardLibraryMode,
+      icCardId: _cardLibraryMode ? _icCardId : null,
+      idCardId: _cardLibraryMode ? _idCardId : null,
+      rollingCode: _cardLibraryMode && _icCardId != null ? _rollingCode : false,
+    );
+    if (widget.fence != null) {
+      widget.provider.updateFence(fence);
     } else {
-      widget.provider.addFence(Geofence(
-        id: 'g${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}',
-        name: name,
-        label: name,
-        slotNumber: slot,
-        points: points,
-        colorValue: _colorValue,
-        cardLibraryMode: _cardLibraryMode,
-        icCardId: _cardLibraryMode ? _icCardId : null,
-        rollingCode: _cardLibraryMode && _rollingCode,
-      ));
+      widget.provider.addFence(fence);
     }
-    if (mounted) Navigator.pop(context);
+    Navigator.pop(context, true);
   }
 
   void _toast(String msg) {
@@ -369,172 +900,521 @@ class _FenceEditPageState extends State<_FenceEditPage> {
       ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
   }
 
+  Future<LatLng?> _getGcjPosition() async {
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      return CoordinateConverter.wgs84ToGcj02(
+          LatLng(position.latitude, position.longitude));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _locateMe() async {
+    final target = widget.provider.lastPosition ?? await _getGcjPosition();
+    if (!mounted || target == null) return;
+    await _mapReadyCompleter.future;
+    if (!mounted) return;
+    _mapController.move(target, 16.0);
+  }
+
+  Future<void> _pickLibraryCard({required bool ic}) async {
+    final cards = await CardLibraryStorage().getCards();
+    if (!mounted) return;
+    if (cards.isEmpty) {
+      _toast('卡库为空，请先添加卡片');
+      return;
+    }
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(ic ? '选择 IC 卡' : '选择 ID 卡'),
+        children: cards
+            .where((c) => ic ? isHfCard(c.tag) : isLf(c.tag))
+            .map((c) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, c.id),
+                  child: Text(
+                      '${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]'),
+                ))
+            .toList(),
+      ),
+    );
+    if (result != null && result.isNotEmpty && mounted) {
+      setState(() {
+        if (ic) {
+          _icCardId = result;
+        } else {
+          _idCardId = result;
+        }
+        if (ic && !isHfCard(_selectedICCard?.tag ?? TagType.mifareClassic1k)) {
+          _rollingCode = false;
+        }
+      });
+    }
+  }
+
+  SaveCard? get _selectedICCard {
+    if (_icCardId == null) return null;
+    return _libraryCardById(_icCardId);
+  }
+
+  SaveCard? get _selectedIDCard {
+    if (_idCardId == null) return null;
+    return _libraryCardById(_idCardId);
+  }
+
+  SaveCard? _libraryCardById(String? id) {
+    if (id == null) return null;
+    SaveCard? found;
+    CardLibraryStorage().getCards().then((cards) {
+      for (final c in cards) {
+        if (c.id == id) {
+          found = c;
+          break;
+        }
+      }
+    });
+    return found;
+  }
+
+  bool get _selectedICCardIsIC =>
+      _selectedICCard != null && isHfCard(_selectedICCard!.tag);
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultCenter = _points.isNotEmpty
+        ? _points.first
+        : (widget.provider.lastPosition ?? const LatLng(39.9042, 116.4074));
+    final maxSlots = widget.provider.fences.isNotEmpty ? 8 : 8;
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.fence == null ? '新增围栏' : '编辑围栏')),
-      backgroundColor: const Color(0xFFF5F6F8),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  TextField(controller: _name, decoration: const InputDecoration(labelText: '围栏名称')),
-                  const SizedBox(height: 8),
-                  TextField(
-                      controller: _slot,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: '目标卡槽（1-8）')),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('卡库模式'),
-                        selected: _cardLibraryMode,
-                        onSelected: (_) => setState(() => _cardLibraryMode = !_cardLibraryMode),
-                      ),
-                      if (_cardLibraryMode)
-                        ChoiceChip(
-                          label: const Text('滚动码'),
-                          selected: _rollingCode,
-                          onSelected: (_) => setState(() => _rollingCode = !_rollingCode),
-                        ),
-                      if (_cardLibraryMode)
-                        ActionButton(
-                          label: _icCardId == null ? '选择卡片' : '已选卡片',
-                          icon: Icons.card_membership,
-                          onTap: _pickCard,
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+      appBar: AppBar(
+        title: Text(widget.fence != null ? '编辑围栏' : '新建围栏'),
+        leading: IconButton(icon: const Icon(Icons.close), onPressed: _cancel),
+        actions: [
+          TextButton(
+            onPressed: _clear,
+            child: const Text('清除', style: TextStyle(color: Colors.red)),
           ),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('地图选点', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  const Text('点击地图添加顶点，拖动调整视角',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 260,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                          initialCenter: _currentPoints.isNotEmpty
-                              ? _currentPoints.first
-                              : (widget.provider.lastPosition ?? const LatLng(34.3416, 108.9398)),
-                          initialZoom: 15,
-                          onTap: (tapPos, latLng) {
-                            setState(() {
-                              _lat.add(TextEditingController(text: latLng.latitude.toString()));
-                              _lng.add(TextEditingController(text: latLng.longitude.toString()));
-                            });
-                          },
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'com.z.nfc',
-                          ),
-                          if (_currentPoints.length >= 3)
-                            PolygonLayer(
-                              polygons: [
-                                Polygon(
-                                  points: _currentPoints,
-                                  color: Color(_colorValue).withValues(alpha: 0.2),
-                                  borderColor: Color(_colorValue),
-                                  borderStrokeWidth: 2,
-                                ),
-                              ],
-                            ),
-                          MarkerLayer(
-                            markers: [
-                              for (final p in _currentPoints)
-                                Marker(
-                                  point: p,
-                                  width: 24,
-                                  height: 24,
-                                  child: const Icon(Icons.location_on,
-                                      color: Colors.blue, size: 24),
-                                ),
-                            ],
+          TextButton(onPressed: _save, child: const Text('保存')),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Stack(
+              children: [
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: defaultCenter,
+                    initialZoom: 15.0,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.all,
+                    ),
+                    onMapReady: () {
+                      if (!_mapReadyCompleter.isCompleted) {
+                        _mapReadyCompleter.complete();
+                      }
+                    },
+                    onTap: (tapPosition, point) => _addPoint(point),
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: _useSatellite
+                          ? 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}'
+                          : 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+                      subdomains: const ['1', '2', '3', '4'],
+                      userAgentPackageName: 'com.z.nfc',
+                    ),
+                    if (_points.length >= 3)
+                      PolygonLayer(
+                        polygons: [
+                          Polygon(
+                            points: _points,
+                            color: Color(_colorValue).withValues(alpha: 0.2),
+                            borderColor: Color(_colorValue),
+                            borderStrokeWidth: 2,
                           ),
                         ],
                       ),
+                    MarkerLayer(
+                      markers: List.generate(_points.length, (index) {
+                        final point = _points[index];
+                        return Marker(
+                          point: point,
+                          width: 32,
+                          height: 32,
+                          child: GestureDetector(
+                            onTap: () => _removePoint(index),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Color(_colorValue),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ],
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: FloatingActionButton.small(
+                    heroTag: 'editMapType',
+                    onPressed: () => setState(() => _useSatellite = !_useSatellite),
+                    child: Icon(
+                      _useSatellite ? Icons.map_outlined : Icons.satellite_alt_outlined,
                     ),
                   ),
-                ],
-              ),
+                ),
+                Positioned(
+                  top: 60,
+                  right: 8,
+                  child: FloatingActionButton.small(
+                    heroTag: 'editLocate',
+                    onPressed: _locateMe,
+                    child: const Icon(Icons.my_location),
+                  ),
+                ),
+                if (_points.isNotEmpty)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: (isDark ? Colors.black87 : Colors.white).withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '${_points.length} 个点',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: '围栏名称',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('围栏顶点', style: TextStyle(fontWeight: FontWeight.w600)),
-                      ActionButton(
-                          label: '添加顶点',
-                          icon: Icons.add_location_alt,
-                          onTap: _addPoint),
+                      Expanded(
+                        child: TextField(
+                          controller: _labelController,
+                          decoration: const InputDecoration(
+                            labelText: '标签名称',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<int>(
+                          initialValue: _slotNumber.clamp(1, maxSlots),
+                          decoration: const InputDecoration(
+                            labelText: '卡槽编号',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: List.generate(maxSlots, (i) {
+                            return DropdownMenuItem(
+                              value: i + 1,
+                              child: Text('卡槽 ${i + 1}'),
+                            );
+                          }),
+                          onChanged: (v) {
+                            if (v != null) setState(() => _slotNumber = v);
+                          },
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  for (var i = 0; i < _lat.length; i++)
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 150,
-                          child: TextField(
-                              controller: _lat[i],
-                              keyboardType: TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(labelText: '顶点${i + 1} 纬度')),
+                  const SizedBox(height: 12),
+                  _buildCardLibraryModeSection(isDark),
+                  const SizedBox(height: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('围栏颜色',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: _presetColors.map((cv) {
+                          final selected = _colorValue == cv;
+                          return GestureDetector(
+                            onTap: () => setState(() => _colorValue = cv),
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: Color(cv),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: selected ? Colors.white : Colors.transparent,
+                                  width: 3,
+                                ),
+                                boxShadow: selected
+                                    ? [BoxShadow(color: Color(cv).withValues(alpha: 0.5), blurRadius: 6)]
+                                    : null,
+                              ),
+                              child: selected
+                                  ? const Icon(Icons.check, color: Colors.white, size: 18)
+                                  : null,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _clear,
+                          icon: const Icon(Icons.clear_all),
+                          label: const Text('清除'),
+                          style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                              controller: _lng[i],
-                              keyboardType: TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(labelText: '经度')),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _cancel,
+                          icon: const Icon(Icons.cancel),
+                          label: const Text('取消'),
                         ),
-                        IconButton(
-                          onPressed: () => _removePoint(i),
-                          icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _save,
+                          icon: const Icon(Icons.save),
+                          label: const Text('保存'),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              ActionButton(label: '保存围栏', icon: Icons.check, onTap: _save),
-            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCardLibraryModeSection(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade300,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('卡库模式',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text('进入围栏时自动上传 IC/ID 卡到选中的卡槽',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                  ],
+                ),
+              ),
+              Switch(
+                value: _cardLibraryMode,
+                onChanged: (v) {
+                  setState(() {
+                    _cardLibraryMode = v;
+                    if (!v) _rollingCode = false;
+                  });
+                },
+              ),
+            ],
+          ),
+          if (_cardLibraryMode) ...[
+            const SizedBox(height: 8),
+            _buildCardSelector(
+              title: 'IC 卡',
+              slotHint: '上传到卡槽 $_slotNumber',
+              selectedCard: _selectedICCard,
+              onPick: () => _pickLibraryCard(ic: true),
+              onClear: () => setState(() => _icCardId = null),
+            ),
+            const SizedBox(height: 8),
+            _buildCardSelector(
+              title: 'ID 卡',
+              slotHint: '上传到卡槽 $_slotNumber',
+              selectedCard: _selectedIDCard,
+              onPick: () => _pickLibraryCard(ic: false),
+              onClear: () => setState(() => _idCardId = null),
+            ),
+            if (_selectedICCardIsIC) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('滚动码',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 2),
+                        Text('刷卡后数据自动同步回卡库',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _rollingCode,
+                    onChanged: (v) => setState(() => _rollingCode = v),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCardSelector({
+    required String title,
+    required String slotHint,
+    required SaveCard? selectedCard,
+    required VoidCallback onPick,
+    required VoidCallback onClear,
+  }) {
+    final isIC = selectedCard != null && isHfCard(selectedCard.tag);
+    final isID = selectedCard != null && isLf(selectedCard.tag);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(title,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(slotHint,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        InkWell(
+          onTap: onPick,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade400),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  selectedCard == null
+                      ? Icons.credit_card_off_outlined
+                      : (isIC ? Icons.credit_card : (isID ? Icons.wifi : Icons.credit_card)),
+                  size: 18,
+                  color: selectedCard != null ? Color(_colorValue) : Colors.grey,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    selectedCard?.name.isEmpty ?? true
+                        ? (selectedCard?.uid ?? '未选择')
+                        : (selectedCard?.name ?? '未选择'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: selectedCard == null ? Colors.grey.shade500 : null,
+                    ),
+                  ),
+                ),
+                if (selectedCard != null)
+                  GestureDetector(
+                    onTap: onClear,
+                    child: Icon(Icons.close, size: 18, color: Colors.grey.shade500),
+                  )
+                else
+                  const Icon(Icons.arrow_drop_down, size: 20),
+              ],
+            ),
+          ),
+        ),
+        if (selectedCard != null) ...[
+          const SizedBox(height: 4),
+          Text(selectedCard.tag.label,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+        ],
+      ],
     );
   }
 }
