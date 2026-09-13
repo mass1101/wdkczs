@@ -41,10 +41,7 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
 
   Future<String> _chipId() async {
     final app = _app ??= AppScope.instance.controller;
-    final device = app.deviceInfo.chipId;
-    if (device.isNotEmpty) return device;
-    final backup = await app.storage.getBackupChipId();
-    return backup;
+    return app.resolveChipId();
   }
 
   Future<void> _load() async {
@@ -553,11 +550,8 @@ class _JoinSubscriptionDialogState extends State<_JoinSubscriptionDialog> {
   }
 
   Future<String?> _chipId() async {
-    final app = AppScope.instance.controller;
-    final device = app.deviceInfo.chipId;
-    if (device.isNotEmpty) return device;
-    final backup = await app.storage.getBackupChipId();
-    return backup.isEmpty ? null : backup;
+    final id = await AppScope.instance.controller.resolveChipId();
+    return id.isEmpty ? null : id;
   }
 
   Future<void> _next() async {
@@ -624,11 +618,8 @@ class _AuthorizedJoinDialogState extends State<_AuthorizedJoinDialog> {
   }
 
   Future<String?> _chipId() async {
-    final app = AppScope.instance.controller;
-    final device = app.deviceInfo.chipId;
-    if (device.isNotEmpty) return device;
-    final backup = await app.storage.getBackupChipId();
-    return backup.isEmpty ? null : backup;
+    final id = await AppScope.instance.controller.resolveChipId();
+    return id.isEmpty ? null : id;
   }
 
   @override
@@ -793,11 +784,8 @@ class _CreateSubscriptionDialogState extends State<_CreateSubscriptionDialog> {
   }
 
   Future<String?> _chipId() async {
-    final app = AppScope.instance.controller;
-    final device = app.deviceInfo.chipId;
-    if (device.isNotEmpty) return device;
-    final backup = await app.storage.getBackupChipId();
-    return backup.isEmpty ? null : backup;
+    final id = await AppScope.instance.controller.resolveChipId();
+    return id.isEmpty ? null : id;
   }
 
   Future<void> _create() async {

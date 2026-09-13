@@ -17,6 +17,7 @@ class StorageService {
   static const _kDefaultCloudEndpoint =
       'https://fc-mp-25581e18-9b6b-41d7-a1c9-69bb4c0020f7.next.bspapp.com';
   static const _kCrackResume = 'nfctool_crack_resume';
+  static const _kChipId = 'nfctool_chip_id';
   static const _kBackupChipId = 'nfctool_backup_chip_id';
   static const _kBackupToken = 'nfctool_backup_token';
   static const _kBackupLastMap = 'nfctool_backup_last_map';
@@ -169,7 +170,19 @@ class StorageService {
 
   // ========== 云端卡库备份（对齐 CU backup.dart，接 card.zzx1101.tk 服务器） ==========
 
-  /// 备份设备标识（芯片编号）
+  /// 设备芯片编号（连接设备时自动缓存，对齐 CU app_last_chip_id）
+  Future<String> getChipId() async {
+    final p = await _p;
+    return p.getString(_kChipId) ?? '';
+  }
+
+  Future<void> saveChipId(String chipId) async {
+    if (chipId.isEmpty) return;
+    final p = await _p;
+    await p.setString(_kChipId, chipId);
+  }
+
+  /// 手动填写的备份设备标识（离线兜底，仅在设备缓存为空时使用）
   Future<String> getBackupChipId() async {
     final p = await _p;
     return p.getString(_kBackupChipId) ?? '';

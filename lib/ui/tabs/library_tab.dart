@@ -704,8 +704,7 @@ class _LibraryTabState extends State<LibraryTab> {
 
   // ========== 云端备份/还原 ==========
   Future<String> _ensureChipId() async {
-    final storage = _app.storage;
-    var chipId = await storage.getBackupChipId();
+    var chipId = await _app.resolveChipId();
     if (chipId.isNotEmpty) return chipId;
     if (!mounted) return '';
     final ctrl = TextEditingController();
@@ -728,7 +727,7 @@ class _LibraryTabState extends State<LibraryTab> {
     );
     if (entered == null || entered.isEmpty) return '';
     chipId = entered;
-    await storage.setBackupChipId(chipId);
+    await _app.storage.setBackupChipId(chipId);
     return chipId;
   }
 

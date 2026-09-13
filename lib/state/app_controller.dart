@@ -188,6 +188,10 @@ class AppController extends ChangeNotifier {
       deviceInfo.version = await this.device.cmdGetAppVersion();
       deviceInfo.gitVersion = await this.device.cmdGetGitVersion();
       deviceInfo.chipId = await this.device.cmdGetDeviceChipId();
+      // 连接即缓存芯片编号（对齐 CU verifyActivation → saveChipId）
+      if (deviceInfo.chipId.isNotEmpty) {
+        await storage.saveChipId(deviceInfo.chipId);
+      }
       deviceInfo.bleAddress = await this.device.cmdBleGetAddress();
       deviceInfo.model = (await this.device.cmdGetDeviceModel()).toString();
       final battery = await this.device.cmdGetBatteryInfo();
@@ -195,6 +199,15 @@ class AppController extends ChangeNotifier {
       deviceInfo.batteryLevel = battery.level;
     } catch (_) {}
     notifyListeners();
+  }
+
+  /// 云端功能统一取设备标识：设备实时值 → 设备缓存 → 手动填写缓存
+  /// 对齐 CU：调用方手上的值优先，否则 getLastChipId() 走 SharedPreferences
+  Future<String> resolveChipId() async {
+    if (deviceInfo.chipId.isNotEmpty) return deviceInfo.chipId;
+    final cached = await storage.getChipId();
+    if (cached.isNotEmpty) return cached;
+    return storage.getBackupChipId();
   }
 
   Future<void> disconnect() async {

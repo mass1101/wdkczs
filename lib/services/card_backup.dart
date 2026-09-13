@@ -220,6 +220,8 @@ class _Random {
 
 Future<String> _resolveChipId(StorageService storage, {String? chipId}) async {
   if (chipId != null && chipId.isNotEmpty) return chipId;
+  final cached = await storage.getChipId();
+  if (cached.isNotEmpty) return cached;
   return storage.getBackupChipId();
 }
 
