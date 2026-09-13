@@ -183,3 +183,122 @@ SaveCard flipperRfidToSaveCard(String data) {
 
   return SaveCard(uid: uid, name: uid, tag: tag);
 }
+
+/// 按 dump 字节数推断卡型（对齐 CU getTagTypeByDumpSize）
+/// nfcapp 仅支持 1K/4K/Ultralight/NTAG215，不支持的尺寸返回 null
+TagType? tagTypeByDumpSize(int size) {
+  switch (size) {
+    case 1024:
+    case 1088:
+    case 1152:
+      return TagType.mifareClassic1k;
+    case 4096:
+      return TagType.mifareClassic4k;
+    case 64:
+      return TagType.mifareUltralight;
+    case 164:
+    case 180:
+    case 540:
+    case 924:
+      return TagType.ntag215;
+    default:
+      return null;
+  }
+}
+
+/// 可识别的二进制 dump 尺寸提示文案
+const supportedBinSizes =
+    '64 / 164 / 180 / 540 / 924 / 1024 / 1088 / 1152 / 4096 字节';
+
+/// 二进制 dump（.bin）导入：按字节数推断卡型并提取 UID/SAK/ATQA
+/// 对齐 CU saved_cards 的二进制分支（无扩展名判断，纯按内容推断）
+SaveCard binToSaveCard(Uint8List bytes, {String? name}) {
+  final tag = tagTypeByDumpSize(bytes.length);
+  if (tag == null) {
+    throw FormatException('无法识别的二进制 dump：${bytes.length} 字节，'
+        '支持尺寸 $supportedBinSizes');
+  }
+
+  String uid;
+  var sak = 0;
+  var atqa = '';
+  final blocks = <String>[];
+
+  if (isMifareClassic(tag)) {
+    if (bytes.length < 16) throw FormatException('Classic dump 至少 16 字节');
+    uid = StorageService.bytesToHex(bytes.sublist(0, 4));
+    sak = bytes[5];
+    // block0 中 ATQA 存为大端 [hi, lo]，转 CU/nfcapp 约定的 [lo, hi]
+    atqa = StorageService.bytesToHex(Uint8List.fromList([bytes[7], bytes[6]]));
+    for (int i = 0; i + 16 <= bytes.length; i += 16) {
+      blocks.add(StorageService.bytesToHex(bytes.sublist(i, i + 16)));
+    }
+  } else {
+    if (bytes.length < 8) throw FormatException('Ultralight dump 至少 8 字节');
+    // page0 = [uid0,uid1,uid2,BCC]，跳过 BCC 拼 7 字节 UID
+    uid = StorageService.bytesToHex(Uint8List.fromList([
+      ...bytes.sublist(0, 3),
+      ...bytes.sublist(4, 8),
+    ]));
+    atqa = '0044';
+    for (int i = 0; i + 4 <= bytes.length; i += 4) {
+      blocks.add(StorageService.bytesToHex(bytes.sublist(i, i + 4)));
+    }
+  }
+
+  return SaveCard(
+    uid: uid,
+    name: name ?? uid,
+    tag: tag,
+    sak: sak,
+    atqa: atqa,
+    data: blocks,
+  );
+}
+
+/// 去除文件扩展名的基名
+String baseName(String fileName) {
+  final i = fileName.lastIndexOf('.');
+  return i > 0 ? fileName.substring(0, i) : fileName;
+}
+
+/// 自动识别文件内容并导入（对齐 CU importCard 双阶段：先文本嗅探，失败按字节推断）
+/// 返回 null 表示识别失败（调用方提示用户），抛异常表示格式明确但不支持
+SaveCard? autoDetectToSaveCard(Uint8List bytes, {String? fileName}) {
+  String? text;
+  try {
+    text = utf8.decode(bytes);
+  } catch (_) {
+    text = null;
+  }
+
+  if (text != null) {
+    final t = text.trim();
+    if (t.isNotEmpty) {
+      // 字典文件夹包（魔数），不属于卡片导入
+      try {
+        final j = jsonDecode(t);
+        if (j is Map<String, dynamic> &&
+            j['format'] == 'chameleon-ultra-gui-dictionary-folder') {
+          return null;
+        }
+      } catch (_) {}
+      try {
+        if (t.contains('"Created": "proxmark3",')) return pm3JsonToSaveCard(t);
+        if (t.contains('Filetype: Flipper NFC device')) {
+          return flipperNfcToSaveCard(t);
+        }
+        if (t.contains('+Sector: 0')) return mctToSaveCard(t);
+        if (t.contains('Filetype: Flipper RFID key')) {
+          return flipperRfidToSaveCard(t);
+        }
+      } catch (_) {}
+    }
+  }
+
+  try {
+    return binToSaveCard(bytes, name: baseName(fileName ?? ''));
+  } catch (_) {
+    return null;
+  }
+}

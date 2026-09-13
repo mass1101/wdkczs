@@ -218,6 +218,51 @@ class ConnectionBanner extends StatelessWidget {
   }
 }
 
+/// 颜色圆点选择行（选中项描边 + 勾）
+class ColorPickerRow extends StatelessWidget {
+  final List<int> colors;
+  final int selected;
+  final ValueChanged<int> onChange;
+  final double size;
+
+  const ColorPickerRow({
+    super.key,
+    required this.colors,
+    required this.selected,
+    required this.onChange,
+    this.size = 28,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: colors.map((c) {
+        final sel = c == selected;
+        return GestureDetector(
+          onTap: () => onChange(c),
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: Color(c),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: sel ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: sel
+                ? const Icon(Icons.check, color: Colors.white, size: 16)
+                : null,
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
 /// 密钥卡片行（label + 值 + 操作图标）
 class KeyCard extends StatelessWidget {
   final String label;

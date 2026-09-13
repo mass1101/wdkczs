@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -9,9 +10,12 @@ import '../../services/card_library.dart';
 import '../../services/card_save_converters.dart';
 import '../../services/slot_writer.dart';
 import '../../state/app_controller.dart';
+import '../screens/card_analyze_screen.dart';
+import '../screens/card_compare_screen.dart';
 import '../screens/card_create_dialog.dart';
 import '../screens/card_edit_dialog.dart';
 import '../screens/card_view_dialog.dart';
+import '../screens/dictionary_manager_screen.dart';
 import '../screens/dump_editor.dart';
 import '../screens/geofence_screen.dart';
 import '../widgets/common.dart' show ActionButton;
@@ -48,6 +52,8 @@ class _LibraryTabState extends State<LibraryTab> {
   List<SaveFolder> _folders = [];
   String? _folderId;
   bool _loading = true;
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _search = '';
 
   bool get _connected => _app.connected;
 
@@ -56,6 +62,12 @@ class _LibraryTabState extends State<LibraryTab> {
     super.initState();
     _app = AppScope.instance.controller;
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -76,14 +88,21 @@ class _LibraryTabState extends State<LibraryTab> {
       ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
   }
 
-  /// 当前文件夹下的子文件夹
+  /// 当前文件夹下的子文件夹（按搜索词过滤）
   List<SaveFolder> get _subFolders => _folders
       .where((f) => f.parentId == _folderId)
+      .where((f) => _match(f.name))
       .toList();
 
-  /// 当前文件夹下的卡片
-  List<SaveCard> get _currentCards =>
-      _cards.where((c) => c.folderId == _folderId).toList();
+  /// 当前文件夹下的卡片（按搜索词过滤）
+  List<SaveCard> get _currentCards => _cards
+      .where((c) => c.folderId == _folderId)
+      .where((c) => _match('${c.name} ${c.uid} ${c.tag.label}'))
+      .toList();
+
+  bool _match(String text) =>
+      _search.isEmpty ||
+      text.toLowerCase().contains(_search.toLowerCase());
 
   /// 当前文件夹对象
   SaveFolder? get _currentFolder {
@@ -128,6 +147,48 @@ class _LibraryTabState extends State<LibraryTab> {
               ],
             ),
           ),
+        // 搜索 + 字典管理
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: '搜索名称 / UID / 卡型',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _search.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              _search = '';
+                              setState(() {});
+                            },
+                          ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                  onChanged: (v) {
+                    _search = v.trim();
+                    setState(() {});
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              ActionButton(
+                label: '字典',
+                icon: Icons.bookmarks,
+                onTap: _openDictionaryManager,
+              ),
+            ],
+          ),
+        ),
         // 操作区
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -288,6 +349,8 @@ class _LibraryTabState extends State<LibraryTab> {
               if (v == 'edit') _editCard(c);
               if (v == 'move') _moveCard(c);
               if (v == 'dump') _openDumpEditor(c);
+              if (v == 'analyze') _openCardAnalyze(c);
+              if (v == 'compare') _openCardCompare(c);
               if (v == 'delete') _deleteCard(c);
             },
             itemBuilder: (_) => [
@@ -295,6 +358,10 @@ class _LibraryTabState extends State<LibraryTab> {
               const PopupMenuItem(value: 'edit', child: Text('编辑')),
               if (isMifareClassic(c.tag) || isMifareUltralight(c.tag))
                 const PopupMenuItem(value: 'dump', child: Text('Dump 编辑器')),
+              if (isMifareClassic(c.tag))
+                const PopupMenuItem(value: 'analyze', child: Text('卡片分析')),
+              if (isMifareClassic(c.tag) || isMifareUltralight(c.tag))
+                const PopupMenuItem(value: 'compare', child: Text('比较 Dump')),
               const PopupMenuItem(value: 'move', child: Text('移动到文件夹')),
               const PopupMenuItem(value: 'delete', child: Text('删除')),
             ],
@@ -337,6 +404,22 @@ class _LibraryTabState extends State<LibraryTab> {
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => DumpEditor(card: c)),
+    );
+    await _reload();
+  }
+
+  Future<void> _openCardAnalyze(SaveCard c) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CardAnalyzeScreen(card: c)),
+    );
+    await _reload();
+  }
+
+  Future<void> _openCardCompare(SaveCard c) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CardCompareScreen(card: c)),
     );
     await _reload();
   }
@@ -597,6 +680,15 @@ class _LibraryTabState extends State<LibraryTab> {
     ).then((_) => _reload());
   }
 
+  // ========== 字典管理 ==========
+  Future<void> _openDictionaryManager() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DictionaryManagerScreen()),
+    );
+    _reload();
+  }
+
   // ========== 电子围栏 ==========
   void _openGeofence() {
     final cb = widget.onOpenGeofence;
@@ -730,21 +822,47 @@ class _ImportSheetState extends State<_ImportSheet> {
     try {
       final pick = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['json', 'nfc', 'rfid', 'txt', 'mct'],
+        allowedExtensions: ['json', 'nfc', 'rfid', 'txt', 'mct', 'bin'],
         withData: true,
       );
       if (pick == null || pick.files.isEmpty) return;
       final file = pick.files.first;
-      final bytes = file.bytes;
+      final path = file.path;
+      final bytes = file.bytes ??
+          (path != null ? await File(path).readAsBytes() : null);
       if (bytes == null) {
         _toast('无法读取文件');
         return;
       }
-      final text = utf8.decode(bytes, allowMalformed: true);
-      setState(() => _ctrl.text = text.trim());
+      final text = utf8.decode(bytes, allowMalformed: true).trim();
+      if (_looksLikeTextExport(text)) {
+        setState(() => _ctrl.text = text);
+        return;
+      }
+      // 非已知文本格式：按二进制 dump 内容推断卡型
+      final card = autoDetectToSaveCard(bytes, fileName: file.name);
+      if (card == null) {
+        _toast('无法识别格式，支持 PM3/Flipper/MCT 文本或二进制 dump');
+        return;
+      }
+      await CardLibraryStorage().upsertCard(card);
+      if (mounted) {
+        _toast('已导入：${card.tag.label}  UID:${card.uid.toUpperCase()}');
+        Navigator.pop(context);
+      }
     } catch (e) {
       _toast('选择文件失败: $e');
     }
+  }
+
+  bool _looksLikeTextExport(String text) {
+    final t = text.trimLeft().toLowerCase();
+    if (t.startsWith('{')) return t.contains('"');
+    if (t.contains('mifare_classic')) return true;
+    if (t.contains('mifare_ultralight')) return true;
+    if (t.contains('rfid')) return true;
+    if (t.contains('+sector')) return true;
+    return false;
   }
 
   void _toast(String msg) {

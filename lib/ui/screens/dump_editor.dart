@@ -22,23 +22,46 @@ class DumpEditor extends StatefulWidget {
 class _DumpEditorState extends State<DumpEditor> {
   late List<String> _data;
   bool _edited = false;
+  SaveCard? _compareTarget;
+  bool _pickingCompare = false;
 
   @override
   void initState() {
     super.initState();
     _data = List<String>.from(widget.card.data);
+    _compareTarget = widget.compareTarget;
   }
 
   bool get _isClassic => isMifareClassic(widget.card.tag);
   bool get _isUltralight => isMifareUltralight(widget.card.tag);
   int get _blockSize => _isClassic ? 16 : 4;
+  bool get _canCompare => _isClassic || _isUltralight;
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+  }
 
   @override
   Widget build(BuildContext context) {
+    final showCompare = _compareTarget != null && _canCompare;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Dump 编辑器 - ${widget.card.name}'),
+        title: Text(
+          'Dump 编辑器 - ${widget.card.name}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
+          if (_canCompare)
+            TextButton(
+              onPressed: _pickingCompare ? null : _pickCompare,
+              child: Text(
+                _compareTarget == null ? '对比' : '换对比卡',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
           if (_edited)
             TextButton(
               onPressed: _save,
@@ -48,13 +71,94 @@ class _DumpEditorState extends State<DumpEditor> {
       ),
       body: _data.isEmpty
           ? const Center(child: Text('无数据', style: TextStyle(color: Colors.grey)))
-          : _isClassic
-              ? _buildClassicView()
-              : _isUltralight
-                  ? _buildUltralightView()
-                  : _buildGenericView(),
+          : Column(
+              children: [
+                if (showCompare) _buildCompareBanner(),
+                Expanded(
+                  child: _isClassic
+                      ? _buildClassicView()
+                      : _isUltralight
+                          ? _buildUltralightView()
+                          : _buildGenericView(),
+                ),
+              ],
+            ),
     );
   }
+
+  /// 对比卡横幅：显示对比对象名与差异块数
+  Widget _buildCompareBanner() {
+    final target = _compareTarget!;
+    final count = _diffCount(target.data);
+    final same = count == 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      color: same ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0),
+      child: Row(
+        children: [
+          Icon(
+            same ? Icons.check_circle_outline : Icons.compare_arrows,
+            size: 16,
+            color: same ? const Color(0xFF2E7D32) : const Color(0xFFEF6C00),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              same
+                  ? '与「${target.name.isEmpty ? target.uid : target.name}」完全一致'
+                  : '与「${target.name.isEmpty ? target.uid : target.name}」有 $count 块不同',
+              style: const TextStyle(fontSize: 12),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            tooltip: '取消对比',
+            onPressed: () => setState(() => _compareTarget = null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _norm(String hex) => hex.replaceAll(RegExp(r'\s'), '').toLowerCase();
+
+  /// 统计两个 dump 的差异块/页数
+  int _diffCount(List<String> other) {
+    var n = 0;
+    final len = _data.length < other.length ? _data.length : other.length;
+    for (int i = 0; i < len; i++) {
+      if (_norm(_data[i]) != _norm(other[i])) n++;
+    }
+    return n + (_data.length > other.length
+        ? _data.length - other.length
+        : other.length - _data.length);
+  }
+
+  /// 选择对比卡（同卡型、非自身、有数据）
+  Future<void> _pickCompare() async {
+    if (_pickingCompare) return;
+    setState(() => _pickingCompare = true);
+    final cards = await CardLibraryStorage().getCards();
+    if (!mounted) return;
+    setState(() => _pickingCompare = false);
+    final candidates = cards
+        .where((c) => c.id != widget.card.id)
+        .where((c) => c.tag == widget.card.tag)
+        .where((c) => c.data.isNotEmpty)
+        .toList();
+    if (candidates.isEmpty) {
+      _toast('卡库中没有其他同卡型且有数据的卡片');
+      return;
+    }
+    final picked = await showModalBottomSheet<SaveCard>(
+      context: context,
+      builder: (ctx) => _ComparePicker(candidates: candidates),
+    );
+    if (picked != null) setState(() => _compareTarget = picked);
+  }
+
 
   /// Mifare Classic 视图：按扇区分组
   Widget _buildClassicView() {
@@ -282,5 +386,77 @@ class _DumpEditorState extends State<DumpEditor> {
       );
       Navigator.pop(context, true);
     }
+  }
+}
+
+/// 选择对比卡：同卡型卡片单选列表
+class _ComparePicker extends StatelessWidget {
+  final List<SaveCard> candidates;
+
+  const _ComparePicker({required this.candidates});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '选择对比卡',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              padding: const EdgeInsets.only(bottom: 12),
+              itemCount: candidates.length,
+              itemBuilder: (_, i) {
+                final c = candidates[i];
+                return ListTile(
+                  onTap: () => Navigator.pop(context, c),
+                  title: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 22,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: c.color,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          c.name.isEmpty ? '未命名' : c.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Text(
+                    '${c.tag.label}  UID:${c.uid.toUpperCase()}  块数:${c.data.length}',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF666666)),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
