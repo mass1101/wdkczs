@@ -1454,6 +1454,96 @@ class DeviceService {
     return _parseAntiCollList(r).isNotEmpty ? _parseAntiCollList(r).first : null;
   }
 
+  // ========== Ultralight/NTAG 模拟器（cmd 4021-4037，对齐 CU mf0Emulator*） ==========
+
+  /// 读取 NTAG 模拟器页数据
+  Future<Uint8List> cmdMf0EmuReadPages(int from, int count) async {
+    await assureDeviceMode(DeviceMode.tag);
+    return _request(Cmd.mf0NtagReadEmuPageData.value,
+        Uint8List.fromList([from, count]));
+  }
+
+  /// 写入 NTAG 模拟器页数据（from 起始页，data 为页数据）
+  Future<void> cmdMf0EmuWritePages(int from, Uint8List data) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagWriteEmuPageData.value,
+        Uint8List.fromList([from, data.length >> 2, ...data]));
+  }
+
+  /// 读取 NTAG 版本数据
+  Future<Uint8List> cmdMf0EmuGetVersionData() async {
+    await assureDeviceMode(DeviceMode.tag);
+    return _request(Cmd.mf0NtagGetVersionData.value, null);
+  }
+
+  /// 写入 NTAG 版本数据
+  Future<void> cmdMf0EmuSetVersionData(Uint8List data) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagSetVersionData.value, Uint8List.fromList(data));
+  }
+
+  /// 读取 NTAG 签名数据
+  Future<Uint8List> cmdMf0EmuGetSignatureData() async {
+    await assureDeviceMode(DeviceMode.tag);
+    return _request(Cmd.mf0NtagGetSignatureData.value, null);
+  }
+
+  /// 写入 NTAG 签名数据
+  Future<void> cmdMf0EmuSetSignatureData(Uint8List data) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagSetSignatureData.value, Uint8List.fromList(data));
+  }
+
+  /// 重置 NTAG 验证计数
+  Future<int> cmdMf0ResetAuthCount() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagResetAuthCnt.value, null);
+    return r.isEmpty ? 0 : r[0];
+  }
+
+  /// 读取 NTAG 页数上限
+  Future<int> cmdMf0EmuGetPageCount() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagGetPageCount.value, null);
+    return r.isEmpty ? 0 : r[0];
+  }
+
+  /// 读取 NTAG 计数器（返回 (value24bit, 撕裂标志 resetTearing==0xBD)）
+  Future<(int, bool)> cmdMf0EmuGetCounterData(int index) async {
+    await assureDeviceMode(DeviceMode.tag);
+    final data = await _request(
+        Cmd.mf0NtagGetCounterData.value, Uint8List.fromList([index]));
+    if (data.length < 4) return (0, false);
+    return (((data[2] << 16) | (data[1] << 8) | data[0]),
+        data[3] == 0xBD);
+  }
+
+  /// 写入 NTAG 计数器
+  Future<void> cmdMf0EmuSetCounterData(
+      int index, int value, bool resetTearing) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagSetCounterData.value,
+        Uint8List.fromList([
+          index | ((resetTearing ? 1 : 0) << 7),
+          value & 0xFF,
+          (value >> 8) & 0xFF,
+          (value >> 16) & 0xFF
+        ]));
+  }
+
+  /// 读取 NTAG 写保护模式（0=normal 1=denied 2=deceive 3=shadow）
+  Future<int> cmdMf0EmuGetWriteMode() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagGetWriteMode.value, null);
+    return r.isEmpty ? 0 : r[0];
+  }
+
+  /// 设置 NTAG 写保护模式
+  Future<void> cmdMf0EmuSetWriteMode(int mode) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagSetWriteMode.value, Uint8List.fromList([mode]));
+  }
+
   // ========== LF 命令（cmd 3000-3009） ==========
 
   Future<Em410xScanRes> cmdEm410xScan() async {
@@ -1502,6 +1592,38 @@ class DeviceService {
       il: r[9],
       oem: bd.getUint16(11),
     );
+  }
+
+  // ========== LF 模拟卡 ID（cmd 5002-5013，对齐 CU set*EmulatorID） ==========
+
+  /// 设置 HID Prox 模拟卡 ID（12 字节）
+  Future<void> cmdHidProxSetEmuId(Uint8List uid) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.hidproxSetEmuId.value, Uint8List.fromList(uid));
+  }
+
+  /// 设置 Viking 模拟卡 ID
+  Future<void> cmdVikingSetEmuId(Uint8List uid) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.vikingSetEmuId.value, Uint8List.fromList(uid));
+  }
+
+  /// 设置 PAC 模拟卡 ID
+  Future<void> cmdPacSetEmuId(Uint8List uid) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.pacSetEmuId.value, Uint8List.fromList(uid));
+  }
+
+  /// 设置 ioProx 模拟卡 ID
+  Future<void> cmdIoProxSetEmuId(Uint8List uid) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.ioProxSetEmuId.value, Uint8List.fromList(uid));
+  }
+
+  /// 设置 idteck 模拟卡 ID
+  Future<void> cmdIdteckSetEmuId(Uint8List uid) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.idteckSetEmuId.value, Uint8List.fromList(uid));
   }
 
   // ========== 组合操作（与逆向 hf14aInfo 等一致） ==========

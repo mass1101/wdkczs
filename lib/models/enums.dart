@@ -107,7 +107,13 @@ enum Cmd {
   hidproxSetEmuId(5002),
   hidproxGetEmuId(5003),
   vikingSetEmuId(5004),
-  vikingGetEmuId(5005);
+  vikingGetEmuId(5005),
+  pacSetEmuId(5006),
+  pacGetEmuId(5007),
+  ioProxSetEmuId(5008),
+  ioProxGetEmuId(5009),
+  idteckSetEmuId(5012),
+  idteckGetEmuId(5013);
 
   const Cmd(this.value);
   final int value;
@@ -135,7 +141,10 @@ enum TagType {
   em4100(100, 'EM4100'),
   hidProx(200, 'HID Prox'),
   viking(170, 'Viking'),
-  electra(104, 'Electra');
+  electra(104, 'Electra'),
+  pac(150, 'PAC'),
+  ioProx(201, 'ioProx'),
+  idteck(310, 'idteck');
 
   const TagType(this.value, this.label);
   final int value;

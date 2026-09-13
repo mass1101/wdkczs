@@ -11,8 +11,10 @@ import '../../models/enums.dart';
 import '../../models/models.dart';
 import '../../services/crypto1.dart';
 import '../../services/device_service.dart';
+import '../../services/card_library.dart';
 import '../../services/log_service.dart';
 import '../../services/native_recovery.dart';
+import '../../services/storage_service.dart';
 import '../../state/app_controller.dart';
 import '../../ui/dialogs/crack_dialog.dart';
 import '../../ui/dialogs/key_file_sheet.dart';
@@ -723,6 +725,37 @@ class _IcTabState extends State<IcTab> {
     } catch (e) {
       _toast('写卡槽失败: $e');
     }
+  }
+
+  // ========== 保存到卡库（对齐 CU 把当前编辑卡存入 savedCards） ==========
+  Future<void> _saveToLibrary() async {
+    final uid = _uidCtrl.text.trim();
+    if (!RegExp(r'^[0-9a-fA-F]{8}$').hasMatch(uid)) {
+      _toast('卡号有误，IC卡号应为8位16进制数');
+      return;
+    }
+    // 从当前 CardState 提取扇区块（16 块/行）
+    final blocks = <String>[];
+    for (var s = 0; s < _app.card.sectors.length; s++) {
+      for (var b = 0; b < 4; b++) {
+        blocks.add(_app.card.sectors[s].blocks[b].data);
+      }
+    }
+    final card = SaveCard(
+      uid: uid.toLowerCase(),
+      name: _app.card.name.isEmpty ? uid : _app.card.name,
+      tag: TagType.mifareClassic1k,
+      sak: _sakCtrl.text.trim().isEmpty
+          ? 0
+          : StorageService.hexToBytes(_sakCtrl.text.trim()).isNotEmpty
+              ? StorageService.hexToBytes(_sakCtrl.text.trim())[0]
+              : 0,
+      atqa: _atqaCtrl.text.trim(),
+      ats: _atsCtrl.text.trim(),
+      data: blocks,
+    );
+    await CardLibraryStorage().upsertCard(card);
+    _toast('已保存到卡库');
   }
 
   // ========== 解卡（对齐小程序 btnCrack + Crack() 完整流程） ==========
@@ -3667,6 +3700,7 @@ const Text('ATS:',
               _sideBtn('双卡破解', Icons.contactless, _crackWith2Cards, primary),
               _sideBtn('读卡槽', Icons.memory, _readSlot, primary),
               _sideBtn('写卡槽', Icons.memory, _writeSlot, primary),
+              _sideBtn('存卡库', Icons.library_add, _saveToLibrary, primary),
               _sideBtn('算密钥', Icons.calculate, _mfkey, primary),
               _sideBtn('导入', Icons.download, _importCard, primary),
               _sideBtn('导出', Icons.upload, _exportCard, primary),

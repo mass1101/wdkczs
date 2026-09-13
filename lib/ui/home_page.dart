@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import '../main.dart';
 import '../state/app_controller.dart';
 import '../ui/tabs/ic_tab.dart';
 import '../ui/tabs/id_tab.dart';
+import '../ui/tabs/library_tab.dart';
 import '../ui/tabs/settings_tab.dart';
 import 'widgets/common.dart';
 
@@ -19,21 +23,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late final AppController _app;
   late final TabController _tabController;
   bool _discovering = false;
+  StreamSubscription<dynamic>? _overlaySub;
 
   @override
   void initState() {
     super.initState();
     _app = AppScope.instance.controller;
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       _app.setTab(_tabController.index);
     });
+    _overlaySub = FlutterOverlayWindow.overlayListener.listen(_onOverlayEvent);
   }
 
   @override
   void dispose() {
+    _overlaySub?.cancel();
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _onOverlayEvent(dynamic event) {
+    if (event == 'restore' || event == 'close') {
+      FlutterOverlayWindow.closeOverlay();
+      if (!mounted) return;
+      _app.geofence.setOverlayActive(false);
+      _tabController.animateTo(2);
+    } else if (event is Map) {
+      final type = event['type'];
+      if (type == 'overlay_error' || type == 'overlay_info') {
+        final msg = event['message']?.toString() ?? 'unknown error';
+        try {
+          _app.geofence
+              .addLog('悬浮窗${type == 'overlay_error' ? '错误' : '信息'}: $msg');
+        } catch (_) {}
+      }
+    }
   }
 
   Future<void> _connect() async {
@@ -101,6 +126,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               tabs: const [
                 Tab(text: 'IC卡'),
                 Tab(text: 'ID卡'),
+                Tab(text: '卡库'),
                 Tab(text: '设置'),
               ],
             ),
@@ -112,6 +138,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               children: const [
                 IcTab(),
                 IdTab(),
+                LibraryTab(),
                 SettingsTab(),
               ],
             ),

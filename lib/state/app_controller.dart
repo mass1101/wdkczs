@@ -9,8 +9,11 @@ import '../ble/ble_service.dart';
 import '../models/enums.dart';
 import '../models/models.dart';
 import '../services/cloud_service.dart';
+import '../services/card_library.dart';
 import '../services/device_service.dart';
 import '../services/dfu_zip.dart';
+import '../services/geofence_provider.dart';
+import '../services/slot_writer.dart';
 import '../services/storage_service.dart';
 
 /// 全局应用状态（设备连接、卡数据、设置）
@@ -24,11 +27,17 @@ class AppController extends ChangeNotifier {
     device = DeviceService(ble);
     storage = StorageService();
     cloud = CloudService(storage);
+    final geo = GeofenceProvider();
+    geofence = geo;
     device.init();
     ble.status.addListener(_onBleStatus);
+    _initGeofence();
   }
 
   bool get connected => ble.isConnected;
+
+  // 电子围栏
+  late final GeofenceProvider geofence;
 
   // IC 卡状态
   CardState card = CardState.withDefaultData();
@@ -78,6 +87,70 @@ class AppController extends ChangeNotifier {
 
   void _onBleStatus() {
     notifyListeners();
+  }
+
+  Future<void> _initGeofence() async {
+    final prefs = await storage.prefs;
+    geofence.setHandlers(
+      activateSlot: (slot) {
+        try {
+          device.cmdSlotSetActive(slot - 1);
+          currentSlot = slot - 1;
+          return true;
+        } catch (_) {
+          return false;
+        }
+      },
+      isConnected: () => connected,
+      uploadCard: (card, slot) async {
+        await slotWriterUpload(card, slot);
+      },
+      readHfSlot: (slot) => readHfSlot(slot),
+    );
+    geofence.setConnected(connected);
+    await geofence.load(prefs);
+    ble.status.addListener(_syncGeofenceConnected);
+  }
+
+  void _syncGeofenceConnected() {
+    geofence.setConnected(connected);
+  }
+
+  /// 卡库卡片写入某槽（供围栏自动上传复用，与卡库页同一实现）
+  Future<void> slotWriterUpload(SaveCard card, int slot) {
+    return uploadCardToSlot(device, card, slot);
+  }
+
+  /// 读取某 HF 槽的完整数据为 SaveCard（供围栏滚动码轮询遍历比对）
+  Future<SaveCard?> readHfSlot(int slot) async {
+    await device.cmdSlotSetActive(slot);
+    final anti = await device.cmdHf14aGetAntiCollData();
+    if (anti == null) return null;
+    final uid = anti.uidHex;
+    // 先按 Mifare Classic 读取（16 块 × 每扇区逐块）
+    final blocks = <String>[];
+    try {
+      for (var sector = 0; sector < 16; sector++) {
+        final raw = await device.cmdMf1EmuReadBlock(sector * 4, 4);
+        if (raw.length < 64) return null;
+        for (var b = 0; b < 4; b++) {
+          blocks.add(raw.sublist(b * 16, b * 16 + 16)
+              .map((x) => x.toRadixString(16).padLeft(2, '0'))
+              .join());
+        }
+      }
+    } catch (_) {
+      return null;
+    }
+    return SaveCard(
+      uid: uid,
+      name: '',
+      tag: TagType.mifareClassic1k,
+      sak: anti.sak,
+      atqa: anti.atqaHex,
+      ats: anti.atsHex,
+      data: blocks,
+    );
   }
 
   void setTab(int index) {

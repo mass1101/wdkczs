@@ -17,12 +17,20 @@ class StorageService {
   static const _kDefaultCloudEndpoint =
       'https://fc-mp-25581e18-9b6b-41d7-a1c9-69bb4c0020f7.next.bspapp.com';
   static const _kCrackResume = 'nfctool_crack_resume';
+  static const _kBackupChipId = 'nfctool_backup_chip_id';
+  static const _kBackupToken = 'nfctool_backup_token';
+  static const _kBackupLastMap = 'nfctool_backup_last_map';
+  static const _kBackupEndpoint = 'nfctool_backup_endpoint';
+  static const _kDefaultBackupEndpoint = 'https://card.zzx1101.tk:6363';
 
   SharedPreferences? _prefs;
 
   Future<SharedPreferences> get _p async {
     return _prefs ??= await SharedPreferences.getInstance();
   }
+
+  /// 暴露底层 SharedPreferences 实例（供围栏等模块持久化）
+  Future<SharedPreferences> get prefs => _p;
 
   // ========== 密钥文件 ==========
 
@@ -157,6 +165,61 @@ class StorageService {
   Future<void> setCloudEndpoint(String endpoint) async {
     final p = await _p;
     await p.setString(_kCloudEndpoint, endpoint);
+  }
+
+  // ========== 云端卡库备份（对齐 CU backup.dart，接 card.zzx1101.tk 服务器） ==========
+
+  /// 备份设备标识（芯片编号）
+  Future<String> getBackupChipId() async {
+    final p = await _p;
+    return p.getString(_kBackupChipId) ?? '';
+  }
+
+  Future<void> setBackupChipId(String chipId) async {
+    final p = await _p;
+    await p.setString(_kBackupChipId, chipId);
+  }
+
+  /// 每次备份生成的设备 Token
+  Future<String> getBackupToken() async {
+    final p = await _p;
+    return p.getString(_kBackupToken) ?? '';
+  }
+
+  Future<void> saveBackupToken(String token) async {
+    final p = await _p;
+    await p.setString(_kBackupToken, token);
+  }
+
+  /// 各卡最近一次成功备份时间
+  Future<Map<String, DateTime>> getCardLastBackupMap() async {
+    final p = await _p;
+    final raw = p.getString(_kBackupLastMap);
+    if (raw == null) return {};
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return map.map((k, v) =>
+          MapEntry(k, DateTime.tryParse(v.toString()) ?? DateTime.fromMillisecondsSinceEpoch(0)));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> setCardsLastBackupMap(Map<String, DateTime> map) async {
+    final p = await _p;
+    final enc = map.map((k, v) => MapEntry(k, v.toIso8601String()));
+    await p.setString(_kBackupLastMap, jsonEncode(enc));
+  }
+
+  /// 备份服务器端点（默认 CU 服务器）
+  Future<String> getBackupEndpoint() async {
+    final p = await _p;
+    return p.getString(_kBackupEndpoint) ?? _kDefaultBackupEndpoint;
+  }
+
+  Future<void> setBackupEndpoint(String endpoint) async {
+    final p = await _p;
+    await p.setString(_kBackupEndpoint, endpoint);
   }
 
   // ========== 解卡断点续破（对齐小程序破解任务：恢复即删，逐块写回） ==========

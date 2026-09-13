@@ -6,6 +6,8 @@ import '../../models/enums.dart';
 import '../../services/device_service.dart';
 import '../../services/log_service.dart';
 import '../../state/app_controller.dart';
+import '../screens/card_subscription_screen.dart';
+import '../screens/fence_subscription_screen.dart';
 import '../widgets/common.dart';
 
 /// 设置 Tab：设备信息、全局设置、右侧操作按钮、卡槽设置
@@ -309,6 +311,23 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
+  // ========== 订阅入口（弹窗显示） ==========
+  Future<void> _showFenceSubscription() async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.5),
+      builder: (_) => Dialog.fullscreen(child: const FenceSubscriptionScreen()),
+    );
+  }
+
+  Future<void> _showCardSubscription() async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.5),
+      builder: (_) => Dialog.fullscreen(child: const CardSubscriptionScreen()),
+    );
+  }
+
   /// 查看日志
   void _showLogs() {
     final logs = LogService.instance.logs;
@@ -496,6 +515,8 @@ class _SettingsTabState extends State<SettingsTab> {
                   _sideBtn('固件刷写', Icons.system_update_alt, _dfuUpdate, primary),
                   _sideBtn('卡槽设置', Icons.tune, _showSlotSettings, primary),
                   _sideBtn('保存卡槽', Icons.save, _saveSlots, primary),
+                  _sideBtn('围栏订阅', Icons.fence, _showFenceSubscription, primary),
+                  _sideBtn('卡片订阅', Icons.credit_card, _showCardSubscription, primary),
                   const SizedBox(height: 16),
                 ],
               ),
