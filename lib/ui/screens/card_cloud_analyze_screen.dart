@@ -45,7 +45,7 @@ class CardCloudAnalyzeScreen extends StatefulWidget {
             Text('将上传当前卡的 dump 原始字节到云端进行分析。', style: TextStyle(fontSize: 14)),
             SizedBox(height: 8),
             Text(
-              '上传目标：analyze.flippercn.com\n数据仅用于本次分析，请勿分析含个人隐私的卡。',
+              '上传目标：数据仅用于本次分析，请勿分析含个人隐私的卡。',
               style: TextStyle(fontSize: 12, color: Color(0xFF888888)),
             ),
           ],
