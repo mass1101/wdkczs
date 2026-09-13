@@ -130,6 +130,9 @@ class GeofenceProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 公开方法：推送围栏状态数据到悬浮窗（供 home_page 定时器调用）
+  void pushOverlayData() => _pushOverlayData();
+
   void _handleNativePosition(double lat, double lng) {
     _lastPosition = LatLng(lat, lng);
     _lastPositionTime = DateTime.now();

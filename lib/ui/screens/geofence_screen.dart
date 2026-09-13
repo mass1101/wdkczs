@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:geolocator/geolocator.dart';
@@ -15,6 +16,8 @@ import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
+
+const _overlayChannel = MethodChannel('com.z.nfc/overlay');
 
 /// 电子围栏列表页：全屏地图 + 浮动控件 + 底部可拖拽围栏列表（对齐 CU geofence_list.dart）
 class GeofenceScreen extends StatefulWidget {
@@ -126,6 +129,23 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     } catch (e) {
       _geo.addLog('悬浮窗启动异常: $e');
     }
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    try {
+      final active = await FlutterOverlayWindow.isActive();
+      _geo.addLog('悬浮窗自检: 服务运行=$active');
+    } catch (e) {
+      _geo.addLog('悬浮窗自检异常: $e');
+    }
+    try {
+      final status = await _overlayChannel.invokeMethod<String>('getOverlayStatus');
+      _geo.addLog('悬浮窗状态:${status ?? '(空)'}');
+    } catch (e) {
+      _geo.addLog('悬浮窗状态获取异常: $e');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    try {
+      await _overlayChannel.invokeMethod('moveToBack');
+    } catch (_) {}
   }
 
   List<LatLng> _pointsForFence(Geofence fence) {

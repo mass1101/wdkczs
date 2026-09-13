@@ -1626,6 +1626,36 @@ class DeviceService {
     await _request(Cmd.idteckSetEmuId.value, Uint8List.fromList(uid));
   }
 
+  /// 读取 HID Prox 模拟卡 ID
+  Future<Uint8List> cmdHidProxGetEmuId() async {
+    final r = await _request(Cmd.hidproxGetEmuId.value, null);
+    return r.length > 2 ? r.sublist(2) : r;
+  }
+
+  /// 读取 Viking 模拟卡 ID
+  Future<Uint8List> cmdVikingGetEmuId() async {
+    final r = await _request(Cmd.vikingGetEmuId.value, null);
+    return r.length > 2 ? r.sublist(2) : r;
+  }
+
+  /// 读取 PAC 模拟卡 ID
+  Future<Uint8List> cmdPacGetEmuId() async {
+    final r = await _request(Cmd.pacGetEmuId.value, null);
+    return r.length > 2 ? r.sublist(2) : r;
+  }
+
+  /// 读取 ioProx 模拟卡 ID
+  Future<Uint8List> cmdIoProxGetEmuId() async {
+    final r = await _request(Cmd.ioProxGetEmuId.value, null);
+    return r.length > 2 ? r.sublist(2) : r;
+  }
+
+  /// 读取 idteck 模拟卡 ID
+  Future<Uint8List> cmdIdteckGetEmuId() async {
+    final r = await _request(Cmd.idteckGetEmuId.value, null);
+    return r.length > 2 ? r.sublist(2) : r;
+  }
+
   // ========== 组合操作（与逆向 hf14aInfo 等一致） ==========
 
   /// 扫描并获取卡片信息列表

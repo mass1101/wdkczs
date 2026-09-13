@@ -157,3 +157,133 @@ Future<void> uploadCardToSlot(
     await device.cmdSlotSaveSettings();
   }
 }
+
+/// 读取实体卡槽中的完整数据（对齐 CU slot_card_io.readSlotDump）
+/// [slot] 从 0 起，[isHf] 为 true 读高频槽，false 读低频槽
+Future<SaveCard?> readSlotDump(
+  DeviceService device,
+  int slot,
+  bool isHf, {
+  String? name,
+}) async {
+  try {
+    final slotTypes = await device.cmdSlotGetInfo();
+    if (slot < 0 || slot >= slotTypes.length) return null;
+
+    final typeValue = isHf ? slotTypes[slot].$1 : slotTypes[slot].$2;
+    final TagType tag;
+    try {
+      tag = TagType.from(typeValue);
+    } catch (_) {
+      return null;
+    }
+
+    await device.cmdSlotSetActive(slot);
+    await device.cmdChangeDeviceMode(DeviceMode.tag);
+
+    if (!isHf) {
+      // LF 卡：读取模拟器 ID
+      Uint8List uid;
+      switch (tag) {
+        case TagType.em4100:
+        case TagType.electra:
+          uid = await device.cmdEm410xGetEmuId();
+          break;
+        case TagType.hidProx:
+          uid = await device.cmdHidProxGetEmuId();
+          break;
+        case TagType.viking:
+          uid = await device.cmdVikingGetEmuId();
+          break;
+        case TagType.pac:
+          uid = await device.cmdPacGetEmuId();
+          break;
+        case TagType.ioProx:
+          uid = await device.cmdIoProxGetEmuId();
+          break;
+        case TagType.idteck:
+          uid = await device.cmdIdteckGetEmuId();
+          break;
+        default:
+          return null;
+      }
+      return SaveCard(
+        uid: StorageService.bytesToHex(uid),
+        name: name ?? '',
+        tag: tag,
+      );
+    }
+
+    // HF 卡：读取反碰撞数据
+    final anti = await device.cmdHf14aGetAntiCollData();
+    if (anti == null) return null;
+
+    if (isMifareUltralight(tag)) {
+      final pageCount = tag == TagType.ntag215 ? 135 : 41;
+      final pages = <String>[];
+      for (int page = 0; page < pageCount; page++) {
+        final pageData = await device.cmdMf0EmuReadPages(page, 1);
+        pages.add(StorageService.bytesToHex(pageData));
+      }
+
+      final versionData = await device.cmdMf0EmuGetVersionData();
+      final signatureData = await device.cmdMf0EmuGetSignatureData();
+      final counters = <int>[];
+      if (pageCount > 41) {
+        for (int i = 0; i < pageCount - 41; i++) {
+          final (val, _) = await device.cmdMf0EmuGetCounterData(i);
+          counters.add(val);
+        }
+      }
+
+      return SaveCard(
+        uid: anti.uidHex,
+        name: name ?? '',
+        sak: anti.sak,
+        atqa: anti.atqaHex,
+        ats: anti.atsHex,
+        tag: tag,
+        data: pages,
+        ultralightVersion: StorageService.bytesToHex(versionData),
+        ultralightSignature: StorageService.bytesToHex(signatureData),
+        ultralightCounters: counters,
+      );
+    } else if (isMifareClassic(tag)) {
+      final blockCount = tag == TagType.mifareClassic4k ? 256 : 64;
+      final blocks = <String>[];
+      final readCount = 16;
+      var binDataIndex = 0;
+      final binData = Uint8List(blockCount * 16);
+
+      for (int currentBlock = 0;
+          currentBlock < blockCount;
+          currentBlock += readCount) {
+        final result = await device.cmdMf1EmuReadBlock(currentBlock, readCount);
+        if (result.length >= 16) {
+          binData.setRange(binDataIndex,
+              binDataIndex + result.length, result);
+          binDataIndex += result.length;
+        }
+      }
+
+      for (int i = 0; i < binData.length; i += 16) {
+        final block = binData.sublist(i, i + 16);
+        blocks.add(StorageService.bytesToHex(block));
+      }
+
+      return SaveCard(
+        uid: anti.uidHex,
+        name: name ?? '',
+        sak: anti.sak,
+        atqa: anti.atqaHex,
+        ats: anti.atsHex,
+        tag: tag,
+        data: blocks,
+      );
+    }
+
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
