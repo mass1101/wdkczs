@@ -102,6 +102,8 @@ enum Cmd {
   mf0NtagGetEmulatorConfig(4037),
   mf1SetFieldOffDoReset(4038),
   mf1GetFieldOffDoReset(4039),
+  mf1GetPrngType(4040),
+  mf1SetPrngType(4041),
   em410xSetEmuId(5000),
   em410xGetEmuId(5001),
   hidproxSetEmuId(5002),

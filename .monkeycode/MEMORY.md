@@ -151,3 +151,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - **该 SDK 已移除 `AlertDialogRoute`/`SimpleDialogRoute`**，全屏 loading 遮罩改用 `DialogRoute<void>(context: context, barrierDismissible: false, barrierColor: Colors.transparent, builder: (_) => widget)`；`SimpleDialog` 本身仍在。
   - `Map<K,V>.from(nullableMap)` 报 `argument_type_not_assignable`（签名收 `Map<dynamic,dynamic>`），改用展开 `<K,V>{...map}` 构造。
   - `dart format`（本 SDK 风格）会把单行 `if (cond) continue;` 折成两行无花括号，触发 `curly_braces_in_flow_control_structures`；格式化后需手动补花括号，否则 `flutter analyze` 有 info。
+  - **工具层对真实包名做掩码**：实际文件里的 `package:flutter/services.dart` 在工具输出中被显示为 `package:flexter/services.dart`，反向输入时又会写回真实名。因此按显示文本做精确字符串匹配会失败；用 `python3` 读文件并比对 `count()` 最可靠，需要写真实包名时按字符码拼接。
+  - `FilteringTextInputFormatter` / `LengthLimitingTextInputFormatter` 在 `package:flutter/services.dart`。新增该导入易被掩码改写成语义不通的 URI；用不了就删掉 formatter 导入，改 `maxLength` + 保存时 `formatHexInput` 校验。
+  - 老文件（如 `device_service.dart`）与新版 `dart format` 风格差异大，整体格式化会产生 500+ 行 diff；只对本轮新写文件跑 format，未改动的老文件保持原样。
+  - HF 卡槽编辑已对齐 CU SlotEditMenu：卡名 + 类型 + UID/SAK/ATQA/ATS，Classic 展开 Gen1a/Gen2/PRNG/块 0 魔改/检测/写保护，Ultralight 展开版本/签名/计数器/UID 魔改/检测/写保护。PRNG 命令（4040/4041）与 NTAG 仿真器（4019/4020/4033-4037）为本次新增；写入 PRNG 已做 try/catch 容错，旧固件不支持时不阻塞保存。

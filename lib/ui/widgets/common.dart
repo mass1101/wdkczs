@@ -352,3 +352,40 @@ class KeyCard extends StatelessWidget {
     );
   }
 }
+
+/// 圆角分段选择按钮（对齐 CU ToggleButtonsWrapper）
+/// 选项过窄时整体缩小，保证不换行
+class ToggleButtonsWrapper extends StatelessWidget {
+  final List<bool> isSelected;
+  final List<String> children;
+  final ValueChanged<int> onPressed;
+  final Color? selectedColor;
+
+  const ToggleButtonsWrapper({
+    super.key,
+    required this.isSelected,
+    required this.children,
+    required this.onPressed,
+    this.selectedColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return FittedBox(
+      alignment: Alignment.centerRight,
+      fit: BoxFit.scaleDown,
+      child: ToggleButtons(
+        direction: Axis.horizontal,
+        borderRadius: BorderRadius.all(const Radius.circular(32)),
+        onPressed: onPressed,
+        isSelected: isSelected,
+        selectedBorderColor: primary,
+        selectedColor: selectedColor ?? primary,
+        color: Colors.grey.shade600,
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 34),
+        children: [for (final c in children) Text(c)],
+      ),
+    );
+  }
+}

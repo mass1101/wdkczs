@@ -1448,6 +1448,18 @@ class DeviceService {
     await _request(Cmd.mf1SetWriteMode.value, Uint8List.fromList([mode]));
   }
 
+
+  /// 读取 Classic 随机数算法类型（0=static 1=weak 2=hard）
+  Future<int> cmdMf1GetPrngType() async {
+    final r = await _request(Cmd.mf1GetPrngType.value, null);
+    return r.isEmpty ? 0 : r[0];
+  }
+
+  /// 设置 Classic 随机数算法类型
+  Future<void> cmdMf1SetPrngType(int type) async {
+    await _request(Cmd.mf1SetPrngType.value, Uint8List.fromList([type]));
+  }
+
   Future<Hf14aAntiColl?> cmdHf14aGetAntiCollData() async {
     final r = await _request(Cmd.hf14aGetAntiCollData.value, null);
     if (r.isEmpty) return null;
@@ -1542,6 +1554,72 @@ class DeviceService {
   Future<void> cmdMf0EmuSetWriteMode(int mode) async {
     await assureDeviceMode(DeviceMode.tag);
     await _request(Cmd.mf0NtagSetWriteMode.value, Uint8List.fromList([mode]));
+  }
+
+  /// 读取 NTAG UID Magic Mode（Gen2）
+  Future<bool> cmdMf0EmuGetMagicMode() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagGetUidMagicMode.value, null);
+    return r.isNotEmpty && r[0] == 1;
+  }
+
+  /// 设置 NTAG UID Magic Mode（Gen2）
+  Future<void> cmdMf0EmuSetMagicMode(bool enable) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagSetUidMagicMode.value,
+        Uint8List.fromList([enable ? 1 : 0]));
+  }
+
+  /// 设置 NTAG 密码检测
+  Future<void> cmdMf0EmuSetDetectionEnable(bool enable) async {
+    await assureDeviceMode(DeviceMode.tag);
+    await _request(Cmd.mf0NtagSetDetectionEnable.value,
+        Uint8List.fromList([enable ? 1 : 0]));
+  }
+
+  /// 读取 NTAG 密码检测开关
+  Future<bool> cmdMf0EmuGetDetectionEnable() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagGetDetectionEnable.value, null);
+    return r.isNotEmpty && r[0] == 1;
+  }
+
+  /// 读取 NTAG 已检测密码数量
+  Future<int> cmdMf0EmuGetDetectionCount() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagGetDetectionCount.value, null);
+    return r.length >= 4
+        ? ByteData.sublistView(r).getUint32(0, Endian.little)
+        : 0;
+  }
+
+  /// 读取 NTAG 已检测密码列表（每条 4 字节 hex）
+  Future<List<String>> cmdMf0EmuGetDetectionLogs(int offset) async {
+    await assureDeviceMode(DeviceMode.tag);
+    final b = Uint8List(4);
+    ByteData.sublistView(b).setUint32(0, offset, Endian.little);
+    final r = await _request(Cmd.mf0NtagGetDetectionLog.value, b);
+    final list = <String>[];
+    for (var i = 0; i + 4 <= r.length; i += 4) {
+      list.add(r.sublist(i, i + 4)
+          .map((x) => x.toRadixString(16).padLeft(2, '0'))
+          .join());
+    }
+    return list;
+  }
+
+  /// 读取 NTAG 模拟器配置（detection / magic / writeMode，writeMode 4 归并为影子）
+  Future<Mf1EmuSettings> cmdMf0EmuGetEmuSettings() async {
+    await assureDeviceMode(DeviceMode.tag);
+    final r = await _request(Cmd.mf0NtagGetEmulatorConfig.value, null);
+    final w = r.length > 2 ? r[2] : 0;
+    return Mf1EmuSettings(
+      detection: r.isNotEmpty && r[0] == 1,
+      gen1a: false,
+      gen2: r.length > 1 && r[1] == 1,
+      antiColl: false,
+      write: w >= 4 ? 3 : w,
+    );
   }
 
   // ========== LF 命令（cmd 3000-3009） ==========
