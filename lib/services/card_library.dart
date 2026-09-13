@@ -32,6 +32,87 @@ bool isLfTag(TagType tag) =>
     tag == TagType.ioProx ||
     tag == TagType.idteck;
 
+/// LF 卡 UID 字节数（对齐 CU uidSizeForLfTag）
+int lfUidSize(TagType tag) {
+  switch (tag) {
+    case TagType.electra:
+      return 13;
+    case TagType.em4100:
+      return 5;
+    case TagType.hidProx:
+      return 5;
+    case TagType.viking:
+      return 4;
+    case TagType.pac:
+      return 8;
+    case TagType.ioProx:
+      return 16;
+    case TagType.idteck:
+      return 8;
+    default:
+      return 0;
+  }
+}
+
+/// HID Prox 类型名称（对齐 CU getNameForHIDProxType，1-30）
+String getNameForHIDProxType(int type) => _hidProxTypeNames[type - 1];
+
+/// 由 HID Prox 字段生成 13 字节 UID 字符串（对齐 CU HIDCard.toString，大端）
+String hidProxUidFromParts(
+  int hidType,
+  int facilityCode,
+  Uint8List uid,
+  int issueLevel,
+  int oem,
+) {
+  return bytesToHexSpace(
+    Uint8List.fromList([
+      hidType & 0xFF,
+      (facilityCode >> 24) & 0xFF,
+      (facilityCode >> 16) & 0xFF,
+      (facilityCode >> 8) & 0xFF,
+      facilityCode & 0xFF,
+      ...uid,
+      issueLevel & 0xFF,
+      (oem >> 8) & 0xFF,
+      oem & 0xFF,
+    ]),
+  );
+}
+
+const List<String> _hidProxTypeNames = [
+  'HID H10301 26-bit',
+  'Indala 26-bit',
+  'Indala 27-bit',
+  'Indala ASC 27-bit',
+  'Tecom 27-bit',
+  '2804 Wiegand 28-bit',
+  'Indala 29-bit',
+  'ATS Wiegand 30-bit',
+  'HID ADT 31-bit',
+  'HID Check Point 32-bit',
+  'HID Hewlett-Packard 32-bit',
+  'Kastle 32-bit',
+  'Indala/Kantech KFS 32-bit',
+  'Wiegand 32-bit',
+  'HID D10202 33-bit',
+  'HID H10306 34-bit',
+  'Honeywell/Northern N10002 34-bit',
+  'Indala Optus 34-bit',
+  'Cardkey Smartpass 34-bit',
+  'BQT 34-bit',
+  'HID Corporate 1000 35-bit Std',
+  'HID KeyScan 36-bit',
+  'HID Simplex 36-bit',
+  'HID 36-bit Siemens',
+  'HID H10320 37-bit BCD',
+  'HID H10302 37-bit huge ID',
+  'HID H10304 37-bit',
+  'HID P10004 37-bit PCSC',
+  'HID Generic 37-bit',
+  'PointGuard MDI 37-bit',
+];
+
 // ========== Mifare Classic helpers (对齐 CU mifare_classic/general.dart) ==========
 
 /// Mifare Classic 卡类型枚举
