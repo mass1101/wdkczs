@@ -14,6 +14,7 @@ import '../../services/slot_writer.dart';
 import '../../services/storage_service.dart';
 import '../../state/app_controller.dart';
 import '../screens/card_analyze_screen.dart';
+import '../screens/card_cloud_analyze_screen.dart';
 import '../screens/card_compare_screen.dart';
 import '../screens/card_create_dialog.dart';
 import '../screens/card_edit_dialog.dart';
@@ -407,6 +408,7 @@ class _LibraryTabState extends State<LibraryTab> {
               if (v == 'move') _moveCard(c);
               if (v == 'dump') _openDumpEditor(c);
               if (v == 'analyze') _openCardAnalyze(c);
+              if (v == 'cloud_analyze') _openCloudAnalyze(c);
               if (v == 'compare') _openCardCompare(c);
               if (v == 'delete') _deleteCard(c);
             },
@@ -417,6 +419,11 @@ class _LibraryTabState extends State<LibraryTab> {
                 const PopupMenuItem(value: 'dump', child: Text('Dump 编辑器')),
               if (isMifareClassic(c.tag))
                 const PopupMenuItem(value: 'analyze', child: Text('卡片分析')),
+              if (isMifareClassic(c.tag))
+                const PopupMenuItem(
+                  value: 'cloud_analyze',
+                  child: Text('云端分析'),
+                ),
               if (isMifareClassic(c.tag) || isMifareUltralight(c.tag))
                 const PopupMenuItem(value: 'compare', child: Text('比较 Dump')),
               const PopupMenuItem(value: 'move', child: Text('移动到文件夹')),
@@ -470,6 +477,11 @@ class _LibraryTabState extends State<LibraryTab> {
       context,
       MaterialPageRoute(builder: (_) => CardAnalyzeScreen(card: c)),
     );
+    await _reload();
+  }
+
+  Future<void> _openCloudAnalyze(SaveCard c) async {
+    await CardCloudAnalyzeScreen.launch(context, c);
     await _reload();
   }
 

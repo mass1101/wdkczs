@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../services/card_library.dart';
 import 'card_analyze_screen.dart';
+import 'card_cloud_analyze_screen.dart';
 import 'card_compare_screen.dart';
 import 'card_edit_dialog.dart';
 import 'dump_editor.dart';
@@ -45,7 +46,12 @@ class _CardViewDialogState extends State<CardViewDialog> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text('已复制: $text'), duration: const Duration(seconds: 1)));
+      ..showSnackBar(
+        SnackBar(
+          content: Text('已复制: $text'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
   }
 
   Widget _infoRow(String label, String value, {bool copyable = true}) {
@@ -55,8 +61,10 @@ class _CardViewDialogState extends State<CardViewDialog> {
         children: [
           SizedBox(
             width: 80,
-            child: Text(label,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF888888))),
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF888888)),
+            ),
           ),
           Expanded(
             child: SelectableText(
@@ -84,13 +92,18 @@ class _CardViewDialogState extends State<CardViewDialog> {
     final isUltralight = isMifareUltralight(_card.tag);
 
     final sakHex = _card.sak.toRadixString(16).padLeft(2, '0');
-    final atqaDisplay = _card.atqa.isEmpty ? '' : _formatHexWithSpace(_card.atqa);
+    final atqaDisplay = _card.atqa.isEmpty
+        ? ''
+        : _formatHexWithSpace(_card.atqa);
 
     return Dialog.fullscreen(
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_card.name.isEmpty ? '未命名' : _card.name,
-              maxLines: 1, overflow: TextOverflow.ellipsis),
+          title: Text(
+            _card.name.isEmpty ? '未命名' : _card.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           leading: TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('关闭', style: TextStyle(color: Colors.white)),
@@ -106,7 +119,11 @@ class _CardViewDialogState extends State<CardViewDialog> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: const [
-                  BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
+                  BoxShadow(
+                    color: Color(0x0A000000),
+                    blurRadius: 2,
+                    offset: Offset(0, 1),
+                  ),
                 ],
               ),
               child: Column(
@@ -120,18 +137,31 @@ class _CardViewDialogState extends State<CardViewDialog> {
                         size: 24,
                       ),
                       const SizedBox(width: 8),
-                      Text(_card.tag.label,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      Text(
+                        _card.tag.label,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       const Spacer(),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: isLf ? const Color(0xFFFF9800) : const Color(0xFF2196F3),
+                          color: isLf
+                              ? const Color(0xFFFF9800)
+                              : const Color(0xFF2196F3),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           isLf ? 'LF' : 'HF',
-                          style: const TextStyle(color: Colors.white, fontSize: 11),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
                         ),
                       ),
                     ],
@@ -141,17 +171,26 @@ class _CardViewDialogState extends State<CardViewDialog> {
                   if (isHf) ...[
                     _infoRow('SAK', sakHex),
                     _infoRow('ATQA', atqaDisplay),
-                    if (_card.ats.isNotEmpty) _infoRow('ATS', _formatHexWithSpace(_card.ats)),
+                    if (_card.ats.isNotEmpty)
+                      _infoRow('ATS', _formatHexWithSpace(_card.ats)),
                   ],
                   if (isUltralight) ...[
                     if (_card.ultralightVersion.isNotEmpty)
-                      _infoRow('版本', _formatHexWithSpace(_card.ultralightVersion)),
+                      _infoRow(
+                        '版本',
+                        _formatHexWithSpace(_card.ultralightVersion),
+                      ),
                     if (_card.ultralightSignature.isNotEmpty)
-                      _infoRow('签名', _formatHexWithSpace(_card.ultralightSignature)),
+                      _infoRow(
+                        '签名',
+                        _formatHexWithSpace(_card.ultralightSignature),
+                      ),
                     if (_card.ultralightCounters.isNotEmpty)
                       _infoRow(
                         '计数器',
-                        _card.ultralightCounters.map((c) => c.toString()).join(', '),
+                        _card.ultralightCounters
+                            .map((c) => c.toString())
+                            .join(', '),
                         copyable: false,
                       ),
                   ],
@@ -185,7 +224,8 @@ class _CardViewDialogState extends State<CardViewDialog> {
                   avatar: const Icon(Icons.copy_all, size: 18),
                   onPressed: () async {
                     final dup = _card.copy();
-                    dup.id = 'c${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+                    dup.id =
+                        'c${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
                     dup.name = '${_card.name} (副本)';
                     dup.updatedAt = DateTime.now();
                     await CardLibraryStorage().upsertCard(dup);
@@ -225,6 +265,13 @@ class _CardViewDialogState extends State<CardViewDialog> {
                       );
                     },
                   ),
+                if (isClassic)
+                  ActionChip(
+                    label: const Text('云端分析'),
+                    avatar: const Icon(Icons.cloud_upload_outlined, size: 18),
+                    onPressed: () =>
+                        CardCloudAnalyzeScreen.launch(context, _card),
+                  ),
                 if (isClassic || isUltralight)
                   ActionChip(
                     label: const Text('比较'),
@@ -256,18 +303,31 @@ class _CardViewDialogState extends State<CardViewDialog> {
                 ),
                 ActionChip(
                   label: const Text('删除'),
-                  avatar: const Icon(Icons.delete_outline, size: 18,
-                      color: Colors.red),
+                  avatar: const Icon(
+                    Icons.delete_outline,
+                    size: 18,
+                    color: Colors.red,
+                  ),
                   onPressed: () async {
                     final ok = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
                         title: const Text('删除卡片'),
-                        content: Text('确定删除「${_card.name.isEmpty ? _card.uid : _card.name}」？'),
+                        content: Text(
+                          '确定删除「${_card.name.isEmpty ? _card.uid : _card.name}」？',
+                        ),
                         actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-                          TextButton(onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text('删除', style: TextStyle(color: Colors.red))),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text(
+                              '删除',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ),
                         ],
                       ),
                     );
