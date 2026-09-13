@@ -147,4 +147,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - 远端：github=`https://github.com/mass1101/NFCapp.git`、gitee=`https://gitee.com/zzx1101/NFCapp.git`，默认分支均 `main`；环境无 `ssh` 二进制，只能走 HTTPS。
   - 打印 git 输出前先 `sed 's|//[^@]*@|//***@|g'` 脱敏，勿在回复中展示 token。
   - Flutter 在 `/opt/flutter/bin/flutter`（3.44.9 / Dart 3.12.2），不在 PATH；`flutter` 命令不可用，必须用绝对路径。
-  - **该 SDK 的 `dart:math` 是精简版，未导出 `floor`/`ceil`/`sinh`/`cosh`/`tanh`**（`pow`/`log`/`exp`/`atan`/`tan`/`sqrt`/`pi`/`ln10` 正常）。取整用 `(x).floor()`，双曲函数按定义实现：`sinh(x) = (exp(x) - exp(-x)) / 2`。
+  - **该 SDK 的 `dart:math` 是精简版，未导出 `floor`/`ceil`/`sinh`/`cosh`/`tanh`**（`pow`/`log`/`exp`/`atan`/`tan`/`sqrt`/`pi`/`ln10` 正常）。取整用 `(x).floor()`，双曲函数按定义实现：`sinh(x) = (exp(x) - exp(-x)) / 2`。`Random.secure()` 可用，生成 token 优先用它，勿自写 LCG。
+  - **该 SDK 已移除 `AlertDialogRoute`/`SimpleDialogRoute`**，全屏 loading 遮罩改用 `DialogRoute<void>(context: context, barrierDismissible: false, barrierColor: Colors.transparent, builder: (_) => widget)`；`SimpleDialog` 本身仍在。
+  - `Map<K,V>.from(nullableMap)` 报 `argument_type_not_assignable`（签名收 `Map<dynamic,dynamic>`），改用展开 `<K,V>{...map}` 构造。
+  - `dart format`（本 SDK 风格）会把单行 `if (cond) continue;` 折成两行无花括号，触发 `curly_braces_in_flow_control_structures`；格式化后需手动补花括号，否则 `flutter analyze` 有 info。
