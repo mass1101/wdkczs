@@ -1143,6 +1143,23 @@ class DeviceService {
   /// 检查多扇区密钥
   /// onChunk：每块响应解析完成后回调，参数为累积结果（已命中的 found 位与 sectorKeys）
   /// 与已处理的 key 数量游标（断点续破），不影响最终返回值
+  /// 掩码中「待检查槽位」数：固件 mf1_toolbox_check_keys_of_sectors 中位=1 表示该槽
+  /// 已知、跳过，位=0 表示待认证；10 字节共 80 槽（对齐 40 扇区 × A/B）。
+  /// 用于按槽次估算批量检查的单命令耗时上界，避免固定 5000ms 误杀大批量全查。
+  static int _maskSlotsToCheck(Uint8List mask) {
+    var slots = 0;
+    for (final b in mask) {
+      var v = b;
+      var setBits = 0;
+      while (v != 0) {
+        setBits += v & 1;
+        v >>= 1;
+      }
+      slots += 8 - setBits;
+    }
+    return slots;
+  }
+
   Future<Mf1CheckKeysOfSectorsRes> cmdMf1CheckKeysOfSectors({
     required List<Uint8List> keys,
     required Uint8List mask,
@@ -1158,12 +1175,18 @@ class DeviceService {
     for (var off = 0; off < keys.length; off += chunkSize) {
       final end = (off + chunkSize > keys.length) ? keys.length : off + chunkSize;
       final chunk = keys.sublist(off, end);
+      // 单命令等待 = 本块将认证的槽次上界 × 单次认证耗时 + BLE 往返缓冲。
+      // 固定 5000ms 会让「字典全 miss + 全扇区全查」的大批量在破解第一步就误超时
+      // （每认证约 30-50ms，32 槽 × 32 把 ≈ 上千次 → 需数十秒）
+      final waitMs = UltraFrame.defaultTimeoutMs +
+          chunk.length * _maskSlotsToCheck(liveMask) * 50;
       final n = Uint8List(10 + chunk.length * 6);
       n.setRange(0, 10, liveMask);
       for (var i = 0; i < chunk.length; i++) {
         n.setRange(10 + i * 6, 10 + i * 6 + 6, chunk[i]);
       }
-      final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n);
+      final r = await _request(Cmd.mf1CheckKeysOfSectors.value, n,
+          timeout: waitMs);
       final found = Uint8List(10);
       found.setRange(0, 10, r.sublist(0, 10));
       var allDone = true;
