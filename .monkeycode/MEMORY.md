@@ -173,6 +173,11 @@ Entries discovered by the Agent during task execution should follow this format:
   - 围栏总开关实际生效条件 = `userEnabled && 设备已连接`（`_syncEnabledState` 取 `_isConnected`）；BLE 状态变化时经 `AppController._syncGeofenceConnected` → `geofence.refreshEnabledState()` 刷新。设备未连接时开关应不生效，否则卡槽切换/上传必然失败，日志满屏失败会被误判成"定位不准"。
   - 卡槽上限统一 80（`TAG_MAX_SLOT_NUM=80`）：围栏编辑页 `maxSlots = fences.isNotEmpty ? 80 : 8`。写成 8 会让 `_slotNumber.clamp(1, maxSlots)` 把已有 9–80 号卡槽的围栏在编辑保存后改写为 8，静默损坏数据。
   - ID 页卡号：`IdCardState.idCardHex` 不落存储（`AppController` 每次 `IdCardState()` 新建），改默认值即改这里；`idCardDec` 是从 hex 派生并 13 位左补零，改十进制默认值要改对应 hex（5577 = 0x15C9 → `00000015c9`，显示为 `000000005577`）。
+  - **定位不准的真正根因在 AndroidManifest，不在 Dart/原生代码**：清单曾写 `ACCESS_FINE_LOCATION` + `android:maxSdkVersion="30"`，Android 11（API 31）及以上只剩粗定位——原生 `requestLocationUpdates(GPS_PROVIDER)` 需要 FINE 权限，抛 `SecurityException` 被 catch 静默吞掉，`GeofenceService` 拿不到任何坐标；Dart 侧 `getCurrentPosition` 也退化成网络粗定位（误差数百米）。已去掉该上限。CU 清单无此限制。排查定位问题先查清单权限，再查代码。
+  - `GeofenceService` 声明曾缺 `android:stopWithTask="false"`，应用退后台即被杀，表现同样是「暂无定位」。已对齐 CU 补齐，并补 `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` 属性。
+  - 「暂无定位」是正常状态：原生服务仅在「总开关开 + NFC 设备已连接」时启动（`_enabled = _userEnabled && _isConnected`）。此时蓝点走 Dart 兜底 `getCurrentPosition`（WGS84→GCJ-02 转换与原生一致，非 bug）。诊断栏「定位」行读的是 `_geo.lastPosition`（仅原生回调），与蓝点数据源可能不同。
+  - 围栏全链路已逐项与 CU 逐字比对确认等价（定位方法/原生 `onLocationChanged` 单次转换/原生与 Dart 的 `wgs84ToGcj02` 数学实现/高德瓦片 URL/marker 绘制/`CoordinateConverter`/`load()`），`geolocator` 锁定版本同为 13.0.4。依赖唯一差异 `geolocator_platform_interface` 4.3.0（本项目）vs 4.2.8（CU）仅涉及 `hasX()` 判定，不影响坐标值。声称「代码等价」前必须逐层 diff 到这一深度，含 `pubspec.lock` 与 `AndroidManifest`。
+  - 已加无损诊断：诊断栏新增「蓝点」行显示蓝点实际使用的坐标与来源（原生定位服务 / Dart定位），`_locateMe` 与 build 的原生同步路径各设 `_positionSource`，实测一次即可判定偏移来自哪条定位路径。
 
 [User Instruction Summary]
 - Date: 2026-09-14
