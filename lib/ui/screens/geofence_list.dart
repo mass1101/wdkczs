@@ -38,6 +38,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   String? _dragFenceId;
   LatLng? _dragStartLatLng;
   LatLng? _dragHandleLatLng;
+  bool _mapReady = false;
   final Map<String, List<LatLng>> _liveDragPoints = {};
   String? _selectedFenceId;
   final _mapReadyCompleter = Completer<void>();
@@ -47,18 +48,39 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     super.initState();
     _geo = AppScope.instance.controller.geofence;
     _geo.addListener(_onChange);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _locateMe());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _geo.startMapPositionStream();
+      _locateMe();
+    });
   }
 
   @override
   void dispose() {
     _geo.removeListener(_onChange);
+    _geo.stopMapPositionStream();
     _mapController.dispose();
     super.dispose();
   }
 
   void _onChange() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final pos = _geo.lastPosition;
+    if (pos == null || pos == _currentPosition) {
+      setState(() {});
+      return;
+    }
+    setState(() {
+      _currentPosition = pos;
+      _positionLoaded = true;
+    });
+    if (_followMe) _mapTo(pos);
+  }
+
+  /// 把地图中心移到 [target]，保持当前缩放级别
+  void _mapTo(LatLng target) {
+    if (!_mapReady) return;
+    _mapController.move(target, _mapController.camera.zoom);
   }
 
   void _toast(String msg) {
@@ -90,15 +112,20 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   }
 
   Future<void> _locateMe() async {
-    final nativePos = _geo.lastPosition;
-    final target = nativePos ?? await _getGcjPosition();
-    if (!mounted || target == null) return;
+    final target = _geo.lastPosition ?? await _getGcjPosition();
+    if (!mounted) return;
+    if (target == null) {
+      setState(() => _statusMessage = '定位失败：请检查定位权限');
+      return;
+    }
     setState(() {
       _currentPosition = target;
       _positionLoaded = true;
       _statusMessage = '已定位到当前位置';
     });
-    await _mapReadyCompleter.future;
+    try {
+      await _mapReadyCompleter.future;
+    } catch (_) {}
     if (!mounted) return;
     _mapController.move(target, 16.0);
   }
@@ -289,18 +316,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final latest = _geo.lastPosition;
-    if (latest != null && latest != _currentPosition) {
-      _currentPosition = latest;
-      _positionLoaded = true;
-      if (_followMe) {
-        final zoom = _mapController.camera.zoom;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _mapController.move(latest, zoom);
-        });
-      }
-    }
-
     return Scaffold(
       body: Stack(
         children: [
@@ -314,6 +329,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                 flags: InteractiveFlag.all,
               ),
               onMapReady: () {
+                _mapReady = true;
                 if (!_mapReadyCompleter.isCompleted) {
                   _mapReadyCompleter.complete();
                 }
@@ -396,8 +412,11 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                         onChanged: (v) {
                           _geo.setEnabled(v);
                           setState(
-                            () => _statusMessage =
-                                v ? '围栏已开启' : '围栏已关闭',
+                            () => _statusMessage = _geo.monitoring
+                                ? '围栏判定已启动'
+                                : (v
+                                    ? '已开启：定位持续更新，连接设备后才判定'
+                                    : '围栏判定已停止'),
                           );
                         },
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -510,6 +529,12 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             connected ? Icons.link : Icons.link_off,
             connected ? '设备已连接' : '设备未连接',
             connected ? Colors.green : Colors.grey,
+            textStyle,
+          ),
+          _diagRow(
+            _geo.monitoring ? Icons.radar : Icons.radar_outlined,
+            _geo.monitoring ? '围栏判定中' : '判定未运行',
+            _geo.monitoring ? Colors.green : Colors.grey,
             textStyle,
           ),
           _diagRow(

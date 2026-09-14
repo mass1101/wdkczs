@@ -3,20 +3,25 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../helpers/coordinate_converter.dart';
 import 'card_library.dart';
 import 'geofence.dart';
 
 /// 电子围栏 Provider（对齐 CU geofence_provider.dart，nfcapp 原生化：
 /// 复用 SaveCard/CardLibraryStorage/uploadCardToSlot，CLI 走注入的设备回调）
 ///
-/// 定位只有原生 geofence_native_channel 一条链路：原生 GeofenceService
-/// 先把 WGS84 转 GCJ02 再与围栏多边形匹配，回调回来的坐标与事件
-/// 都是 GCJ-02，与高德瓦片上点选的多边形同一坐标系。Dart 侧不再
-/// 并行跑 geolocator，否则原始 WGS84 会与 GCJ-02 互相覆盖。
+/// 位置有两条来源，坐标系统一为 GCJ-02（与高德瓦片上点选的多边形一致）：
+/// 1. 原生 geofence_native_channel：原生 GeofenceService 先把 WGS84 转
+///    GCJ02 再做围栏匹配，回调的坐标与命中/离开事件都是 GCJ-02。
+///    仅在「总开关开 + 设备已连接」时运行——围栏动作要写卡槽，必须连设备。
+/// 2. Dart 侧 geolocator 地图位置流（[startMapPositionStream]）：不依赖设备，
+///    进围栏页即启动，只供地图蓝点/坐标行/地图跟随/悬浮窗显示使用。
+///    写入前同样先转 GCJ-02，不会把原始 WGS84 灌进 lastPosition。
 class GeofenceProvider extends ChangeNotifier {
   List<Geofence> _fences = [];
   bool _userEnabled = false;
@@ -141,11 +146,65 @@ class GeofenceProvider extends ChangeNotifier {
   /// 公开方法：推送围栏状态数据到悬浮窗（供 home_page 定时器调用）
   void pushOverlayData() => _pushOverlayData();
 
-  void _handleNativePosition(double lat, double lng) {
-    _lastPosition = LatLng(lat, lng);
+  void _handleNativePosition(double lat, double lng) =>
+      _updatePosition(LatLng(lat, lng));
+
+  /// 统一的位置更新入口（入参必须已是 GCJ-02）
+  void _updatePosition(LatLng pos) {
+    if (_lastPosition == pos) return;
+    _lastPosition = pos;
     _lastPositionTime = DateTime.now();
     notifyListeners();
     _pushOverlayData();
+  }
+
+  /// 地图位置流（Dart 侧 geolocator），设备未连接时仍持续更新
+  StreamSubscription<Position>? _mapPositionSub;
+  int _mapPositionRefs = 0;
+
+  bool get mapPositionRunning => _mapPositionSub != null;
+
+  Future<void> startMapPositionStream() async {
+    _mapPositionRefs++;
+    if (_mapPositionSub != null) return;
+    final granted = await _ensureLocationPermission();
+    if (!granted) {
+      _log('定位权限未授予，地图位置流未启动');
+      return;
+    }
+    _mapPositionSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 2,
+      ),
+    ).listen(
+      (p) => _updatePosition(
+        CoordinateConverter.wgs84ToGcj02(LatLng(p.latitude, p.longitude)),
+      ),
+      onError: (Object _) {},
+    );
+    _log('地图位置流已启动（不依赖设备连接）');
+  }
+
+  void stopMapPositionStream() {
+    if (_mapPositionRefs == 0) return;
+    _mapPositionRefs--;
+    if (_mapPositionRefs > 0) return;
+    _mapPositionSub?.cancel();
+    _mapPositionSub = null;
+  }
+
+  Future<bool> _ensureLocationPermission() async {
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      return permission != LocationPermission.denied &&
+          permission != LocationPermission.deniedForever;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _handleFenceEvent(String event, String fenceId) {
@@ -467,6 +526,7 @@ class GeofenceProvider extends ChangeNotifier {
   @override
   void dispose() {
     _stopMonitoring();
+    stopMapPositionStream();
     super.dispose();
   }
 }
