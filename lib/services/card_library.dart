@@ -473,6 +473,13 @@ Uint8List hexToUint8List(String hex) => StorageService.hexToBytes(hex);
 String formatHexInput(String input) =>
     input.replaceAll(RegExp(r'[^0-9a-fA-F\s]'), '');
 
+/// 卡片名称校验（对齐 CU validateName：非空 + 最多 19 字符）
+String? validateCardName(String? value) {
+  if (value == null || value.isEmpty) return '请输入名称';
+  if (value.length > 19) return '名称过长（最多 19 字符）';
+  return null;
+}
+
 /// 已保存卡片（对应 CU CardSave，data 语义按卡类型：Classic=扇区块/UL=页）
 class SaveCard {
   String id;

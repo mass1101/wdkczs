@@ -1,23 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/storage_service.dart';
-
-/// 预设颜色列表
-const _presetColors = <Color>[
-  Color(0xFFFF5722), // deepOrange
-  Color(0xFF2196F3), // blue
-  Color(0xFF4CAF50), // green
-  Color(0xFF9C27B0), // purple
-  Color(0xFFFF9800), // orange
-  Color(0xFFE91E63), // pink
-  Color(0xFF00BCD4), // cyan
-  Color(0xFF795548), // brown
-  Color(0xFF607D8B), // blueGrey
-  Color(0xFFF44336), // red
-];
 
 /// 卡片创建对话框（对齐 CU CardCreateMenu）
 class CardCreateDialog extends StatefulWidget {
@@ -45,7 +32,8 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
   final _oemCtrl = TextEditingController();
 
   TagType _selectedType = TagType.mifare1K;
-  Color _currentColor = _presetColors[0];
+  Color _currentColor = Colors.deepOrange;
+  Color _pickerColor = Colors.deepOrange;
 
   @override
   void dispose() {
@@ -75,7 +63,7 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
   List<TagType> get _lfTypes => lfTagTypes();
 
   String? _validateUid(String? value) {
-    if (value == null || value.trim().isEmpty) return 'UID 不能为空';
+    if (value == null || value.isEmpty) return 'UID 不能为空';
     final clean = value.replaceAll(RegExp(r'\s'), '');
     if (clean.isEmpty) return 'UID 不能为空';
     if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) return 'UID 只能包含十六进制字符';
@@ -100,85 +88,69 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
     int? exactBytes,
     bool required = false,
   }) {
-    if (value == null || value.trim().isEmpty) {
+    if (value == null || value.isEmpty) {
       return required ? '不能为空' : null;
     }
     final clean = value.replaceAll(RegExp(r'\s'), '');
-    if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) return '只能包含十六进制字符';
+    if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) {
+      return '只能包含十六进制字符';
+    }
+    if (clean.length % 2 != 0) return '长度为奇数，不是合法 16 进制';
     if (exactBytes != null && clean.length != exactBytes * 2) {
       return '需要 $exactBytes 字节（${exactBytes * 2} 位 hex）';
     }
     return null;
   }
 
-  String? _validateRange(String? value, {required int min, required int max}) {
-    if (value == null || value.trim().isEmpty) return null;
-    final v = int.tryParse(value.trim());
-    if (v == null) return '只能包含数字';
-    if (v < min || v > max) return '范围为 $min - $max';
+  String? _validateRange(
+    String? value, {
+    required int min,
+    required int max,
+    bool required = true,
+  }) {
+    if (value == null || value.isEmpty) {
+      return required ? '范围为 $min - $max' : null;
+    }
+    final v = int.tryParse(value);
+    if (v == null || v < min || v > max) return '范围为 $min - $max';
     return null;
   }
 
   void _pickColor() {
-    showModalBottomSheet<void>(
+    showDialog<void>(
       context: context,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '选择颜色',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: _presetColors.map((c) {
-                final selected = c.toARGB32() == _currentColor.toARGB32();
-                return GestureDetector(
-                  onTap: () {
-                    setState(() => _currentColor = c);
-                    Navigator.pop(ctx);
-                  },
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: c,
-                      shape: BoxShape.circle,
-                      border: selected
-                          ? Border.all(color: Colors.white, width: 3)
-                          : null,
-                      boxShadow: selected
-                          ? [
-                              BoxShadow(
-                                color: c,
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: selected
-                        ? const Icon(Icons.check, color: Colors.white, size: 20)
-                        : null,
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: () {
-                setState(() => _currentColor = _presetColors[0]);
-                Navigator.pop(ctx);
-              },
-              child: const Text('恢复默认'),
-            ),
-          ],
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择颜色'),
+        content: SingleChildScrollView(
+          child: ColorPicker(
+            pickerColor: _pickerColor,
+            onColorChanged: (c) => setState(() => _pickerColor = c),
+            pickerAreaHeightPercent: 0.8,
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _currentColor = Colors.deepOrange;
+                _pickerColor = Colors.deepOrange;
+              });
+              Navigator.pop(ctx);
+            },
+            child: const Text('恢复默认'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() => _currentColor = _pickerColor);
+              Navigator.pop(ctx);
+            },
+            child: const Text('确定'),
+          ),
+        ],
       ),
     );
   }
@@ -189,21 +161,11 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
     final uidBytes = hexToUint8List(_uidCtrl.text);
     final uid = _isHidProx
         ? hidProxUidFromParts(
-            int.parse(_hidTypeCtrl.text.isEmpty ? '1' : _hidTypeCtrl.text),
-            int.parse(
-              _facilityCodeCtrl.text.trim().isEmpty
-                  ? '0'
-                  : _facilityCodeCtrl.text.trim(),
-            ),
+            int.parse(_hidTypeCtrl.text),
+            int.parse(_facilityCodeCtrl.text),
             uidBytes,
-            int.parse(
-              _issueLevelCtrl.text.trim().isEmpty
-                  ? '0'
-                  : _issueLevelCtrl.text.trim(),
-            ),
-            int.parse(
-              _oemCtrl.text.trim().isEmpty ? '0' : _oemCtrl.text.trim(),
-            ),
+            int.parse(_issueLevelCtrl.text),
+            int.parse(_oemCtrl.text),
           )
         : bytesToHexSpace(uidBytes);
     int sak = 0;
@@ -212,15 +174,9 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
     List<String> data = [];
 
     if (!_isLf) {
-      sak = _sakCtrl.text.trim().isNotEmpty
-          ? hexToUint8List(_sakCtrl.text)[0]
-          : 0;
-      atqa = _atqaCtrl.text.trim().isNotEmpty
-          ? StorageService.bytesToHex(hexToUint8List(_atqaCtrl.text))
-          : '';
-      ats = _atsCtrl.text.trim().isNotEmpty
-          ? StorageService.bytesToHex(hexToUint8List(_atsCtrl.text))
-          : '';
+      sak = hexToUint8List(_sakCtrl.text)[0];
+      atqa = StorageService.bytesToHex(hexToUint8List(_atqaCtrl.text));
+      ats = StorageService.bytesToHex(hexToUint8List(_atsCtrl.text));
 
       if (_isClassic) {
         data = generateMfClassicBlocks(_selectedType);
@@ -239,18 +195,18 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
 
     final card = SaveCard(
       uid: uid,
-      name: _nameCtrl.text.trim(),
+      name: _nameCtrl.text,
       tag: _selectedType,
       sak: sak,
       atqa: atqa,
       ats: ats,
       data: data,
-      ultralightVersion: _ulVersionCtrl.text.trim().isNotEmpty
-          ? StorageService.bytesToHex(hexToUint8List(_ulVersionCtrl.text))
-          : '',
-      ultralightSignature: _ulSignatureCtrl.text.trim().isNotEmpty
-          ? StorageService.bytesToHex(hexToUint8List(_ulSignatureCtrl.text))
-          : '',
+      ultralightVersion: StorageService.bytesToHex(
+        hexToUint8List(_ulVersionCtrl.text),
+      ),
+      ultralightSignature: StorageService.bytesToHex(
+        hexToUint8List(_ulSignatureCtrl.text),
+      ),
       folderId: widget.folderId,
       colorValue: _currentColor.toARGB32(),
     );
@@ -261,31 +217,14 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog.fullscreen(
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('创建卡片'),
-          leading: TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消', style: TextStyle(color: Colors.white)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: _save,
-              child: const Text(
-                '创建',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        body: Form(
+    return AlertDialog(
+      title: const Text('创建卡片'),
+      content: SingleChildScrollView(
+        child: Form(
           key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               // 名称 + 颜色
               TextFormField(
@@ -301,8 +240,7 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
                     onPressed: _pickColor,
                   ),
                 ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? '请输入名称' : null,
+                validator: validateCardName,
               ),
               const SizedBox(height: 16),
 
@@ -464,6 +402,13 @@ class _CardCreateDialogState extends State<CardCreateDialog> {
           ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        TextButton(onPressed: _save, child: const Text('创建')),
+      ],
     );
   }
 }

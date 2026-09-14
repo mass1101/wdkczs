@@ -287,7 +287,7 @@ class _CardEditDialogState extends State<CardEditDialog> {
     final updated = SaveCard(
       id: widget.card.id,
       uid: uid,
-      name: _nameCtrl.text.trim(),
+      name: _nameCtrl.text,
       tag: _selectedType,
       sak: sak,
       atqa: atqa,
@@ -351,8 +351,7 @@ class _CardEditDialogState extends State<CardEditDialog> {
                     onPressed: _pickColor,
                   ),
                 ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? '请输入名称' : null,
+                validator: validateCardName,
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<TagType>(
