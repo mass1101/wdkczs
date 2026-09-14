@@ -46,7 +46,11 @@ dependencies:
   ffi: ^2.1.0
   geolocator: ^13.0.2
   latlong2: ^0.9.1
-  flutter_overlay_window: ^0.4.4
+  # 使用本地 fork（对齐 CU third_party/flutter_overlay_window 0.5.0）：
+  # 0.4.5 的 OverlayService.onCreate 在缓存引擎为 null 时 NPE 导致悬浮窗不创建，
+  # 且窗口 y 坐标为 -statusBarHeightPx() 会把悬浮窗推到状态栏上方屏幕外
+  flutter_overlay_window:
+    path: third_party/flutter_overlay_window
   flutter_map: ^7.0.2
 
 dev_dependencies:

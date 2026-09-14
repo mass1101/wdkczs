@@ -178,6 +178,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - 「暂无定位」是正常状态：原生服务仅在「总开关开 + NFC 设备已连接」时启动（`_enabled = _userEnabled && _isConnected`）。此时蓝点走 Dart 兜底 `getCurrentPosition`（WGS84→GCJ-02 转换与原生一致，非 bug）。诊断栏「定位」行读的是 `_geo.lastPosition`（仅原生回调），与蓝点数据源可能不同。
   - 围栏全链路已逐项与 CU 逐字比对确认等价（定位方法/原生 `onLocationChanged` 单次转换/原生与 Dart 的 `wgs84ToGcj02` 数学实现/高德瓦片 URL/marker 绘制/`CoordinateConverter`/`load()`），`geolocator` 锁定版本同为 13.0.4。依赖唯一差异 `geolocator_platform_interface` 4.3.0（本项目）vs 4.2.8（CU）仅涉及 `hasX()` 判定，不影响坐标值。声称「代码等价」前必须逐层 diff 到这一深度，含 `pubspec.lock` 与 `AndroidManifest`。
   - 已加无损诊断：诊断栏新增「蓝点」行显示蓝点实际使用的坐标与来源（原生定位服务 / Dart定位），`_locateMe` 与 build 的原生同步路径各设 `_positionSource`，实测一次即可判定偏移来自哪条定位路径。
+  - **悬浮窗不显示/偏移的根因在插件版本，不在 app 代码**：pub.dev `flutter_overlay_window` 0.4.5 的 `OverlayService.onCreate` 把 `flutterChannel` 作为字段初始化器直接取 `FlutterEngineCache.get()`，缓存引擎为 null 时 NPE 使服务崩溃，悬浮窗根本不创建；且 0.4.5 的 `dy = -statusBarHeightPx()` 把窗口 y 设为负值推到状态栏上方屏幕外（表现即"窗口偏移了"）。CU 对此 fork 到 `third_party/flutter_overlay_window`（0.5.0）：引擎判空后新建、引擎创建包 try/catch、`dy = 0`、新增 `overlay_ready`/`pong`/`close`/`restore` 状态消息与 `reportError`/`reportInfo` 回报。**已改为 path 依赖对齐 CU**，app 侧 `overlay_window.dart` 与 CU 逐字一致（已发 `overlay_ready`/`pong`），Manifest 与 Dart 侧 lib 无差异，fork 零额外依赖。`pub get` 必须用 `--offline`。
 
 [User Instruction Summary]
 - Date: 2026-09-14
