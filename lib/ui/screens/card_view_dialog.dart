@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/card_library.dart';
-import 'card_analyze_screen.dart';
 import 'card_cloud_analyze_screen.dart';
 import 'card_compare_screen.dart';
 import 'card_edit_dialog.dart';
@@ -250,19 +249,6 @@ class _CardViewDialogState extends State<CardViewDialog> {
                           widget.onChanged?.call();
                         }
                       });
-                    },
-                  ),
-                if (isClassic)
-                  ActionChip(
-                    label: const Text('分析'),
-                    avatar: const Icon(Icons.insights, size: 18),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CardAnalyzeScreen(card: _card),
-                        ),
-                      );
                     },
                   ),
                 if (isClassic)
