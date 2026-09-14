@@ -173,3 +173,9 @@ Entries discovered by the Agent during task execution should follow this format:
   - 围栏总开关实际生效条件 = `userEnabled && 设备已连接`（`_syncEnabledState` 取 `_isConnected`）；BLE 状态变化时经 `AppController._syncGeofenceConnected` → `geofence.refreshEnabledState()` 刷新。设备未连接时开关应不生效，否则卡槽切换/上传必然失败，日志满屏失败会被误判成"定位不准"。
   - 卡槽上限统一 80（`TAG_MAX_SLOT_NUM=80`）：围栏编辑页 `maxSlots = fences.isNotEmpty ? 80 : 8`。写成 8 会让 `_slotNumber.clamp(1, maxSlots)` 把已有 9–80 号卡槽的围栏在编辑保存后改写为 8，静默损坏数据。
   - ID 页卡号：`IdCardState.idCardHex` 不落存储（`AppController` 每次 `IdCardState()` 新建），改默认值即改这里；`idCardDec` 是从 hex 派生并 13 位左补零，改十进制默认值要改对应 hex（5577 = 0x15C9 → `00000015c9`，显示为 `000000005577`）。
+
+[User Instruction Summary]
+- Date: 2026-09-14
+- Context: 用户要求卡库新建卡片 SAK 输入 08 时块 0 数据里存 08（覆盖 CU 行为）
+- Instructions:
+  - `mfClassicGenerateFirstBlock`（`lib/services/card_library.dart`）块 0 的 SAK 字节直存输入值，勿加 0x80；4 字节/7 字节 UID 两分支的 `+ 0x80` 已按用户指令去掉。此指令优先于「严格对齐 CU」——CU `general.dart:580`/`:585` 是 `sak + 0x80`（内部 SAK bit7 标志位），后续对齐 CU 时勿改回去。编辑卡片 UID 魔改重建块 0（card_edit_dialog.dart）同样生效。
