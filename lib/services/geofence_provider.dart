@@ -9,10 +9,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'card_library.dart';
 import 'geofence.dart';
-import 'location_service.dart';
 
 /// 电子围栏 Provider（对齐 CU geofence_provider.dart，nfcapp 原生化：
 /// 复用 SaveCard/CardLibraryStorage/uploadCardToSlot，CLI 走注入的设备回调）
+///
+/// 定位只有原生 geofence_native_channel 一条链路：原生 GeofenceService
+/// 先把 WGS84 转 GCJ02 再与围栏多边形匹配，回调回来的坐标与事件
+/// 都是 GCJ-02，与高德瓦片上点选的多边形同一坐标系。Dart 侧不再
+/// 并行跑 geolocator，否则原始 WGS84 会与 GCJ-02 互相覆盖。
 class GeofenceProvider extends ChangeNotifier {
   List<Geofence> _fences = [];
   bool _userEnabled = false;
@@ -47,7 +51,6 @@ class GeofenceProvider extends ChangeNotifier {
   int? _lastActivatedSlot;
 
   SharedPreferences? _prefs;
-  final LocationService _location = LocationService();
 
   // 注入的设备/卡库回调
   bool Function(int slot)? _activateSlot; // 返回值=是否成功切换
@@ -206,6 +209,7 @@ class GeofenceProvider extends ChangeNotifier {
     final i = _fences.indexWhere((f) => f.id == fence.id);
     if (i != -1) {
       _fences[i] = fence;
+      _completedUploads.remove(fence.id);
       _save();
       notifyListeners();
     }
@@ -213,6 +217,7 @@ class GeofenceProvider extends ChangeNotifier {
 
   void deleteFence(String id) {
     _fences.removeWhere((f) => f.id == id);
+    _completedUploads.remove(id);
     _save();
     notifyListeners();
   }
@@ -221,13 +226,26 @@ class GeofenceProvider extends ChangeNotifier {
     final i = _fences.indexWhere((f) => f.id == id);
     if (i != -1) {
       _fences[i].enabled = enabled;
+      if (!enabled) _completedUploads.remove(id);
       _save();
       notifyListeners();
     }
   }
 
   void _syncEnabledState() {
-    _enabled = _userEnabled;
+    final activated = _isConnected?.call() ?? false;
+    _enabled = _userEnabled && activated;
+  }
+
+  /// 设备连接状态变化后调用：连接态参与围栏总开关的实际生效判定
+  void refreshEnabledState() {
+    _syncEnabledState();
+    if (_enabled) {
+      _startMonitoring();
+    } else {
+      _stopMonitoring();
+    }
+    notifyListeners();
   }
 
   Future<void> setEnabled(bool v) async {
@@ -257,10 +275,6 @@ class GeofenceProvider extends ChangeNotifier {
     if (_monitoring) return;
     _monitoring = true;
     _setupChannel();
-    await _location.start(
-      intervalSeconds: _checkInterval,
-      onPosition: _handlePosition,
-    );
     try {
       _nativeChannel.invokeMethod('start');
     } catch (_) {}
@@ -268,21 +282,11 @@ class GeofenceProvider extends ChangeNotifier {
 
   Future<void> _stopMonitoring() async {
     _monitoring = false;
-    _location.stop();
     try {
       _nativeChannel.invokeMethod('stop');
     } catch (_) {}
     _lastActivatedSlot = null;
     _stopRollingCodePolling();
-  }
-
-  void _handlePosition(double lat, double lng) {
-    _lastPosition = LatLng(lat, lng);
-    _lastPositionTime = DateTime.now();
-    final match = GeofenceMatcher.findMatchingFence(_lastPosition!, _fences);
-    _handleMatchedFence(match);
-    notifyListeners();
-    _pushOverlayData();
   }
 
   void _handleMatchedFence(Geofence? match) {
@@ -291,7 +295,8 @@ class GeofenceProvider extends ChangeNotifier {
       final entering = prevId != match.id;
       if (entering) {
         _log('命中围栏 ${match.name} slot=${match.slotNumber} '
-            '卡库模式=${match.cardLibraryMode} IC卡=${match.icCardId}');
+            '卡库模式=${match.cardLibraryMode} '
+            'IC卡=${match.icCardId} ID卡=${match.idCardId}');
       }
       _lastMatchedFenceName = match.name;
       if (_activateSlot != null && match.slotNumber != _lastActivatedSlot) {
@@ -337,14 +342,12 @@ class GeofenceProvider extends ChangeNotifier {
     _log('正在上传卡片...');
     notifyListeners();
     _pushOverlayData();
-    final cardId = match.icCardId;
-    if (cardId == null) {
-      _uploading = false;
-      return;
-    }
     final completed = _completedUploads[match.id] ?? <String>{};
-    final key = '$cardId:${match.slotNumber}';
-    if (!completed.contains(key)) {
+
+    Future<void> uploadOne(String? cardId) async {
+      if (cardId == null) return;
+      final key = '$cardId:${match.slotNumber}';
+      if (completed.contains(key)) return;
       for (var attempt = 0; attempt < 4; attempt++) {
         if (attempt > 0) {
           _uploadStatus = '卡片上传失败，3秒后重试...';
@@ -360,16 +363,18 @@ class GeofenceProvider extends ChangeNotifier {
           _log('卡片上传成功');
           notifyListeners();
           _pushOverlayData();
-          break;
+          return;
         }
       }
-      if (!completed.contains(key)) {
-        _uploadStatus = '卡片上传失败，已放弃';
-        _log('卡片上传失败，已放弃');
-        notifyListeners();
-        _pushOverlayData();
-      }
+      _uploadStatus = '卡片上传失败，已放弃';
+      _log('卡片上传失败，已放弃');
+      notifyListeners();
+      _pushOverlayData();
     }
+
+    await uploadOne(match.icCardId);
+    await uploadOne(match.idCardId);
+
     _completedUploads[match.id] = completed;
     _uploading = false;
     notifyListeners();

@@ -16,6 +16,7 @@ import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
+import 'geofence_logs_screen.dart';
 
 const _overlayChannel = MethodChannel('com.z.nfc/overlay');
 
@@ -702,6 +703,18 @@ class _GeofenceScreenState extends State<GeofenceScreen>
                   child: const Icon(Icons.my_location),
                 ),
                 const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'logs',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const GeofenceLogsScreen(),
+                    ),
+                  ),
+                  tooltip: '围栏日志',
+                  child: const Icon(Icons.receipt_long, size: 18),
+                ),
+                const SizedBox(height: 8),
                 FloatingActionButton(
                   heroTag: 'addFence',
                   onPressed: () async {
@@ -1137,6 +1150,7 @@ class _FenceEditPageState extends State<FenceEditPage>
   String? _icCardId;
   String? _idCardId;
   bool _rollingCode = false;
+  List<SaveCard> _libraryCards = [];
   final _mapReadyCompleter = Completer<void>();
 
   static const _presetColors = [
@@ -1166,6 +1180,13 @@ class _FenceEditPageState extends State<FenceEditPage>
       _idCardId = widget.fence!.idCardId;
       _rollingCode = widget.fence!.rollingCode;
     }
+    // 同步缓存卡库，供 _selectedICCard/_selectedIDCard 同步查询
+    // （CU 用同步 SharedPreferences，这里用一次性缓存等价实现）
+    CardLibraryStorage().getCards().then((cards) {
+      if (mounted && cards.isNotEmpty) {
+        setState(() => _libraryCards = cards);
+      }
+    });
     attachOfflineMap(
       _mapController,
       _points.isNotEmpty ? _points.first : const LatLng(39.9042, 116.4074),
@@ -1267,27 +1288,20 @@ class _FenceEditPageState extends State<FenceEditPage>
   }
 
   Future<void> _pickLibraryCard({required bool ic}) async {
-    final cards = await CardLibraryStorage().getCards();
+    final all = await CardLibraryStorage().getCards();
     if (!mounted) return;
+    _libraryCards = all;
+    final cards = all.where((c) => ic ? isHfCard(c.tag) : isLf(c.tag)).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
     if (cards.isEmpty) {
       _toast('卡库为空，请先添加卡片');
       return;
     }
     final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => SimpleDialog(
-        title: Text(ic ? '选择 IC 卡' : '选择 ID 卡'),
-        children: cards
-            .where((c) => ic ? isHfCard(c.tag) : isLf(c.tag))
-            .map(
-              (c) => SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, c.id),
-                child: Text(
-                  '${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]',
-                ),
-              ),
-            )
-            .toList(),
+      builder: (ctx) => _CardPickerDialog(
+        cards: cards,
+        title: ic ? '选择 IC 卡' : '选择 ID 卡',
       ),
     );
     if (result != null && result.isNotEmpty && mounted) {
@@ -1316,16 +1330,10 @@ class _FenceEditPageState extends State<FenceEditPage>
 
   SaveCard? _libraryCardById(String? id) {
     if (id == null) return null;
-    SaveCard? found;
-    CardLibraryStorage().getCards().then((cards) {
-      for (final c in cards) {
-        if (c.id == id) {
-          found = c;
-          break;
-        }
-      }
-    });
-    return found;
+    for (final c in _libraryCards) {
+      if (c.id == id) return c;
+    }
+    return null;
   }
 
   bool get _selectedICCardIsIC =>
@@ -1336,8 +1344,8 @@ class _FenceEditPageState extends State<FenceEditPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final defaultCenter = _points.isNotEmpty
         ? _points.first
-        : (widget.provider.lastPosition ?? const LatLng(39.9042, 116.4074));
-    final maxSlots = widget.provider.fences.isNotEmpty ? 8 : 8;
+        : const LatLng(39.9042, 116.4074);
+    final maxSlots = widget.provider.fences.isNotEmpty ? 80 : 8;
 
     return Scaffold(
       appBar: AppBar(
@@ -1846,6 +1854,118 @@ class _FenceEditPageState extends State<FenceEditPage>
           ),
         ],
       ],
+    );
+  }
+}
+
+/// 卡库卡片选择对话框（对齐 CU showSearch + CardSearchDelegate：
+/// 带搜索过滤、颜色与卡类型展示）
+class _CardPickerDialog extends StatefulWidget {
+  const _CardPickerDialog({required this.cards, required this.title});
+
+  final List<SaveCard> cards;
+  final String title;
+
+  @override
+  State<_CardPickerDialog> createState() => _CardPickerDialogState();
+}
+
+class _CardPickerDialogState extends State<_CardPickerDialog> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<SaveCard> get _filtered {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return widget.cards;
+    return widget.cards
+        .where(
+          (c) =>
+              c.name.toLowerCase().contains(q) ||
+              c.uid.toLowerCase().contains(q),
+        )
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = _filtered;
+    return AlertDialog(
+      title: Text(widget.title),
+      contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _query = v),
+            decoration: const InputDecoration(
+              hintText: '搜索名称或 UID',
+              isDense: true,
+              prefixIcon: Icon(Icons.search, size: 20),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (cards.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('没有匹配的卡片'),
+            )
+          else
+            SizedBox(
+              height: 320,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: cards.length,
+                itemBuilder: (context, i) {
+                  final c = cards[i];
+                  return SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, c.id),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 12,
+                          height: 12,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            color: c.color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                c.name.isEmpty ? c.uid : c.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                '${c.tag.label}  ${c.uid}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontFamily: 'monospace',
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

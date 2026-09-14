@@ -121,6 +121,7 @@ class AppController extends ChangeNotifier {
 
   void _syncGeofenceConnected() {
     geofence.setConnected(connected);
+    geofence.refreshEnabledState();
   }
 
   /// 卡库卡片写入某槽（供围栏自动上传复用，与卡库页同一实现）

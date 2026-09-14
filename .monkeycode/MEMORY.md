@@ -162,3 +162,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 卡库「编辑卡片」已对齐 CU CardEditMenu：新增 HID Prox 四字段（HID 类型下拉 1-30 / 设施代码 / 发行级别 / OEM），载入时由 13 字节 UID 大端拆回 `[0]type [1..4]fc [5..9]uid [10]il [11..12]oem`（`_initHidFields`），保存时 `_buildUid` 用 `hidProxUidFromParts` 重建 13 字节并带 try/catch 回退裸 UID。UID 校验补长度（LF=卡型字节数、HF 含 Ultralight=4/7/10 字节，对齐 CU `validateUid` 非创建模式）；取色改 `flutter_colorpicker`；形态 `Dialog.fullscreen`+`Scaffold`+`AppBar` 改 `AlertDialog`（Column 不带 `mainAxisSize`，对齐 CU）；计数器校验复用 `_validateRange`。LF 卡的 sak/atqa/ats 走 `widget.card.*` 原值不覆盖（LF 无 `4018` 数据，控制器为空串）。`_tagTypes` 仍为 `TagType.values`，与 CU `getTagTypes()` 一致。
   - ⚠️ Flipper `.rfid` 的 H10301 导入（`card_save_converters.dart`）拼的是 10 字节 HID 数组，非 13 字节；编辑对话框已用 `bytes.length >= 13` 防御，短 UID 按缺省值填充而非抛异常。
   - 可选命名参数可直接命名为 `required`（`{required int min, bool required = true}` 与关键字 `required` 在同一参数表中共存，analyze 通过）。
+
+[Project Knowledge Summary]
+- Date: 2026-09-14
+- Context: 排查电子围栏「地图定位不准」并按用户要求严格对齐 CU 围栏实现时发现
+- Category: Troubleshooting & Debugging | Environment Configuration
+- Instructions:
+  - **围栏坐标系不变量（定位不准的根因）**：地图瓦片是高德 GCJ-02，用户在图上点选的多边形存的是 GCJ-02；定位原始值是 WGS84，转换只能发生一次，且必须在匹配前。转换点在原生 `android/app/src/main/kotlin/com/z/nfc/GeofenceService.kt:245`（`wgs84ToGcj02` 后再 `findMatchingFence`），回调 Flutter 的 `onPosition`/`onFenceEvent` 坐标已是 GCJ-02。因此 Dart 侧禁止再并行跑 `geolocator`（`LocationService`）——原始 WGS84 会覆盖 `_lastPosition` 造成地图蓝点周期回跳几百米，并拿 WGS84 去比 GCJ-02 多边形（境内偏移约 300–700 米）造成"人在围栏内不触发/不在却触发"。围栏判定只有原生一条链路，`GeofenceMatcher` 的 Dart 实现只用于地图上的图形交互。
+  - 围栏**不写固件、不走蓝牙字节协议**：纯 SharedPreferences 键 `geofence_list`（原生读取时带 `flutter.` 前缀）+ 原生 Service 按 `flutter.geofence_check_interval`（下限 5 秒）轮询。JSON 存 double 全精度，不要 `toStringAsFixed` 截断；围栏无"圆心+半径"模型（多边形射线法），不存在米/厘米或大端小端问题。
+  - 围栏总开关实际生效条件 = `userEnabled && 设备已连接`（`_syncEnabledState` 取 `_isConnected`）；BLE 状态变化时经 `AppController._syncGeofenceConnected` → `geofence.refreshEnabledState()` 刷新。设备未连接时开关应不生效，否则卡槽切换/上传必然失败，日志满屏失败会被误判成"定位不准"。
+  - 卡槽上限统一 80（`TAG_MAX_SLOT_NUM=80`）：围栏编辑页 `maxSlots = fences.isNotEmpty ? 80 : 8`。写成 8 会让 `_slotNumber.clamp(1, maxSlots)` 把已有 9–80 号卡槽的围栏在编辑保存后改写为 8，静默损坏数据。
+  - ID 页卡号：`IdCardState.idCardHex` 不落存储（`AppController` 每次 `IdCardState()` 新建），改默认值即改这里；`idCardDec` 是从 hex 派生并 13 位左补零，改十进制默认值要改对应 hex（5577 = 0x15C9 → `00000015c9`，显示为 `000000005577`）。

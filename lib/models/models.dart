@@ -405,7 +405,7 @@ class IdCardState {
     String? idCardHex,
     List<IdCardItem>? idCards,
     String? idCardKeys,
-  })  : idCardHex = (idCardHex ?? '0000000000').toLowerCase(),
+  })  : idCardHex = (idCardHex ?? '00000015c9').toLowerCase(),
         idCards = idCards ?? [IdCardItem(id: '0000000000', name: '未命名')],
         idCardKeys = idCardKeys ?? '19920427\n1dd00a11\n20206666\n51243648';
 
