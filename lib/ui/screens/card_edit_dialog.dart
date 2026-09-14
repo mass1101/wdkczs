@@ -1,22 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/storage_service.dart';
-
-const _editPresetColors = <Color>[
-  Color(0xFFFF5722),
-  Color(0xFF2196F3),
-  Color(0xFF4CAF50),
-  Color(0xFF9C27B0),
-  Color(0xFFFF9800),
-  Color(0xFFE91E63),
-  Color(0xFF00BCD4),
-  Color(0xFF795548),
-  Color(0xFF607D8B),
-  Color(0xFFF44336),
-];
 
 /// 卡片编辑对话框（对齐 CU CardEditMenu）
 class CardEditDialog extends StatefulWidget {
@@ -39,8 +27,14 @@ class _CardEditDialogState extends State<CardEditDialog> {
   late final TextEditingController _ulSignatureCtrl;
   late List<TextEditingController> _counterCtrls;
 
+  late final TextEditingController _hidTypeCtrl;
+  late final TextEditingController _facilityCodeCtrl;
+  late final TextEditingController _issueLevelCtrl;
+  late final TextEditingController _oemCtrl;
+
   late TagType _selectedType;
   late Color _currentColor;
+  Color _pickerColor = Colors.deepOrange;
   late String _originalUid;
   late String _originalSak;
   late String _originalAtqa;
@@ -51,8 +45,9 @@ class _CardEditDialogState extends State<CardEditDialog> {
     _selectedType = widget.card.tag;
     _nameCtrl = TextEditingController(text: widget.card.name);
     _uidCtrl = TextEditingController(text: widget.card.uid);
-    final sakHex = widget.card.sak.toRadixString(16).padLeft(2, '0');
-    _sakCtrl = TextEditingController(text: sakHex);
+    _sakCtrl = TextEditingController(
+      text: widget.card.sak.toRadixString(16).padLeft(2, '0'),
+    );
     _atqaCtrl = TextEditingController(
       text: _formatHexWithSpace(widget.card.atqa),
     );
@@ -65,9 +60,15 @@ class _CardEditDialogState extends State<CardEditDialog> {
     _ulSignatureCtrl = TextEditingController(
       text: _formatHexWithSpace(widget.card.ultralightSignature),
     );
+    _hidTypeCtrl = TextEditingController(text: '1');
+    _facilityCodeCtrl = TextEditingController();
+    _issueLevelCtrl = TextEditingController();
+    _oemCtrl = TextEditingController();
+    if (_selectedType == TagType.hidProx) _initHidFields();
     _currentColor = widget.card.color;
+    _pickerColor = widget.card.color;
     _originalUid = widget.card.uid;
-    _originalSak = sakHex;
+    _originalSak = widget.card.sak.toRadixString(16).padLeft(2, '0');
     _originalAtqa = _formatHexWithSpace(widget.card.atqa);
     _initCounterControllers();
   }
@@ -95,6 +96,10 @@ class _CardEditDialogState extends State<CardEditDialog> {
     _atsCtrl.dispose();
     _ulVersionCtrl.dispose();
     _ulSignatureCtrl.dispose();
+    _hidTypeCtrl.dispose();
+    _facilityCodeCtrl.dispose();
+    _issueLevelCtrl.dispose();
+    _oemCtrl.dispose();
     for (final c in _counterCtrls) {
       c.dispose();
     }
@@ -104,6 +109,45 @@ class _CardEditDialogState extends State<CardEditDialog> {
   bool get _isLf => isLfTag(_selectedType);
   bool get _isUltralight => isMifareUltralight(_selectedType);
   bool get _isClassic => isMifareClassic(_selectedType);
+  bool get _isHidProx => _selectedType == TagType.hidProx;
+
+  /// 从 13 字节 UID 还原 HID Prox 字段（对齐 CU initHIDFields）；
+  /// UID 非 13 字节时按缺省值填充，避免旧数据解析异常
+  void _initHidFields() {
+    final bytes = hexToUint8List(widget.card.uid);
+    final full = bytes.length >= 13;
+    _uidCtrl.text = full
+        ? bytesToHexSpace(bytes.sublist(5, 10))
+        : _formatHexWithSpace(widget.card.uid);
+    final type = full && bytes[0] >= 1 && bytes[0] <= 30 ? bytes[0] : 1;
+    _hidTypeCtrl.text = type.toString();
+    _facilityCodeCtrl.text =
+        (full
+                ? (bytes[1] << 24) |
+                      (bytes[2] << 16) |
+                      (bytes[3] << 8) |
+                      bytes[4]
+                : 0)
+            .toString();
+    _issueLevelCtrl.text = (full ? bytes[10] : 0).toString();
+    _oemCtrl.text = (full ? (bytes[11] << 8) | bytes[12] : 0).toString();
+  }
+
+  /// 由 HID Prox 字段重建 13 字节 UID（对齐 CU save 里的 try/catch 回退）
+  String _buildUid(Uint8List uidBytes) {
+    if (!_isHidProx) return bytesToHexSpace(uidBytes);
+    try {
+      return hidProxUidFromParts(
+        int.parse(_hidTypeCtrl.text),
+        int.parse(_facilityCodeCtrl.text),
+        uidBytes,
+        int.parse(_issueLevelCtrl.text),
+        int.parse(_oemCtrl.text),
+      );
+    } catch (_) {
+      return bytesToHexSpace(uidBytes);
+    }
+  }
 
   bool _hasDataChanged() =>
       _uidCtrl.text != _originalUid ||
@@ -115,11 +159,39 @@ class _CardEditDialogState extends State<CardEditDialog> {
 
   List<TagType> get _tagTypes => TagType.values;
 
+  /// 校验 UID（对齐 CU validateUid 非创建模式：
+  /// LF 须等于卡型字节数；HF（含 Ultralight）须 4 / 7 / 10 字节）
   String? _validateUid(String? value) {
-    if (value == null || value.trim().isEmpty) return 'UID 不能为空';
+    if (value == null || value.isEmpty) return 'UID 不能为空';
     final clean = value.replaceAll(RegExp(r'\s'), '');
-    if (clean.isEmpty) return 'UID 不能为空';
-    if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) return 'UID 只能包含十六进制字符';
+    if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) {
+      return 'UID 只能包含十六进制字符';
+    }
+    final bytes = clean.length ~/ 2;
+    if (_isLf) {
+      final expected = lfUidSize(_selectedType);
+      if (bytes != expected) {
+        return 'UID 需要 $expected 字节（${expected * 2} 位 hex）';
+      }
+      return null;
+    }
+    if (bytes != 4 && bytes != 7 && bytes != 10) {
+      return 'UID 需要 4 / 7 / 10 字节';
+    }
+    return null;
+  }
+
+  String? _validateRange(
+    String? value, {
+    required int min,
+    required int max,
+    bool required = true,
+  }) {
+    if (value == null || value.isEmpty) {
+      return required ? '范围为 $min - $max' : null;
+    }
+    final v = int.tryParse(value);
+    if (v == null || v < min || v > max) return '范围为 $min - $max';
     return null;
   }
 
@@ -151,58 +223,40 @@ class _CardEditDialogState extends State<CardEditDialog> {
   }
 
   void _pickColor() {
-    showModalBottomSheet<void>(
+    showDialog<void>(
       context: context,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '选择颜色',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: _editPresetColors.map((c) {
-                final selected = c.toARGB32() == _currentColor.toARGB32();
-                return GestureDetector(
-                  onTap: () {
-                    setState(() => _currentColor = c);
-                    Navigator.pop(ctx);
-                  },
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: c,
-                      shape: BoxShape.circle,
-                      border: selected
-                          ? Border.all(color: Colors.white, width: 3)
-                          : null,
-                      boxShadow: selected
-                          ? [
-                              BoxShadow(
-                                color: c,
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: selected
-                        ? const Icon(Icons.check, color: Colors.white, size: 20)
-                        : null,
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 16),
-          ],
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择颜色'),
+        content: SingleChildScrollView(
+          child: ColorPicker(
+            pickerColor: _pickerColor,
+            onColorChanged: (c) => setState(() => _pickerColor = c),
+            pickerAreaHeightPercent: 0.8,
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _currentColor = Colors.deepOrange;
+                _pickerColor = Colors.deepOrange;
+              });
+              Navigator.pop(ctx);
+            },
+            child: const Text('恢复默认'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() => _currentColor = _pickerColor);
+              Navigator.pop(ctx);
+            },
+            child: const Text('确定'),
+          ),
+        ],
       ),
     );
   }
@@ -270,8 +324,7 @@ class _CardEditDialogState extends State<CardEditDialog> {
       }
     }
 
-    final uidBytes = hexToUint8List(_uidCtrl.text);
-    final uid = bytesToHexSpace(uidBytes);
+    final uid = _buildUid(hexToUint8List(_uidCtrl.text));
     final sak = _isLf ? widget.card.sak : hexToUint8List(_sakCtrl.text)[0];
     final atqa = _isLf
         ? widget.card.atqa
@@ -313,31 +366,13 @@ class _CardEditDialogState extends State<CardEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog.fullscreen(
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('编辑卡片'),
-          leading: TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消', style: TextStyle(color: Colors.white)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: _save,
-              child: const Text(
-                '保存',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        body: Form(
+    return AlertDialog(
+      title: const Text('编辑卡片'),
+      content: SingleChildScrollView(
+        child: Form(
           key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          child: Column(
             children: [
               TextFormField(
                 controller: _nameCtrl,
@@ -460,22 +495,75 @@ class _CardEditDialogState extends State<CardEditDialog> {
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
                         ],
-                        validator: (v) {
-                          final n = int.tryParse(v ?? '');
-                          if (n == null || n < 0 || n > 16777215) {
-                            return '0-16777215';
-                          }
-                          return null;
-                        },
+                        validator: (v) =>
+                            _validateRange(v, min: 0, max: 16777215),
                       ),
                     ],
                   ],
                 ],
               ],
+              if (_isHidProx) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  initialValue: int.tryParse(_hidTypeCtrl.text) ?? 1,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'HID 类型'),
+                  items: List.generate(30, (i) => i + 1)
+                      .map(
+                        (t) => DropdownMenuItem(
+                          value: t,
+                          child: Text(getNameForHIDProxType(t)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      setState(() => _hidTypeCtrl.text = v.toString());
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _facilityCodeCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '设施代码',
+                    hintText: '0 - 4294967295',
+                  ),
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) => _validateRange(v, min: 0, max: 4294967295),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _issueLevelCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '发行级别',
+                    hintText: '0 - 255',
+                  ),
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) => _validateRange(v, min: 0, max: 255),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _oemCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'OEM',
+                    hintText: '0 - 65535',
+                  ),
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) => _validateRange(v, min: 0, max: 65535),
+                ),
+              ],
             ],
           ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        TextButton(onPressed: _save, child: const Text('保存')),
+      ],
     );
   }
 }

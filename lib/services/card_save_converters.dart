@@ -168,11 +168,17 @@ SaveCard flipperRfidToSaveCard(String data) {
       break;
     case 'H10301':
       tag = TagType.hidProx;
-      // HID 10 字节编码：hidType=1, fc=uid byte0, uid=3 bytes, il=0, oem=0
-      final ub = StorageService.hexToBytes(uid);
+      // 对齐 CU：hidType=1，facilityCode=uid byte0（大端 u32），
+      // uid 取后 3 字节补足 5 字节，issueLevel/oem=0，输出 13 字节
+      final ub = hexToUint8List(uid);
       if (ub.length >= 3) {
-        final hid = <int>[1, ub[0], 0, 0, 0, ...ub.sublist(1, 3), 0, 0, 0, 0];
-        uid = StorageService.bytesToHex(Uint8List.fromList(hid));
+        uid = hidProxUidFromParts(
+          1,
+          ub[0],
+          Uint8List.fromList([0, 0, 0, ub[1], ub[2]]),
+          0,
+          0,
+        );
       }
       break;
     default:
