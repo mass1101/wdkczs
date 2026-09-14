@@ -225,7 +225,7 @@ class DeviceService {
     try {
       final r = await _request(Cmd.getSlotTagNick.value,
           Uint8List.fromList([slot, freq]));
-      return String.fromCharCodes(r);
+      return utf8.decode(r, allowMalformed: true);
     } on DeviceException catch (e) {
       if (e.status == 113) return null;
       rethrow;
