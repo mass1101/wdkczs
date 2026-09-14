@@ -1,6 +1,8 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../services/card_backup.dart';
 import '../../services/card_library.dart';
 import 'card_cloud_analyze_screen.dart';
 import 'card_compare_screen.dart';
@@ -51,6 +53,32 @@ class _CardViewDialogState extends State<CardViewDialog> {
           duration: const Duration(seconds: 1),
         ),
       );
+  }
+
+  Future<void> _exportDump() async {
+    final bytes = cardSaveToBin(_card);
+    if (bytes.isEmpty) {
+      _toast('该卡片无数据，无法导出 dump');
+      return;
+    }
+    try {
+      final name = (_card.name.isEmpty ? _card.uid : _card.name).trim();
+      final uri = await FilePicker.platform.saveFile(
+        fileName: '$name.bin',
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      _toast(uri == null ? '已取消导出' : '已导出 ${bytes.length} 字节：$uri');
+    } catch (e) {
+      if (mounted) _toast('导出失败: $e');
+    }
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Widget _infoRow(String label, String value, {bool copyable = true}) {
@@ -281,11 +309,9 @@ class _CardViewDialogState extends State<CardViewDialog> {
                     },
                   ),
                 ActionChip(
-                  label: const Text('导出 JSON'),
+                  label: const Text('导出 dump'),
                   avatar: const Icon(Icons.download, size: 18),
-                  onPressed: () {
-                    _copy(_card.toJson());
-                  },
+                  onPressed: _exportDump,
                 ),
                 ActionChip(
                   label: const Text('删除'),

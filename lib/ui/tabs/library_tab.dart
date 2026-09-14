@@ -13,7 +13,6 @@ import '../../services/card_save_converters.dart';
 import '../../services/slot_writer.dart';
 import '../../services/storage_service.dart';
 import '../../state/app_controller.dart';
-import '../screens/card_analyze_screen.dart';
 import '../screens/card_cloud_analyze_screen.dart';
 import '../screens/card_compare_screen.dart';
 import '../screens/card_create_dialog.dart';
@@ -413,9 +412,8 @@ class _LibraryTabState extends State<LibraryTab> {
               if (v == 'view') _viewCard(c);
               if (v == 'edit') _editCard(c);
               if (v == 'move') _moveCard(c);
-              if (v == 'dump') _openDumpEditor(c);
-              if (v == 'analyze') _openCardAnalyze(c);
-              if (v == 'cloud_analyze') _openCloudAnalyze(c);
+               if (v == 'dump') _openDumpEditor(c);
+               if (v == 'cloud_analyze') _openCloudAnalyze(c);
               if (v == 'compare') _openCardCompare(c);
               if (v == 'delete') _deleteCard(c);
             },
@@ -424,13 +422,11 @@ class _LibraryTabState extends State<LibraryTab> {
               const PopupMenuItem(value: 'edit', child: Text('编辑')),
               if (isMifareClassic(c.tag) || isMifareUltralight(c.tag))
                 const PopupMenuItem(value: 'dump', child: Text('Dump 编辑器')),
-              if (isMifareClassic(c.tag))
-                const PopupMenuItem(value: 'analyze', child: Text('卡片分析')),
-              if (isMifareClassic(c.tag))
-                const PopupMenuItem(
-                  value: 'cloud_analyze',
-                  child: Text('云端分析'),
-                ),
+               if (isMifareClassic(c.tag))
+                 const PopupMenuItem(
+                   value: 'cloud_analyze',
+                   child: Text('云端分析'),
+                 ),
               if (isMifareClassic(c.tag) || isMifareUltralight(c.tag))
                 const PopupMenuItem(value: 'compare', child: Text('比较 Dump')),
               const PopupMenuItem(value: 'move', child: Text('移动到文件夹')),
@@ -475,14 +471,6 @@ class _LibraryTabState extends State<LibraryTab> {
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => DumpEditor(card: c)),
-    );
-    await _reload();
-  }
-
-  Future<void> _openCardAnalyze(SaveCard c) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => CardAnalyzeScreen(card: c)),
     );
     await _reload();
   }
