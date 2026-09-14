@@ -10,7 +10,7 @@ import '../ui/tabs/id_tab.dart';
 import '../ui/tabs/library_tab.dart';
 import '../ui/tabs/settings_tab.dart';
 import '../ui/tabs/slot_manager_tab.dart';
-import 'screens/geofence_screen.dart';
+import 'screens/geofence_list.dart';
 import 'widgets/common.dart';
 
 /// 主框架：蓝底标题栏 + 胶囊按钮、六 Tab（IC卡/ID卡/卡槽/卡库/电子围栏/设置）、右下角 FAB
