@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -211,7 +212,7 @@ class DeviceService {
   }
 
   Future<void> cmdSlotSetFreqName(int slot, int freq, String name) async {
-    final nb = Uint8List.fromList(name.codeUnits);
+    final nb = utf8.encode(name);
     final b = Uint8List(2 + nb.length);
     b[0] = slot;
     b[1] = freq;
@@ -623,7 +624,9 @@ class DeviceService {
       final t = e[pos];
       if (e.length < pos + t + 5) break;
       final uid = e.sublist(pos + 1, pos + 1 + t);
-      final atqa = e.sublist(pos + 1 + t, pos + 3 + t);
+      final atqa = Uint8List.fromList(
+        e.sublist(pos + 1 + t, pos + 3 + t).reversed.toList(),
+      );
       final sak = e[pos + 3 + t];
       final r = e[pos + 4 + t];
       final ats = e.sublist(pos + 5 + t, pos + 5 + t + r);
@@ -1346,12 +1349,13 @@ class DeviceService {
     Uint8List? ats,
   }) async {
     final atsD = ats ?? Uint8List(0);
+    final atqaReversed = Uint8List.fromList(atqa.reversed.toList());
     final b = Uint8List(uid.length + 1 + 2 + 1 + atsD.length + 1);
     var p = 0;
     b[p++] = uid.length;
     b.setRange(p, p + uid.length, uid);
     p += uid.length;
-    b.setRange(p, p + 2, atqa);
+    b.setRange(p, p + 2, atqaReversed);
     p += 2;
     b[p++] = sak[0];
     b[p++] = atsD.length;
@@ -1402,12 +1406,20 @@ class DeviceService {
 
   Future<Mf1EmuSettings> cmdMf1GetEmuSettings() async {
     final r = await _request(Cmd.mf1GetEmulatorConfig.value, null);
+    final w = r[4];
+    final mode = w == 1
+        ? 1
+        : w == 2
+            ? 2
+            : (w == 3 || w == 4)
+                ? 3
+                : 0;
     return Mf1EmuSettings(
       detection: r[0] == 1,
       gen1a: r[1] == 1,
       gen2: r[2] == 1,
       antiColl: r[3] == 1,
-      write: r[4],
+      write: mode,
     );
   }
 
@@ -1590,16 +1602,14 @@ class DeviceService {
   Future<int> cmdMf0EmuGetDetectionCount() async {
     await assureDeviceMode(DeviceMode.tag);
     final r = await _request(Cmd.mf0NtagGetDetectionCount.value, null);
-    return r.length >= 4
-        ? ByteData.sublistView(r).getUint32(0, Endian.little)
-        : 0;
+    return r.length >= 4 ? ByteData.sublistView(r).getUint32(0) : 0;
   }
 
   /// 读取 NTAG 已检测密码列表（每条 4 字节 hex）
   Future<List<String>> cmdMf0EmuGetDetectionLogs(int offset) async {
     await assureDeviceMode(DeviceMode.tag);
     final b = Uint8List(4);
-    ByteData.sublistView(b).setUint32(0, offset, Endian.little);
+    ByteData.sublistView(b).setUint32(0, offset);
     final r = await _request(Cmd.mf0NtagGetDetectionLog.value, b);
     final list = <String>[];
     for (var i = 0; i + 4 <= r.length; i += 4) {

@@ -1,7 +1,5 @@
-import 'dart:math';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../main.dart';
 import '../../models/enums.dart';
@@ -11,6 +9,7 @@ import '../../services/device_service.dart';
 import '../../ui/widgets/common.dart';
 import '../../services/slot_writer.dart';
 import '../../state/app_controller.dart';
+import '../screens/mfkey32_screen.dart';
 
 /// 卡槽管理 Tab（对齐 CU slot_manager.dart）
 /// 网格展示所有卡槽 + 点击写入卡库卡片 + 单槽设置 + 批量备份
@@ -986,6 +985,7 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   int _ulDetectionCount = 0;
   bool _loading = true;
   bool _saving = false;
+  int _previousType = -1;
 
   TagType? get _type => _selectedType > 0
       ? TagType.values.where((e) => e.value == _selectedType).firstOrNull
@@ -1045,9 +1045,15 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   }
 
   /// 读取卡槽碰撞数据、Ultralight 数据与仿真器配置
+  ///
+  /// 对齐 CU edit.dart updateInfo：切换卡型时若类型变了（且非 Classic 同家族）
+  /// 则重读设备现状回填字段；同类型或 Classic 同家族短路。读取前先激活目标槽，
+  /// 否则无槽参数的命令（4018/4009/4023）会读到当前激活槽的数据。
   Future<void> _loadHfData() async {
+    if (_sameClassicFamily(_previousType, _selectedType)) return;
     final device = widget.app.device;
     try {
+      await device.cmdSlotSetActive(widget.slot);
       try {
         final ac = await device.cmdHf14aGetAntiCollData();
         if (ac != null && mounted) {
@@ -1121,16 +1127,31 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       // 忽略读取失败，使用默认值
     } finally {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _previousType = _selectedType;
+        });
       }
     }
   }
 
+  /// 短路条件（对齐 CU edit.dart:81-84）：同类型或 Classic 同家族时不重读
+  bool _sameClassicFamily(int prev, int cur) {
+    if (prev == cur) return true;
+    if (prev <= 0 || cur <= 0) return false;
+    final p = TagType.values.where((e) => e.value == prev).firstOrNull;
+    final c = TagType.values.where((e) => e.value == cur).firstOrNull;
+    return p != null && c != null &&
+        isMifareClassic(p) && isMifareClassic(c);
+  }
+
   /// 读取 LF 卡槽当前模拟 ID（对齐 CU updateInfo 的 LF 分支）
   Future<void> _loadLfData() async {
+    if (_previousType == _selectedType && _previousType != -1) return;
     final device = widget.app.device;
     final type = _type;
     try {
+      await device.cmdSlotSetActive(widget.slot);
       if (type == TagType.hidProx) {
         final uid = await device.cmdHidProxGetEmuId();
         if (!mounted) return;
@@ -1182,7 +1203,10 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       // 忽略读取失败，使用空值
     } finally {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _previousType = _selectedType;
+        });
       }
     }
   }
@@ -1223,6 +1247,7 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     }
     return Form(
       key: _formKey,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1231,7 +1256,6 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
             '卡槽名称',
             TextFormField(
               controller: _nameCtrl,
-              maxLength: 19,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
                 isDense: true,
@@ -1249,7 +1273,15 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
             ],
             onChanged: (v) {
               if (v == null || v == 0) return;
-              setState(() => _selectedType = v);
+              setState(() {
+                _selectedType = v;
+                _loading = true;
+              });
+              if (widget.isHf) {
+                _loadHfData();
+              } else {
+                _loadLfData();
+              }
             },
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
@@ -1367,31 +1399,46 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       'Gen1A 魔术模式',
       ['是', '否'],
       _gen1a ? 0 : 1,
-      (i) => setState(() => _gen1a = i == 0),
+      (i) => _pushConfig(
+        () => widget.app.device.cmdMf1SetGen1aMode(i == 0),
+        local: () => setState(() => _gen1a = i == 0),
+      ),
     ),
     _toggleRow(
       'Gen2 魔术模式',
       ['是', '否'],
       _gen2 ? 1 : 0,
-      (i) => setState(() => _gen2 = i == 1),
+      (i) => _pushConfig(
+        () => widget.app.device.cmdMf1SetGen2Mode(i == 1),
+        local: () => setState(() => _gen2 = i == 1),
+      ),
     ),
     _toggleRow(
       'PRNG 类型',
       [for (final p in _prngTypes) p.$1],
       _indexByValue(_prngTypes, _prngType),
-      (i) => setState(() => _prngType = _prngTypes[i].$2),
+      (i) => _pushConfig(
+        () => widget.app.device.cmdMf1SetPrngType(_prngTypes[i].$2),
+        local: () => setState(() => _prngType = _prngTypes[i].$2),
+      ),
     ),
     _toggleRow(
       '从 0 块使用 UID/SAK/ATQA',
       ['否', '是'],
       _useFirstBlock ? 1 : 0,
-      (i) => setState(() => _useFirstBlock = i == 1),
+      (i) => _pushConfig(
+        () => widget.app.device.cmdMf1SetAntiCollMode(i == 1),
+        local: () => setState(() => _useFirstBlock = i == 1),
+      ),
     ),
     _toggleRow(
       '收集 nonces (Mfkey32)',
       ['否', '是'],
       _classicDetection ? 1 : 0,
-      (i) => setState(() => _classicDetection = i == 1),
+      (i) => _pushConfig(
+        () => widget.app.device.cmdMf1SetDetectionEnable(i == 1),
+        local: () => setState(() => _classicDetection = i == 1),
+      ),
     ),
     _detectionHint(
       enabled: _classicDetection,
@@ -1400,13 +1447,19 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       emptyHint: '请将卡片靠近读卡器以恢复密钥',
       countText: (c) => '已收集 nonce: $c',
       buttonLabel: '恢复密钥',
-      onView: _showMf1DetectionLogs,
+      onView: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const Mfkey32Screen()),
+      ),
     ),
     _toggleRow(
       '写入模式',
       [for (final m in _writeModes) m.$1],
       _indexByValue(_writeModes, _classicWriteMode),
-      (i) => setState(() => _classicWriteMode = _writeModes[i].$2),
+      (i) => _pushConfig(
+        () => widget.app.device.cmdMf1SetWriteMode(_writeModes[i].$2),
+        local: () => setState(() => _classicWriteMode = _writeModes[i].$2),
+      ),
     ),
   ];
 
@@ -1431,13 +1484,19 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
         'Gen2 魔术模式',
         ['否', '是'],
         _ulGen2 ? 1 : 0,
-        (i) => setState(() => _ulGen2 = i == 1),
+        (i) => _pushConfig(
+          () => widget.app.device.cmdMf0EmuSetMagicMode(i == 1),
+          local: () => setState(() => _ulGen2 = i == 1),
+        ),
       ),
       _toggleRow(
         '密码检测',
         ['否', '是'],
         _ulDetection ? 1 : 0,
-        (i) => setState(() => _ulDetection = i == 1),
+        (i) => _pushConfig(
+          () => widget.app.device.cmdMf0EmuSetDetectionEnable(i == 1),
+          local: () => setState(() => _ulDetection = i == 1),
+        ),
       ),
       _detectionHint(
         enabled: _ulDetection,
@@ -1452,31 +1511,18 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
         '写入模式',
         [for (final m in _writeModes) m.$1],
         _indexByValue(_writeModes, _ulWriteMode),
-        (i) => setState(() => _ulWriteMode = _writeModes[i].$2),
+        (i) => _pushConfig(
+          () => widget.app.device.cmdMf0EmuSetWriteMode(_writeModes[i].$2),
+          local: () => setState(() => _ulWriteMode = _writeModes[i].$2),
+        ),
       ),
     ]);
     return children;
   }
 
-  Widget _signatureRow() => Row(
-    children: [
-      Expanded(
-        child: _field(
-          'Ultralight 签名',
-          _hexForm(_ulSignatureCtrl, fieldName: '签名'),
-        ),
-      ),
-      const SizedBox(width: 8),
-      TextButton.icon(
-        onPressed: _randomSignature,
-        icon: const Icon(Icons.refresh, size: 16),
-        label: const Text('随机生成', style: TextStyle(fontSize: 12)),
-        style: TextButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-        ),
-      ),
-    ],
+  Widget _signatureRow() => _field(
+    'Ultralight 签名',
+    _hexForm(_ulSignatureCtrl, fieldName: '签名'),
   );
 
   Widget _counterRow(int index) => _field(
@@ -1522,6 +1568,9 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   }) => TextFormField(
     controller: ctrl,
     keyboardType: TextInputType.text,
+    inputFormatters: [
+      FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Fa-f ]')),
+    ],
     decoration: const InputDecoration(
       border: OutlineInputBorder(),
       isDense: true,
@@ -1698,69 +1747,6 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     return [for (final t in types) (t.value, t.label)];
   }
 
-  Future<void> _randomSignature() async {
-    final rnd = Random.secure();
-    final sb = StringBuffer();
-    for (var i = 0; i < 8; i++) {
-      sb.write(rnd.nextInt(256).toRadixString(16).padLeft(2, '0'));
-      if (i < 7) {
-        sb.write(' ');
-      }
-    }
-    final hex = sb.toString();
-    setState(() => _ulSignatureCtrl.text = hex);
-    try {
-      await widget.app.device.cmdMf0EmuSetSignatureData(hexToUint8List(hex));
-    } catch (e) {
-      _toast('签名写入失败: $e');
-    }
-  }
-
-  Future<void> _showMf1DetectionLogs() async {
-    try {
-      final logs = await widget.app.device.cmdMf1GetDetectionLogs(0);
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('已收集 nonce'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final l in logs)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text(
-                        '块 ${l.block}（${l.isKeyB ? 'B' : 'A'}）: '
-                        '${bytesToHexSpace(l.nt)} ${bytesToHexSpace(l.nr)} '
-                        '${bytesToHexSpace(l.ar)}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('关闭'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      _toast('读取失败: $e');
-    }
-  }
-
   Future<void> _showMf0DetectionLogs() async {
     try {
       final logs = await widget.app.device.cmdMf0EmuGetDetectionLogs(0);
@@ -1804,6 +1790,13 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     }
   }
 
+  /// toggle 即时下发：先同步本地状态刷新 UI，再异步下发设备命令（静默容错）。
+  /// 对齐 CU edit.dart：仿真器开关在切换时即时生效，保存不再重复写。
+  void _pushConfig(Future<void> Function() cmd, {required VoidCallback local}) {
+    local();
+    cmd().catchError((_) {});
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
@@ -1814,7 +1807,7 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
 
     setState(() => _saving = true);
     try {
-      final name = _nameCtrl.text.trim();
+      final name = _nameCtrl.text;
       if (widget.isHf) {
         await _saveHf(name);
       } else {
@@ -1873,23 +1866,8 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       await _writeUltralightData();
     }
 
-    if (_isClassic) {
-      await device.cmdMf1SetGen1aMode(_gen1a);
-      await device.cmdMf1SetGen2Mode(_gen2);
-      try {
-        await device.cmdMf1SetPrngType(_prngType);
-      } catch (_) {
-        // 旧固件不支持 PRNG 命令，忽略
-      }
-      await device.cmdMf1SetAntiCollMode(_useFirstBlock);
-      await device.cmdMf1SetDetectionEnable(_classicDetection);
-      await device.cmdMf1SetWriteMode(_classicWriteMode);
-    }
-    if (_isUltralight) {
-      await device.cmdMf0EmuSetMagicMode(_ulGen2);
-      await device.cmdMf0EmuSetDetectionEnable(_ulDetection);
-      await device.cmdMf0EmuSetWriteMode(_ulWriteMode);
-    }
+    // 仿真器开关（Gen1a/Gen2/PRNG/检测/写模式）在 toggle 时即时下发，
+    // 保存不再重复写（对齐 CU edit.dart：save 不写开关）
 
     await device.cmdSlotSetFreqName(widget.slot, 2, name);
     await device.cmdSlotSaveSettings();
