@@ -10,7 +10,7 @@ import '../screens/card_subscription_screen.dart';
 import '../screens/fence_subscription_screen.dart';
 import '../widgets/common.dart';
 
-/// 设置 Tab：设备信息、全局设置、右侧操作按钮、卡槽设置
+/// 设置 Tab：设备信息、全局设置、右侧操作按钮
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key});
 
@@ -121,38 +121,6 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  Future<void> _showSlotSettings() async {
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      isScrollControlled: true,
-      builder: (ctx) => _SlotSettingsSheet(app: _app),
-    );
-  }
-
-  Future<void> _saveSlots() async {
-    try {
-      for (var i = 0; i < 8; i++) {
-        final (hf, lf) = _app.enabledSlots[i];
-        await _dev.cmdSlotSetEnable(i, 2, hf);
-        await _dev.cmdSlotSetEnable(i, 1, lf);
-        final hfName = _app.slotNames[i].$1;
-        final lfName = _app.slotNames[i].$2;
-        if (hfName != null && hfName.isNotEmpty) {
-          await _dev.cmdSlotSetFreqName(i, 2, hfName);
-        }
-        if (lfName != null && lfName.isNotEmpty) {
-          await _dev.cmdSlotSetFreqName(i, 1, lfName);
-        }
-      }
-      await _dev.cmdSlotSaveSettings();
-      _toast('卡槽配置已保存');
-    } catch (e) {
-      _toast('保存失败: $e');
-    }
-  }
-
   // ========== 固件刷写 ==========
   Future<void> _dfuUpdate() async {
     final controller = TextEditingController();
@@ -223,18 +191,6 @@ class _SettingsTabState extends State<SettingsTab> {
       _toast('刷写成功，设备将自动重启');
     } catch (e) {
       _toast('刷写失败: $e');
-    }
-  }
-
-  // ========== 读取卡槽（仅刷新卡槽相关） ==========
-  Future<void> _readSlotsOnly() async {
-    try {
-      await _app.loadEnabledSlots();
-      final active = await _dev.cmdSlotGetActive();
-      _app.currentSlot = active;
-      _toast('已读取卡槽配置');
-    } catch (e) {
-      _toast('读取卡槽失败: $e');
     }
   }
 
@@ -443,26 +399,7 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                   ),
-                  // 卡槽设置入口
-                  SectionCard(
-                    title: '卡槽设置',
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '当前卡槽：卡槽${_app.currentSlot + 1}',
-                          style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
-                        ),
-                        ActionButton(
-                          label: '卡槽设置',
-                          icon: Icons.tune,
-                          color: primary,
-                          onTap: _showSlotSettings,
-                        ),
-                      ],
-                    ),
-                  ),
-                    // 调试日志
+                  // 调试日志
                     SectionCard(
                       title: '调试',
                       child: Row(
@@ -507,14 +444,11 @@ class _SettingsTabState extends State<SettingsTab> {
               child: Column(
                 children: [
                   _sideBtn('读取设置', Icons.download, _refresh, primary),
-                  _sideBtn('读取卡槽', Icons.memory, _readSlotsOnly, primary),
                   _sideBtn('保存设置', Icons.save, _saveSettings, primary),
                   _sideBtn('恢复出厂', Icons.refresh, _resetSettings, primary),
                   _sideBtn('清除数据', Icons.cleaning_services, _wipeFds, primary),
                   _sideBtn('清除配对', Icons.link_off, _deleteBonds, primary),
                   _sideBtn('固件刷写', Icons.system_update_alt, _dfuUpdate, primary),
-                  _sideBtn('卡槽设置', Icons.tune, _showSlotSettings, primary),
-                  _sideBtn('保存卡槽', Icons.save, _saveSlots, primary),
                   _sideBtn('围栏订阅', Icons.fence, _showFenceSubscription, primary),
                   _sideBtn('卡片订阅', Icons.credit_card, _showCardSubscription, primary),
                   const SizedBox(height: 16),
@@ -633,340 +567,3 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 }
 
-/// 卡槽设置底部弹窗
-class _SlotSettingsSheet extends StatefulWidget {
-  final AppController app;
-  const _SlotSettingsSheet({required this.app});
-
-  @override
-  State<_SlotSettingsSheet> createState() => _SlotSettingsSheetState();
-}
-
-class _SlotSettingsSheetState extends State<_SlotSettingsSheet> {
-  late final PageController _controller;
-  var _current = 0;
-  // 每槽两个独立别名输入框：ID 别名(lf/freq1) 与 IC 别名(hf/freq2)
-  final _idNameCtrls = List.generate(8, (_) => TextEditingController());
-  final _icNameCtrls = List.generate(8, (_) => TextEditingController());
-
-  AppController get _app => widget.app;
-  DeviceService get _dev => _app.device;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = PageController();
-    for (var i = 0; i < 8; i++) {
-      _idNameCtrls[i].text = _app.slotNames[i].$2 ?? '';
-      _icNameCtrls[i].text = _app.slotNames[i].$1 ?? '';
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    for (final c in _idNameCtrls) {
-      c.dispose();
-    }
-    for (final c in _icNameCtrls) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  void _loadNamesIntoCtrls() {
-    for (var i = 0; i < 8; i++) {
-      _idNameCtrls[i].text = _app.slotNames[i].$2 ?? '';
-      _icNameCtrls[i].text = _app.slotNames[i].$1 ?? '';
-    }
-  }
-
-  void _syncNames() {
-    for (var i = 0; i < 8; i++) {
-      final id = _idNameCtrls[i].text.trim();
-      final ic = _icNameCtrls[i].text.trim();
-      _app.slotNames[i] =
-          (ic.isEmpty ? null : ic, id.isEmpty ? null : id);
-    }
-  }
-
-  /// 读取当前卡槽设置（对齐小程序 btnLoadSlot）
-  Future<void> _readSlot(int slot) async {
-    try {
-      if (!_app.connected) throw Exception('设备未连接');
-      await _app.loadEnabledSlots();
-      await _dev.cmdSlotSetActive(slot);
-      _app.currentSlot = slot;
-      await _app.loadSlotEmuSettings(slot);
-      _loadNamesIntoCtrls();
-      setState(() {});
-    } catch (e) {
-      _toast('卡槽 ${slot + 1} 读取设置失败: $e');
-    }
-  }
-
-  /// 保存当前卡槽设置（对齐小程序 btnSaveSlot）
-  Future<void> _saveSlot(int slot) async {
-    try {
-      if (!_app.connected) throw Exception('设备未连接');
-      _syncNames();
-      await _dev.cmdSlotSetActive(slot);
-      _app.currentSlot = slot;
-      final (hf, lf) = _app.enabledSlots[slot];
-      final s = _app.slotEmuSettings[slot];
-      await _dev.cmdSlotSetEnable(slot, 1, lf);
-      await _dev.cmdSlotSetEnable(slot, 2, hf);
-      final hfName = _app.slotNames[slot].$1;
-      final lfName = _app.slotNames[slot].$2;
-      if (hfName != null && hfName.isNotEmpty) {
-        await _dev.cmdSlotSetFreqName(slot, 2, hfName);
-      }
-      if (lfName != null && lfName.isNotEmpty) {
-        await _dev.cmdSlotSetFreqName(slot, 1, lfName);
-      }
-      if (hf) {
-        await _dev.cmdMf1SetAntiCollMode(s.antiColl);
-        await _dev.cmdMf1SetDetectionEnable(s.detection);
-        await _dev.cmdMf1SetGen1aMode(s.gen1a);
-        await _dev.cmdMf1SetGen2Mode(s.gen2);
-        await _dev.cmdMf1SetWriteMode(s.write);
-      }
-      await _dev.cmdSlotSaveSettings();
-      _toast('卡槽 ${slot + 1} 设置已保存');
-    } catch (e) {
-      _toast('卡槽 ${slot + 1} 保存失败: $e');
-    }
-  }
-
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.68,
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('卡槽设置',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            ),
-            // 顶部指示点：左右滑动切换卡槽
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text('卡槽 ${_current + 1} / 8（左右滑动切换）',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF999999))),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: 8,
-                onPageChanged: (i) => setState(() => _current = i),
-                itemBuilder: (_, i) => _buildSlotPanel(i, primary),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 单个卡槽面板：顶部读取/保存，内容 ID/IC 功能+别名 与 mf1 配置
-  Widget _buildSlotPanel(int i, Color primary) {
-    final s = _app.slotEmuSettings[i];
-    final (hf, lf) = _app.enabledSlots[i];
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text('卡槽 ${i + 1}',
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF333333))),
-              ),
-              ActionButton(
-                  label: '读取',
-                  icon: Icons.download,
-                  color: primary,
-                  onTap: () => _readSlot(i)),
-              const SizedBox(width: 8),
-              ActionButton(
-                  label: '保存',
-                  icon: Icons.save,
-                  color: primary,
-                  onTap: () => _saveSlot(i)),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-            children: [
-              _freqRow('ID功能', lf, (v) {
-                setState(() => _app.enabledSlots[i] = (hf, v));
-              }, primary),
-              _nameRow('ID别名', _idNameCtrls[i], (v) {
-                _app.slotNames[i] = (_app.slotNames[i].$1, v);
-              }),
-              _freqRow('IC功能', hf, (v) {
-                setState(() => _app.enabledSlots[i] = (v, lf));
-              }, primary),
-              _nameRow('IC别名', _icNameCtrls[i], (v) {
-                _app.slotNames[i] = (v, _app.slotNames[i].$2);
-              }),
-              const Divider(height: 8),
-              _switchRow('侦测功能', s.detection, (v) {
-                _app.updateSlotEmu(i, detection: v);
-              }, primary),
-              _switchRow('防冲突', s.antiColl, (v) {
-                _app.updateSlotEmu(i, antiColl: v);
-              }, primary),
-              _dropdownRowInt('UID功能', s.gen1a ? 1 : 0, const [0, 1],
-                  (v) => v == 0 ? '关闭UID功能' : '开启UID功能', (v) {
-                _app.updateSlotEmu(i, gen1a: v == 1);
-              }),
-              _dropdownRowInt('CUID功能', s.gen2 ? 1 : 0, const [0, 1],
-                  (v) => v == 0 ? '关闭CUID功能' : '开启CUID功能', (v) {
-                _app.updateSlotEmu(i, gen2: v == 1);
-              }),
-              const Divider(height: 8),
-              _dropdownRowInt('写卡模式', s.write, const [0, 1, 2, 3], _writeModeLabel,
-                  (v) {
-                _app.updateSlotEmu(i, write: v);
-              }),
-              const SizedBox(height: 12),
-              ActionButton(
-                  label: '保存当前卡槽',
-                  icon: Icons.save,
-                  color: primary,
-                  onTap: () => _saveSlot(i)),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _writeModeLabel(int m) {
-    switch (m) {
-      case 0:
-        return '关闭滚动功能';
-      case 1:
-        return '拒绝写入数据';
-      case 2:
-        return '立即复原数据';
-      case 3:
-        return '下次复原数据';
-      default:
-        return '关闭滚动功能';
-    }
-  }
-
-  /// ID/IC 功能开关行
-  Widget _freqRow(String label, bool value, ValueChanged<bool> onChanged, Color primary) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 72,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          const Spacer(),
-          Switch(value: value, activeThumbColor: primary, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
-
-  /// 别名输入行
-  Widget _nameRow(String label, TextEditingController ctrl, ValueChanged<String> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 72,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          Expanded(
-            child: TextField(
-              controller: ctrl,
-              style: const TextStyle(fontSize: 13),
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(6))),
-              ),
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 布尔开关行
-  Widget _switchRow(String label, bool value, ValueChanged<bool> onChanged, Color primary) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 72,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          const Spacer(),
-          Switch(value: value, activeThumbColor: primary, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
-
-  /// 整数下拉行
-  Widget _dropdownRowInt(String label, int value, List<int> options,
-      String Function(int) itemLabel, ValueChanged<int> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 72,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          Expanded(
-            child: DropdownButton<int>(
-              value: options.contains(value) ? value : options.first,
-              isExpanded: true,
-              isDense: true,
-              underline: const SizedBox.shrink(),
-              style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
-              icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFBBBBBB)),
-              items: options
-                  .map((o) => DropdownMenuItem(
-                      value: o,
-                      child: Text(itemLabel(o),
-                          style: const TextStyle(fontSize: 13))))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) onChanged(v);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
