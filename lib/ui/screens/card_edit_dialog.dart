@@ -25,7 +25,7 @@ class _CardEditDialogState extends State<CardEditDialog> {
   late final TextEditingController _atsCtrl;
   late final TextEditingController _ulVersionCtrl;
   late final TextEditingController _ulSignatureCtrl;
-  late List<TextEditingController> _counterCtrls;
+  final List<TextEditingController> _counterCtrls = [];
 
   late final TextEditingController _hidTypeCtrl;
   late final TextEditingController _facilityCodeCtrl;
@@ -77,7 +77,7 @@ class _CardEditDialogState extends State<CardEditDialog> {
     for (final c in _counterCtrls) {
       c.dispose();
     }
-    _counterCtrls = [];
+    _counterCtrls.clear();
     final count = mfUltralightGetCounterCount(_selectedType);
     for (int i = 0; i < count; i++) {
       final val = i < widget.card.ultralightCounters.length
