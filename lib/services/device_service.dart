@@ -1313,9 +1313,11 @@ class DeviceService {
 
   // ========== 模拟命令（cmd 4000-4039） ==========
 
-  /// 设置 EM4100 模拟 ID（5 字节）
+  /// 设置 EM4100 模拟 ID（EM410X 5 字节 / Electra 13 字节）
   Future<void> cmdEm410xSetEmuId(Uint8List id) async {
-    if (id.length != 5) throw DeviceException(96, 'id must be 5 bytes');
+    if (id.length != 5 && id.length != 13) {
+      throw DeviceException(96, 'id must be 5 or 13 bytes');
+    }
     await assureDeviceMode(DeviceMode.tag);
     await _request(Cmd.em410xSetEmuId.value, id);
   }
@@ -1674,7 +1676,7 @@ class DeviceService {
 
   // ========== LF 模拟卡 ID（cmd 5002-5013，对齐 CU set*EmulatorID） ==========
 
-  /// 设置 HID Prox 模拟卡 ID（12 字节）
+  /// 设置 HID Prox 模拟卡 ID（13 字节）
   Future<void> cmdHidProxSetEmuId(Uint8List uid) async {
     await assureDeviceMode(DeviceMode.tag);
     await _request(Cmd.hidproxSetEmuId.value, Uint8List.fromList(uid));
@@ -1704,34 +1706,29 @@ class DeviceService {
     await _request(Cmd.idteckSetEmuId.value, Uint8List.fromList(uid));
   }
 
-  /// 读取 HID Prox 模拟卡 ID
+  /// 读取 HID Prox 模拟卡 ID（13 字节，无状态前缀）
   Future<Uint8List> cmdHidProxGetEmuId() async {
-    final r = await _request(Cmd.hidproxGetEmuId.value, null);
-    return r.length > 2 ? r.sublist(2) : r;
+    return _request(Cmd.hidproxGetEmuId.value, null);
   }
 
-  /// 读取 Viking 模拟卡 ID
+  /// 读取 Viking 模拟卡 ID（4 字节，无状态前缀）
   Future<Uint8List> cmdVikingGetEmuId() async {
-    final r = await _request(Cmd.vikingGetEmuId.value, null);
-    return r.length > 2 ? r.sublist(2) : r;
+    return _request(Cmd.vikingGetEmuId.value, null);
   }
 
-  /// 读取 PAC 模拟卡 ID
+  /// 读取 PAC 模拟卡 ID（8 字节，无状态前缀）
   Future<Uint8List> cmdPacGetEmuId() async {
-    final r = await _request(Cmd.pacGetEmuId.value, null);
-    return r.length > 2 ? r.sublist(2) : r;
+    return _request(Cmd.pacGetEmuId.value, null);
   }
 
-  /// 读取 ioProx 模拟卡 ID
+  /// 读取 ioProx 模拟卡 ID（16 字节，无状态前缀）
   Future<Uint8List> cmdIoProxGetEmuId() async {
-    final r = await _request(Cmd.ioProxGetEmuId.value, null);
-    return r.length > 2 ? r.sublist(2) : r;
+    return _request(Cmd.ioProxGetEmuId.value, null);
   }
 
-  /// 读取 idteck 模拟卡 ID
+  /// 读取 idteck 模拟卡 ID（8 字节，无状态前缀）
   Future<Uint8List> cmdIdteckGetEmuId() async {
-    final r = await _request(Cmd.idteckGetEmuId.value, null);
-    return r.length > 2 ? r.sublist(2) : r;
+    return _request(Cmd.idteckGetEmuId.value, null);
   }
 
   // ========== 组合操作（与逆向 hf14aInfo 等一致） ==========

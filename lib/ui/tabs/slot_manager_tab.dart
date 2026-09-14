@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -6,6 +7,7 @@ import '../../main.dart';
 import '../../models/enums.dart';
 import '../../services/card_backup.dart';
 import '../../services/card_library.dart';
+import '../../services/device_service.dart';
 import '../../ui/widgets/common.dart';
 import '../../services/slot_writer.dart';
 import '../../state/app_controller.dart';
@@ -922,7 +924,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
 
 /// 卡槽编辑对话框（对齐 CU SlotEditMenu）
 /// HF：卡名 + 标签类型 + UID/SAK/ATQA/ATS + Ultralight 数据 + 仿真器设置
-/// LF：卡名 + 标签类型
+/// LF：卡名 + 标签类型 + UID（HID Prox 另带类型/facilityCode/issueLevel/OEM）
 class SlotEditDialog extends StatefulWidget {
   final int slot;
   final bool isHf;
@@ -955,6 +957,8 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     ('影子', 3),
   ];
 
+  final _formKey = GlobalKey<FormState>();
+
   late final TextEditingController _nameCtrl;
   late final TextEditingController _uidCtrl;
   late final TextEditingController _sakCtrl;
@@ -962,12 +966,16 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   late final TextEditingController _atsCtrl;
   late final TextEditingController _ulVersionCtrl;
   late final TextEditingController _ulSignatureCtrl;
+  late final TextEditingController _facilityCtrl;
+  late final TextEditingController _issueLevelCtrl;
+  late final TextEditingController _oemCtrl;
   late final List<TextEditingController> _ulCounterCtrls;
 
   int _selectedType = 0;
   int _prngType = 1;
   int _classicWriteMode = 0;
   int _ulWriteMode = 0;
+  int _hidType = 1;
   bool _gen1a = true;
   bool _gen2 = false;
   bool _useFirstBlock = false;
@@ -979,16 +987,20 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   bool _loading = true;
   bool _saving = false;
 
-  TagType get _type => TagType.from(_selectedType);
+  TagType? get _type => _selectedType > 0
+      ? TagType.values.where((e) => e.value == _selectedType).firstOrNull
+      : null;
 
-  bool get _isClassic => _selectedType > 0 && isMifareClassic(_type);
+  bool get _isClassic =>
+      _selectedType > 0 && isMifareClassic(_type ?? TagType.unknown);
 
-  bool get _isUltralight => _selectedType > 0 && isMifareUltralight(_type);
+  bool get _isUltralight =>
+      _selectedType > 0 && isMifareUltralight(_type ?? TagType.unknown);
+
+  bool get _isHidProx => _type == TagType.hidProx;
 
   int get _counterCount =>
-      _isUltralight ? mfUltralightGetCounterCount(_type) : 0;
-
-  int get _uidBytes => _isUltralight ? 7 : 4;
+      _isUltralight ? mfUltralightGetCounterCount(_type!) : 0;
 
   @override
   void initState() {
@@ -1002,10 +1014,15 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     _atsCtrl = TextEditingController();
     _ulVersionCtrl = TextEditingController();
     _ulSignatureCtrl = TextEditingController();
+    _facilityCtrl = TextEditingController(text: '0');
+    _issueLevelCtrl = TextEditingController(text: '0');
+    _oemCtrl = TextEditingController(text: '0');
     _ulCounterCtrls = List.generate(3, (_) => TextEditingController());
     _selectedType = widget.initialType;
     if (widget.isHf) {
       _loadHfData();
+    } else {
+      _loadLfData();
     }
   }
 
@@ -1018,6 +1035,9 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     _atsCtrl.dispose();
     _ulVersionCtrl.dispose();
     _ulSignatureCtrl.dispose();
+    _facilityCtrl.dispose();
+    _issueLevelCtrl.dispose();
+    _oemCtrl.dispose();
     for (final c in _ulCounterCtrls) {
       c.dispose();
     }
@@ -1070,6 +1090,7 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
             setState(() {
               _ulGen2 = es.gen2;
               _ulDetection = es.detection;
+              _ulWriteMode = es.write;
               _ulDetectionCount = count;
             });
           }
@@ -1098,6 +1119,67 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       }
     } catch (_) {
       // 忽略读取失败，使用默认值
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  /// 读取 LF 卡槽当前模拟 ID（对齐 CU updateInfo 的 LF 分支）
+  Future<void> _loadLfData() async {
+    final device = widget.app.device;
+    final type = _type;
+    try {
+      if (type == TagType.hidProx) {
+        final uid = await device.cmdHidProxGetEmuId();
+        if (!mounted) return;
+        setState(() {
+          _uidCtrl.text = uid.length >= 10
+              ? bytesToHexSpace(uid.sublist(5, 10))
+              : '';
+          _hidType = uid.isNotEmpty && uid[0] >= 1 && uid[0] <= 30 ? uid[0] : 1;
+          _facilityCtrl.text = uid.length >= 5
+              ? ((uid[1] << 24 | uid[2] << 16 | uid[3] << 8 | uid[4]) >>> 0)
+                    .toString()
+              : '0';
+          _issueLevelCtrl.text = uid.length > 10 ? uid[10].toString() : '0';
+          _oemCtrl.text = uid.length > 12
+              ? (((uid[11] << 8) | uid[12]) >>> 0).toString()
+              : '0';
+        });
+        return;
+      }
+
+      final Uint8List uid;
+      switch (type) {
+        case TagType.em410X:
+        case TagType.em410X16:
+        case TagType.em410X32:
+        case TagType.em410X64:
+        case TagType.em410XElectra:
+          uid = await device.cmdEm410xGetEmuId();
+          break;
+        case TagType.viking:
+          uid = await device.cmdVikingGetEmuId();
+          break;
+        case TagType.pac:
+          uid = await device.cmdPacGetEmuId();
+          break;
+        case TagType.ioProx:
+          uid = await device.cmdIoProxGetEmuId();
+          break;
+        case TagType.idteck:
+          uid = await device.cmdIdteckGetEmuId();
+          break;
+        default:
+          return;
+      }
+      if (mounted) {
+        setState(() => _uidCtrl.text = bytesToHexSpace(uid));
+      }
+    } catch (_) {
+      // 忽略读取失败，使用空值
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -1139,37 +1221,44 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _field(
-          '卡槽名称',
-          TextField(
-            controller: _nameCtrl,
-            maxLength: 19,
+    return Form(
+      key: _formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _field(
+            '卡槽名称',
+            TextFormField(
+              controller: _nameCtrl,
+              maxLength: 19,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              validator: _validateName,
+            ),
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<int>(
+            initialValue: _selectedType,
+            items: [
+              for (final t in _availableTagTypes())
+                DropdownMenuItem(value: t.$1, child: Text(t.$2)),
+              const DropdownMenuItem(value: 0, child: Text('未设置')),
+            ],
+            onChanged: (v) {
+              if (v == null || v == 0) return;
+              setState(() => _selectedType = v);
+            },
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,
             ),
           ),
-        ),
-        const SizedBox(height: 10),
-        DropdownButtonFormField<int>(
-          initialValue: _selectedType,
-          items: [
-            for (final t in _availableTagTypes())
-              DropdownMenuItem(value: t.$1, child: Text(t.$2)),
-            const DropdownMenuItem(value: 0, child: Text('未设置')),
-          ],
-          onChanged: (v) => setState(() => _selectedType = v ?? 0),
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        if (widget.isHf) ..._hfFields(),
-      ],
+          if (widget.isHf) ..._hfFields() else ..._lfFields(),
+        ],
+      ),
     );
   }
 
@@ -1177,18 +1266,95 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
   List<Widget> _hfFields() {
     final children = <Widget>[
       const SizedBox(height: 10),
-      _field('UID', _hexField(_uidCtrl, _uidBytes)),
+      _field('UID', _hexForm(_uidCtrl, validator: _validateUid)),
       const SizedBox(height: 10),
-      _field('SAK', _hexField(_sakCtrl, 1)),
+      _field(
+        'SAK',
+        _hexForm(
+          _sakCtrl,
+          validator: (v) =>
+              _validateHex(v, exactBytes: 1, required: true, fieldName: 'SAK'),
+        ),
+      ),
       const SizedBox(height: 10),
-      _field('ATQA', _hexField(_atqaCtrl, 2)),
+      _field(
+        'ATQA',
+        _hexForm(
+          _atqaCtrl,
+          validator: (v) =>
+              _validateHex(v, exactBytes: 2, required: true, fieldName: 'ATQA'),
+        ),
+      ),
       const SizedBox(height: 10),
-      _field('ATS（可选）', _hexField(_atsCtrl, 0)),
+      _field('ATS（可选）', _hexForm(_atsCtrl, fieldName: 'ATS')),
     ];
     if (_isClassic) {
       children.addAll(_classicFields());
     } else if (_isUltralight) {
       children.addAll(_ultralightFields());
+    }
+    return children;
+  }
+
+  /// LF 特有字段：UID + HID Prox 附加字段（对齐 CU edit.dart LF 分支）
+  List<Widget> _lfFields() {
+    final children = <Widget>[
+      const SizedBox(height: 10),
+      _field('UID', _hexForm(_uidCtrl, validator: _validateUid)),
+    ];
+    if (_isHidProx) {
+      children.addAll([
+        const SizedBox(height: 10),
+        _field(
+          'HID Prox 类型',
+          DropdownButtonFormField<int>(
+            initialValue: _hidType,
+            items: [
+              for (var i = 1; i <= 30; i++)
+                DropdownMenuItem(
+                  value: i,
+                  child: Text(getNameForHIDProxType(i)),
+                ),
+            ],
+            onChanged: (v) => setState(() => _hidType = v ?? 1),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _field(
+          'facilityCode',
+          _intForm(
+            _facilityCtrl,
+            validator: (v) => _validateIntRange(
+              v,
+              min: 0,
+              max: 0xFFFFFFFF,
+              fieldName: 'facilityCode',
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _field(
+          'issueLevel',
+          _intForm(
+            _issueLevelCtrl,
+            validator: (v) =>
+                _validateIntRange(v, min: 0, max: 255, fieldName: 'issueLevel'),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _field(
+          'OEM',
+          _intForm(
+            _oemCtrl,
+            validator: (v) =>
+                _validateIntRange(v, min: 0, max: 65535, fieldName: 'OEM'),
+          ),
+        ),
+      ]);
     }
     return children;
   }
@@ -1249,7 +1415,7 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       const SizedBox(height: 14),
       const Divider(),
       const SizedBox(height: 8),
-      _field('Ultralight 版本', _hexField(_ulVersionCtrl, 0)),
+      _field('Ultralight 版本', _hexForm(_ulVersionCtrl, fieldName: '版本')),
       const SizedBox(height: 10),
       _signatureRow(),
     ];
@@ -1294,7 +1460,12 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
 
   Widget _signatureRow() => Row(
     children: [
-      Expanded(child: _field('Ultralight 签名', _hexField(_ulSignatureCtrl, 0))),
+      Expanded(
+        child: _field(
+          'Ultralight 签名',
+          _hexForm(_ulSignatureCtrl, fieldName: '签名'),
+        ),
+      ),
       const SizedBox(width: 8),
       TextButton.icon(
         onPressed: _randomSignature,
@@ -1310,13 +1481,19 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
 
   Widget _counterRow(int index) => _field(
     'Ultralight 计数器 ${index + 1}',
-    TextField(
+    TextFormField(
       controller: _ulCounterCtrls[index],
       keyboardType: TextInputType.number,
       decoration: const InputDecoration(
         border: OutlineInputBorder(),
         isDense: true,
         hintText: '0 - 16777215',
+      ),
+      validator: (v) => _validateIntRange(
+        v,
+        min: 0,
+        max: 16777215,
+        fieldName: '计数器 ${index + 1}',
       ),
     ),
   );
@@ -1336,14 +1513,102 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     ],
   );
 
-  Widget _hexField(TextEditingController ctrl, int? bytes) => TextField(
+  Widget _hexForm(
+    TextEditingController ctrl, {
+    int? exactBytes,
+    bool required = false,
+    String? fieldName,
+    String? Function(String?)? validator,
+  }) => TextFormField(
     controller: ctrl,
     keyboardType: TextInputType.text,
     decoration: const InputDecoration(
       border: OutlineInputBorder(),
       isDense: true,
     ),
+    validator:
+        validator ??
+        ((v) => _validateHex(
+          v,
+          exactBytes: exactBytes,
+          required: required,
+          fieldName: fieldName ?? '',
+        )),
   );
+
+  Widget _intForm(
+    TextEditingController ctrl, {
+    String? Function(String?)? validator,
+  }) => TextFormField(
+    controller: ctrl,
+    keyboardType: TextInputType.number,
+    decoration: const InputDecoration(
+      border: OutlineInputBorder(),
+      isDense: true,
+    ),
+    validator: validator,
+  );
+
+  /// 卡槽名称校验（对齐 CU validateName：必填 + 最多 19 字符）
+  String? _validateName(String? value) {
+    final v = (value ?? '').trim();
+    if (v.isEmpty) return '请输入卡槽名称';
+    if (v.length > 19) return '卡槽名称过长（最多 19 字符）';
+    return null;
+  }
+
+  /// 16 进制校验（对齐 CU validateHex）
+  String? _validateHex(
+    String? value, {
+    int? exactBytes,
+    bool required = false,
+    String? fieldName,
+  }) {
+    final clean = (value ?? '').replaceAll(RegExp(r'[\s-]'), '');
+    if (clean.isEmpty) {
+      return required ? '请输入 ${fieldName ?? ''}' : null;
+    }
+    if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean) || clean.length % 2 != 0) {
+      return '${fieldName ?? '输入'} 必须是合法 16 进制';
+    }
+    if (exactBytes != null && clean.length != exactBytes * 2) {
+      return '${fieldName ?? ''} 应为 $exactBytes 字节';
+    }
+    return null;
+  }
+
+  /// UID 校验（对齐 CU validateUid 非 create 模式：HF 4/7/10 字节，LF 按卡型）
+  String? _validateUid(String? value) {
+    final clean = (value ?? '').replaceAll(RegExp(r'[\s-]'), '');
+    if (clean.isEmpty) return '请输入 UID';
+    final type = _type;
+    if (type == null) return null;
+    if (isHfTag(type)) {
+      if (![8, 14, 20].contains(clean.length)) {
+        return 'UID 应为 4、7 或 10 字节';
+      }
+      return null;
+    }
+    final bytes = lfUidSize(type);
+    if (bytes > 0 && clean.length != bytes * 2) {
+      return 'UID 应为 $bytes 字节';
+    }
+    return null;
+  }
+
+  /// 整数范围校验（对齐 CU validateIntRange）
+  String? _validateIntRange(
+    String? value, {
+    required int min,
+    required int max,
+    String? fieldName,
+  }) {
+    final v = int.tryParse((value ?? '').trim());
+    if (v == null || v < min || v > max) {
+      return '${fieldName ?? '数值'} 范围为 $min - $max';
+    }
+    return null;
+  }
 
   Widget _toggleRow(
     String title,
@@ -1541,61 +1806,19 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
 
   Future<void> _save() async {
     if (_saving) return;
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      _toast('请输入卡槽名称');
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedType == 0) {
+      _toast('请选择卡型');
       return;
-    }
-    if (name.length > 19) {
-      _toast('卡槽名称过长（最多 19 字符）');
-      return;
-    }
-
-    if (widget.isHf) {
-      final uid = formatHexInput(_uidCtrl.text);
-      final sak = formatHexInput(_sakCtrl.text);
-      final atqa = formatHexInput(_atqaCtrl.text);
-      final ats = formatHexInput(_atsCtrl.text);
-      if (uid.isEmpty || sak.isEmpty || atqa.isEmpty) {
-        _toast('UID / SAK / ATQA 为必填项');
-        return;
-      }
-      if (_isUltralight && uid.length != 14) {
-        _toast('Ultralight 卡 UID 应为 7 字节');
-        return;
-      }
-      if (_isClassic && uid.length != 8) {
-        _toast('Classic 卡 UID 应为 4 字节');
-        return;
-      }
-      if (sak.length != 2) {
-        _toast('SAK 应为 1 字节');
-        return;
-      }
-      if (atqa.length != 4) {
-        _toast('ATQA 应为 2 字节');
-        return;
-      }
-      if (ats.isNotEmpty && ats.length > 16) {
-        _toast('ATS 最多 8 字节');
-        return;
-      }
-      for (var i = 0; i < _counterCount; i++) {
-        final counter = _ulCounterCtrls[i].text.trim();
-        final v = int.tryParse(counter);
-        if (v == null || v < 0 || v > 0xFFFFFF) {
-          _toast('Ultralight 计数器范围为 0 - 16777215');
-          return;
-        }
-      }
     }
 
     setState(() => _saving = true);
     try {
+      final name = _nameCtrl.text.trim();
       if (widget.isHf) {
         await _saveHf(name);
       } else {
-        await _applyNameAndType(name);
+        await _saveLf(name);
       }
       if (!mounted) return;
       Navigator.pop(context);
@@ -1609,27 +1832,37 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     }
   }
 
-  /// 写入卡名与标签类型（LF 卡槽 / HF 卡槽的通用部分）
-  Future<void> _applyNameAndType(String name) async {
-    final device = widget.app.device;
-    await device.cmdSlotSetFreqName(widget.slot, widget.isHf ? 2 : 1, name);
-    if (_selectedType > 0 && _selectedType != widget.initialType) {
-      await device.cmdSlotChangeTagType(widget.slot, _selectedType);
+  /// 切换卡型（对齐 CU save：1004 后仅跨家族才走 1005 重置默认数据）
+  Future<void> _applyTypeChange(DeviceService device) async {
+    if (_selectedType <= 0 || _selectedType == widget.initialType) return;
+    await device.cmdSlotChangeTagType(widget.slot, _selectedType);
+    if (_needResetData(widget.initialType, _selectedType)) {
       await device.cmdSlotResetTagType(widget.slot, _selectedType);
     }
-    await device.cmdSlotSaveSettings();
+  }
+
+  /// 是否需要在切卡型后重置默认数据（对齐 CU：Classic/Ultralight 同家族切换跳过）
+  bool _needResetData(int oldType, int newType) {
+    if (oldType == 0 || newType == 0) return true;
+    final oldT = TagType.values.where((e) => e.value == oldType).firstOrNull;
+    final newT = TagType.values.where((e) => e.value == newType).firstOrNull;
+    if (oldT == null || newT == null) return true;
+    if (isMifareClassic(oldT) && isMifareClassic(newT)) return false;
+    if (isMifareUltralight(oldT) && isMifareUltralight(newT)) return false;
+    return true;
   }
 
   /// 保存 HF 卡槽（对齐 CU edit.dart save 顺序）
   Future<void> _saveHf(String name) async {
     final device = widget.app.device;
+    await device.cmdSlotSetActive(widget.slot);
+    await _applyTypeChange(device);
+
     final uid = hexToUint8List(_uidCtrl.text);
     final atqa = hexToUint8List(_atqaCtrl.text);
     final sak = hexToUint8List(_sakCtrl.text);
     final atsText = formatHexInput(_atsCtrl.text);
     final ats = atsText.isEmpty ? null : hexToUint8List(atsText);
-
-    await device.cmdSlotSetFreqName(widget.slot, 2, name);
     await device.cmdHf14aSetAntiCollData(
       uid: uid,
       atqa: atqa,
@@ -1638,20 +1871,6 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
     );
     if (_isUltralight) {
       await _writeUltralightData();
-    }
-
-    if (_selectedType > 0 && _selectedType != widget.initialType) {
-      await device.cmdSlotChangeTagType(widget.slot, _selectedType);
-      await device.cmdSlotResetTagType(widget.slot, _selectedType);
-      await device.cmdHf14aSetAntiCollData(
-        uid: uid,
-        atqa: atqa,
-        sak: sak,
-        ats: ats,
-      );
-      if (_isUltralight) {
-        await _writeUltralightData();
-      }
     }
 
     if (_isClassic) {
@@ -1672,25 +1891,76 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       await device.cmdMf0EmuSetWriteMode(_ulWriteMode);
     }
 
+    await device.cmdSlotSetFreqName(widget.slot, 2, name);
     await device.cmdSlotSaveSettings();
   }
 
-  /// 写入 Ultralight 版本 / 签名 / 计数器
+  /// 保存 LF 卡槽（对齐 CU edit.dart save 的 LF 分支）
+  Future<void> _saveLf(String name) async {
+    final device = widget.app.device;
+    await device.cmdSlotSetActive(widget.slot);
+    await _applyTypeChange(device);
+    await _writeLfUid(device);
+    await device.cmdSlotSetFreqName(widget.slot, 1, name);
+    await device.cmdSlotSaveSettings();
+  }
+
+  /// 写入 LF 模拟 ID（按卡型分发到对应的 5xxx 命令）
+  Future<void> _writeLfUid(DeviceService device) async {
+    final type = _type;
+    if (type == null) return;
+    if (type == TagType.hidProx) {
+      final cardHex = hidProxUidFromParts(
+        _hidType,
+        int.parse(_facilityCtrl.text.trim()),
+        hexToUint8List(_uidCtrl.text),
+        int.parse(_issueLevelCtrl.text.trim()),
+        int.parse(_oemCtrl.text.trim()),
+      );
+      await device.cmdHidProxSetEmuId(hexToUint8List(cardHex));
+      return;
+    }
+    final uid = hexToUint8List(_uidCtrl.text);
+    switch (type) {
+      case TagType.em410X:
+      case TagType.em410X16:
+      case TagType.em410X32:
+      case TagType.em410X64:
+      case TagType.em410XElectra:
+        await device.cmdEm410xSetEmuId(uid);
+        break;
+      case TagType.viking:
+        await device.cmdVikingSetEmuId(uid);
+        break;
+      case TagType.pac:
+        await device.cmdPacSetEmuId(uid);
+        break;
+      case TagType.ioProx:
+        await device.cmdIoProxSetEmuId(uid);
+        break;
+      case TagType.idteck:
+        await device.cmdIdteckSetEmuId(uid);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /// 写入 Ultralight 版本 / 签名 / 计数器（无条件写入，空值即清空，对齐 CU）
   Future<void> _writeUltralightData() async {
     final device = widget.app.device;
     final versionText = formatHexInput(_ulVersionCtrl.text);
-    if (versionText.isNotEmpty) {
-      await device.cmdMf0EmuSetVersionData(hexToUint8List(versionText));
-    }
+    await device.cmdMf0EmuSetVersionData(
+      versionText.isEmpty ? Uint8List(0) : hexToUint8List(versionText),
+    );
     final signatureText = formatHexInput(_ulSignatureCtrl.text);
-    if (signatureText.isNotEmpty) {
-      await device.cmdMf0EmuSetSignatureData(hexToUint8List(signatureText));
-    }
+    await device.cmdMf0EmuSetSignatureData(
+      signatureText.isEmpty ? Uint8List(0) : hexToUint8List(signatureText),
+    );
     for (var i = 0; i < _counterCount; i++) {
       final counter = _ulCounterCtrls[i].text.trim();
-      if (counter.isNotEmpty) {
-        await device.cmdMf0EmuSetCounterData(i, int.parse(counter), true);
-      }
+      final v = int.tryParse(counter) ?? 0;
+      await device.cmdMf0EmuSetCounterData(i, v, true);
     }
   }
 
