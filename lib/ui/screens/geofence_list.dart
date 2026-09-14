@@ -34,7 +34,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   bool _positionLoaded = false;
   bool _followMe = true;
   String _statusMessage = '';
-  String _positionSource = '未定位';
 
   String? _dragFenceId;
   LatLng? _dragStartLatLng;
@@ -97,8 +96,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     setState(() {
       _currentPosition = target;
       _positionLoaded = true;
-      _positionSource =
-          nativePos != null ? '原生定位服务' : 'Dart定位(GPS+WGS84转GCJ02)';
       _statusMessage = '已定位到当前位置';
     });
     await _mapReadyCompleter.future;
@@ -296,7 +293,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     if (latest != null && latest != _currentPosition) {
       _currentPosition = latest;
       _positionLoaded = true;
-      _positionSource = '原生定位服务';
       if (_followMe) {
         final zoom = _mapController.camera.zoom;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -525,15 +521,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
               Icons.pin_drop,
               '坐标 ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
               Colors.blueGrey,
-              textStyle,
-            ),
-          if (_positionLoaded)
-            _diagRow(
-              Icons.navigation,
-              '蓝点 ${_currentPosition.latitude.toStringAsFixed(5)}, '
-                  '${_currentPosition.longitude.toStringAsFixed(5)} '
-                  '($_positionSource)',
-              Colors.cyan,
               textStyle,
             ),
           _diagRow(
