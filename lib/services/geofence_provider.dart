@@ -29,6 +29,11 @@ class GeofenceProvider extends ChangeNotifier {
   final List<String> _logs = <String>[];
 
   List<String> get logs => List.unmodifiable(_logs);
+
+  /// 围栏进出事件（命中/离开），供诊断栏与事件列表展示
+  List<String> get eventLogs => _logs
+      .where((l) => l.contains('命中围栏') || l.contains('离开围栏'))
+      .toList();
   List<Geofence> get fences => List.unmodifiable(_fences);
   bool get enabled => _enabled;
   bool get userEnabled => _userEnabled;
@@ -293,11 +298,7 @@ class GeofenceProvider extends ChangeNotifier {
     final prevId = _lastMatchedFenceNameFromId;
     if (match != null) {
       final entering = prevId != match.id;
-      if (entering) {
-        _log('命中围栏 ${match.name} slot=${match.slotNumber} '
-            '卡库模式=${match.cardLibraryMode} '
-            'IC卡=${match.icCardId} ID卡=${match.idCardId}');
-      }
+      if (entering) _log('命中围栏 ${match.name}');
       _lastMatchedFenceName = match.name;
       if (_activateSlot != null && match.slotNumber != _lastActivatedSlot) {
         final switched = _activateSlot!(match.slotNumber);

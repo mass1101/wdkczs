@@ -488,6 +488,8 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     final time = _geo.lastPositionTime;
     final pos = _geo.lastPosition;
     final matched = _geo.lastMatchedFenceName;
+    final events = _geo.eventLogs;
+    final latestEvent = events.isEmpty ? null : events.last.split('] ').last;
     final bg = (isDark ? Colors.black87 : Colors.white).withValues(alpha: 0.9);
     final textStyle = TextStyle(
       fontSize: 11,
@@ -529,6 +531,15 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             matched != null ? Colors.orange : Colors.grey,
             textStyle,
           ),
+          if (latestEvent != null)
+            _diagRow(
+              latestEvent.contains('命中')
+                  ? Icons.arrow_circle_down
+                  : Icons.exit_to_app,
+              '最新事件 $latestEvent',
+              Colors.purple,
+              textStyle,
+            ),
           if (_geo.uploadStatus != null)
             _diagRow(
               _geo.uploadStatus == '卡片上传成功'
@@ -545,12 +556,84 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
               Colors.teal,
               textStyle,
             ),
+          if (events.isNotEmpty)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _showEventLogs,
+                icon: const Icon(Icons.history, size: 13),
+                label: Text('事件 ${events.length}'),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  visualDensity: VisualDensity.compact,
+                  textStyle: textStyle.copyWith(color: Colors.purple),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _diagRow(IconData icon, String text, Color color, TextStyle style) {
+  void _showEventLogs() {
+    final events = _geo.eventLogs.reversed.toList();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.history, size: 20),
+            SizedBox(width: 8),
+            Expanded(child: Text('围栏事件')),
+          ],
+        ),
+        content: events.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('暂无围栏进出记录'),
+              )
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: events.length,
+                  itemBuilder: (_, i) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Text(
+                      events[i],
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _geo.clearLogs();
+              Navigator.pop(ctx);
+            },
+            child: const Text('清空日志'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _diagRow(
+    IconData icon,
+    String text,
+    Color color,
+    TextStyle style, {
+    double? maxWidth,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Row(
@@ -558,7 +641,14 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
         children: [
           Icon(icon, size: 13, color: color),
           const SizedBox(width: 5),
-          Text(text, style: style.copyWith(color: color)),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth ?? 200),
+            child: Text(
+              text,
+              style: style.copyWith(color: color),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );

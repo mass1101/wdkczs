@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -55,16 +57,22 @@ class _CardViewDialogState extends State<CardViewDialog> {
       );
   }
 
-  Future<void> _exportDump() async {
-    final bytes = cardSaveToBin(_card);
-    if (bytes.isEmpty) {
-      _toast('该卡片无数据，无法导出 dump');
-      return;
+  Future<void> _exportFile() async {
+    final name = (_card.name.isEmpty ? _card.uid : _card.name).trim();
+    final classic = isMifareClassic(_card.tag);
+    late Uint8List bytes;
+    if (classic) {
+      bytes = cardSaveToBin(_card);
+      if (bytes.isEmpty) {
+        _toast('该卡片无数据，无法导出 bin');
+        return;
+      }
+    } else {
+      bytes = Uint8List.fromList(utf8.encode(_card.toJson()));
     }
     try {
-      final name = (_card.name.isEmpty ? _card.uid : _card.name).trim();
       final uri = await FilePicker.platform.saveFile(
-        fileName: '$name.bin',
+        fileName: classic ? '$name.bin' : '$name.json',
         bytes: bytes,
       );
       if (!mounted) return;
@@ -309,9 +317,11 @@ class _CardViewDialogState extends State<CardViewDialog> {
                     },
                   ),
                 ActionChip(
-                  label: const Text('导出 dump'),
+                  label: Text(
+                    isMifareClassic(_card.tag) ? '导出 bin' : '导出 json',
+                  ),
                   avatar: const Icon(Icons.download, size: 18),
-                  onPressed: _exportDump,
+                  onPressed: _exportFile,
                 ),
                 ActionChip(
                   label: const Text('删除'),
