@@ -116,6 +116,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     if (!mounted) return;
     if (target == null) {
       setState(() => _statusMessage = '定位失败：请检查定位权限');
+      _promptLocationPermission();
       return;
     }
     setState(() {
@@ -128,6 +129,36 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     } catch (_) {}
     if (!mounted) return;
     _mapController.move(target, 16.0);
+  }
+
+  /// 未获得定位权限时的引导：定位权限决定地图定位与跟随能否工作
+  Future<void> _promptLocationPermission() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('未获得定位权限：请在系统设置中开启定位，否则地图与跟随不可用'),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: '去设置',
+          onPressed: () async {
+            await Geolocator.openAppSettings();
+            if (!mounted) return;
+            final st = await Geolocator.checkPermission();
+            final granted = st == LocationPermission.always ||
+                st == LocationPermission.whileInUse;
+            if (!granted) {
+              _toast('定位权限仍未开启，无法定位与跟随');
+              return;
+            }
+            await _geo.startMapPositionStream();
+            if (!mounted) return;
+            _toast('定位权限已开启，地图开始跟随');
+            _locateMe();
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> _enterFloatingWindow() async {

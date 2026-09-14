@@ -172,6 +172,9 @@ class GeofenceProvider extends ChangeNotifier {
       _log('定位权限未授予，地图位置流未启动');
       return;
     }
+    // 权限确认（含系统弹窗）期间页面可能已退出，此时不应再建订阅，
+    // 否则残留订阅既不会被取消，也会在无人监听时持续回调
+    if (_mapPositionRefs == 0) return;
     _mapPositionSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
