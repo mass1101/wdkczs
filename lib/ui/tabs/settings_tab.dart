@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -179,16 +180,18 @@ class _SettingsTabState extends State<SettingsTab> {
       await _app.ble.connect(target);
 
       if (!mounted) return;
+      // 显示进度条对话框（对齐 CU 的 SnackBar + progress bar）
+      final progressCompleter = Completer<void>();
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const AlertDialog(
-          title: Text('固件刷写中...', style: TextStyle(fontSize: 16)),
-          content: Text('正在传输固件，请勿断开设备'),
-        ),
+        builder: (ctx) => _dfuProgressDialog(ctx, progressCompleter.future),
       );
       try {
-        await _app.dfuUpdateFromUrl(url);
+        await _app.dfuUpdateFromUrl(url,
+            onProgress: (progress) {
+          // progress 是百分比 0-100
+        });
       } finally {
         if (mounted) Navigator.of(context).pop();
       }
@@ -196,6 +199,41 @@ class _SettingsTabState extends State<SettingsTab> {
     } catch (e) {
       _toast('刷写失败: $e');
     }
+  }
+
+  /// DFU 刷写进度对话框（对齐 CU 的进度显示）
+  Widget _dfuProgressDialog(BuildContext ctx, Future<void> future) {
+    return FutureBuilder<void>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done && snapshot.hasError) {
+          return AlertDialog(
+            title: const Text('刷写失败', style: TextStyle(fontSize: 16)),
+            content: Text(snapshot.error.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('关闭'),
+              ),
+            ],
+          );
+        }
+        return AlertDialog(
+          title: const Text('固件刷写中...', style: TextStyle(fontSize: 16)),
+          content: const SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(),
+                SizedBox(height: 12),
+                Text('正在传输固件，请勿断开设备'),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   // ========== 配对密钥编辑 ==========

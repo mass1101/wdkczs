@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../ble/ble_service.dart';
+import '../bridge/dfu.dart';
 import 'log_service.dart';
 import '../models/enums.dart';
 import '../models/models.dart';
@@ -20,23 +21,20 @@ class DeviceException implements Exception {
       '${DeviceStatus.message(status)} (status=$status) $message';
 }
 
-/// 是否错误状态码
-/// 设备错误状态码集合（对应逆向 rk：HF 1-8 / LF 65-67 / 通用错误）
-/// 成功码：0 (HF), 64 (LF), 104 (Device) 均不在该集合中
-final Set<int> _errorStatuses = {1, 2, 3, 4, 5, 6, 7, 8, 65, 66, 67, 96, 102, 103, 105, 112, 113, 114};
-
-bool _isErrStatus(int s) => _errorStatuses.contains(s);
-
 /// 设备命令层：封装 UltraFrame 协议的全部命令（对应逆向 Kk 类）
 class DeviceService {
   final BleService _ble;
   bool _ready = false;
   final _pending = <int, Completer<Uint8List>>{};
-  final _dfuPending = <int, Completer<Uint8List>>{};
   StreamSubscription? _sub;
   Future<void> _txQueue = Future.value();
 
-  DeviceService(this._ble);
+  /// DFU 通信器（对齐 CU DFUCommunicator）
+  late final DFUCommunicator _dfu;
+
+  DeviceService(this._ble) {
+    _dfu = DFUCommunicator(_ble, viaBLE: true);
+  }
 
   /// 初始化（监听接收流，解析响应帧，支持 BLE 粘包/分片重组）
   void init() {
@@ -45,10 +43,6 @@ class DeviceService {
     var buf = Uint8List(0);
     _sub = _ble.rx.listen((bytes) {
       if (bytes.isEmpty) return;
-      if (bytes[0] == 0x60) {
-        _handleDfuFrame(bytes);
-        return;
-      }
       buf = _concat(buf, bytes);
       try {
         for (;;) {
@@ -62,35 +56,39 @@ class DeviceService {
             }
           }
           if (magicAt < 0) {
-            buf = Uint8List(0);
+            if (buf.length > 4096) {
+              buf = Uint8List.fromList(buf.sublist(buf.length - 2));
+            }
             break;
           }
-          if (magicAt > 0) buf = buf.sublist(magicAt);
-          if (buf.length < 10) break;
-          // 头 LRC 校验（第 0..7 字节，第 8 字节为 LRC）
-          if (!UltraFrame.checkHeadLrc(buf)) {
-            buf = buf.sublist(1);
+          if (magicAt > 0) {
+            buf = Uint8List.fromList(buf.sublist(magicAt));
+          }
+          // 解析帧长度
+          if (buf.length < 8) break;
+          final len = buf[6] | (buf[7] << 8);
+          final totalLen = len + 8 + 4; // magic(2) + seq(4) + data(len) + crc(4)
+          if (buf.length < totalLen) break;
+          // CRC32 校验
+          final payload = buf.sublist(2, totalLen - 4);
+          final crcStored = buf[totalLen - 4] | (buf[totalLen - 3] << 8) | (buf[totalLen - 2] << 16) | (buf[totalLen - 1] << 24);
+          final crcCalc = _crc32(payload);
+          if (crcCalc != crcStored) {
+            buf = Uint8List.fromList(buf.sublist(magicAt + 2));
             continue;
           }
-          final bd = ByteData.sublistView(buf);
-          final len = bd.getUint16(6);
-          final total = len + 10;
-          if (buf.length < total) break; // 等待后续分片
-          final frame = buf.sublist(0, total);
-          buf = buf.sublist(total);
-          if (!UltraFrame.checkLrc(frame)) continue;
-          final (cmd, status, data) = UltraFrame.decode(frame);
-          final completer = _pending.remove(cmd);
+          // 解析命令 ID 和数据
+          final cmdId = buf[2] | (buf[3] << 8) | (buf[4] << 16) | (buf[5] << 24);
+          final data = buf.sublist(8, totalLen - 4);
+          final completer = _pending.remove(cmdId);
           if (completer != null) {
-            if (_isErrStatus(status)) {
-              completer.completeError(DeviceException(status, ''));
-            } else {
-              completer.complete(data);
-            }
+            completer.complete(data);
           }
+          buf = Uint8List.fromList(buf.sublist(totalLen));
         }
       } catch (e) {
-        debugPrint('frame decode error: $e');
+        debugPrint('Frame parse error: $e');
+        buf = Uint8List(0);
       }
     });
   }
@@ -452,139 +450,26 @@ class DeviceService {
     await _request(Cmd.deleteAllBleBonds.value, null);
   }
 
-  // ========== DFU 固件刷写（对应逆向 DfuFrame / DfuZip） ==========
+  // ========== DFU 固件刷写（对齐 CU DFUCommunicator） ==========
 
   /// 进入 DFU 模式（cmd 1010），设备随后断开进入 bootloader
   Future<void> cmdDfuEnter() async {
     await _request(Cmd.enterBootloader.value, null);
   }
 
-  /// DFU 模式下向 bootloader 发送协议帧（op + data），返回响应数据
-  Future<Uint8List> _dfuRequest(int op, [Uint8List? data]) async {
-    final d = data ?? Uint8List(0);
-    final buf = Uint8List(1 + d.length);
-    buf[0] = op;
-    if (d.isNotEmpty) buf.setRange(1, 1 + d.length, d);
-    final completer = Completer<Uint8List>();
-    _dfuPending[op] = completer;
-    try {
-      await _ble.dfuWrite(buf);
-      return await completer.future.timeout(const Duration(seconds: 10));
-    } on TimeoutException {
-      _dfuPending.remove(op);
-      throw DeviceException(-2, 'DFU 响应超时');
-    } catch (e) {
-      _dfuPending.remove(op);
-      rethrow;
-    }
-  }
+  /// DFU 通信器访问（供外部调用）
+  DFUCommunicator get dfu => _dfu;
 
-  Future<int> cmdDfuGetProtocol() async {
-    final r = await _dfuRequest(0);
-    return r.isEmpty ? 0 : r[0];
-  }
-
-  Future<void> cmdDfuCreateObject(int type, int size) async {
-    final b = Uint8List(5);
-    b[0] = type;
-    ByteData.sublistView(b).setUint32(1, size, Endian.little);
-    await _dfuRequest(1, b);
-  }
-
-  Future<void> cmdDfuSetPrn(int prn) async {
-    final b = Uint8List(4);
-    ByteData.sublistView(b).setUint32(0, prn, Endian.little);
-    await _dfuRequest(2, b);
-  }
-
-  Future<(int, int)> cmdDfuGetObjectCrc() async {
-    final r = await _dfuRequest(3);
-    final bd = ByteData.sublistView(r);
-    return (bd.getUint32(0, Endian.little), bd.getUint32(4, Endian.little));
-  }
-
-  Future<void> cmdDfuExecuteObject() async {
-    await _dfuRequest(4);
-  }
-
-  Future<({int offset, int crc, int maxSize})> cmdDfuSelectObject(
-      int type) async {
-    final r = await _dfuRequest(6, Uint8List.fromList([type]));
-    final bd = ByteData.sublistView(r);
-    return (
-      offset: bd.getUint32(1, Endian.little),
-      crc: bd.getUint32(5, Endian.little),
-      maxSize: bd.getUint32(9, Endian.little),
-    );
-  }
-
-  Future<int> cmdDfuGetMtu() async {
-    final r = await _dfuRequest(7);
-    if (r.length < 2) return 0;
-    return ByteData.sublistView(r).getUint16(0, Endian.little);
-  }
-
-  Future<int> cmdDfuPing(int id) async {
-    final r = await _dfuRequest(9, Uint8List.fromList([id]));
-    return r.isEmpty ? 0 : r[0];
-  }
-
-  Future<void> cmdDfuAbort() async {
-    await _dfuRequest(12);
-  }
-
-  /// 更新单个对象（对应逆向 dfuUpdateObject：select→分段 create/write→crc 校验→execute）
-  Future<void> dfuUpdateObject(
-      int type, Uint8List data, void Function(int offset, int size)? onProgress) async {
-    var selected = await cmdDfuSelectObject(type);
-    if (selected.offset == data.length) {
-      // 对象已完整上传
-      if (onProgress != null) onProgress(data.length, data.length);
-      return;
-    }
-    if (selected.offset > 0) {
-      // 已存在部分对象：校验已上传偏移的 CRC，不一致则中止重建
-      final expected = _crc32(data.sublist(0, selected.offset));
-      if (selected.crc != expected) {
-        await cmdDfuAbort();
-        selected = await cmdDfuSelectObject(type);
-      }
-    }
-    if (onProgress != null) onProgress(0, data.length);
-    final mtu = await cmdDfuGetMtu();
-    final chunkSize = mtu > 0 ? mtu : 20;
-    var offset = selected.offset > 0 ? selected.offset : 0;
-    var failures = 0;
-    while (offset < data.length) {
-      final size = (data.length - offset) < chunkSize
-          ? (data.length - offset)
-          : chunkSize;
-      final chunk = data.sublist(offset, offset + size);
-      await cmdDfuCreateObject(type, chunk.length);
-      await _ble.dfuWrite(chunk);
-      final (crcOff, crcVal) = await cmdDfuGetObjectCrc();
-      final expected = _crc32(data.sublist(0, offset + chunk.length));
-      if (crcOff == offset + chunk.length && crcVal == expected) {
-        await cmdDfuExecuteObject();
-        offset += chunk.length;
-        failures = 0;
-        if (onProgress != null) onProgress(offset, data.length);
-      } else {
-        failures++;
-        if (failures > 10) throw DeviceException(-1, 'crc32 check failed 10 times');
-        await cmdDfuSelectObject(type);
-      }
-    }
-  }
-
-  /// 刷写固件镜像（header 对象 + body 对象）
+  /// 刷写固件镜像（对齐 CU flashFile 流程）
   Future<void> dfuUpdateImage({
     required Uint8List header,
     required Uint8List body,
-    void Function(int offset, int size)? onProgress,
+    void Function(int progress)? onProgress,
   }) async {
-    await dfuUpdateObject(1, header, onProgress);
-    await dfuUpdateObject(2, body, onProgress);
+    await _dfu.setPRN();
+    await _dfu.getMTU();
+    await _dfu.flashFirmware(0x01, header, onProgress ?? (_) {});
+    await _dfu.flashFirmware(0x02, body, onProgress ?? (_) {});
     // 等待重启（逆向等待最多 5000ms 后断开）
     for (var t = 0; t < 50 && isConnected(); t++) {
       await Future.delayed(const Duration(milliseconds: 10));
@@ -611,25 +496,6 @@ class DeviceService {
       crc = (crc >> 8) ^ _crcTable[(crc ^ b) & 0xFF];
     }
     return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
-  }
-
-  // DFU 响应帧监听（qk：buf[0]==0x60 表示响应）
-  void _handleDfuFrame(Uint8List bytes) {
-    if (bytes.isEmpty) return;
-    if (bytes[0] != 0x60) {
-      debugPrint('DFU frame: not resp: ${bytes.map((b) => b.toRadixString(16)).join()}');
-      return;
-    }
-    if (bytes.length < 3) return;
-    final op = bytes[1];
-    final result = bytes.length > 2 ? bytes[2] : 0;
-    final completer = _dfuPending.remove(op);
-    if (completer == null) return;
-    if (result != 1) {
-      completer.completeError(DeviceException(result, 'DFU 操作失败 (op=$op)'));
-      return;
-    }
-    completer.complete(bytes.sublist(3));
   }
 
   Future<int> cmdGetDeviceModel() async {

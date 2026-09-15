@@ -40,6 +40,7 @@ class BleService {
   StreamSubscription<List<int>>? _notifySub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   bool _autoReconnect = false;
+  void Function(List<int>)? _dfuCallback;
 
   /// 是否 ChameleonUltra（非 CU- 系列）
   bool get isChameleonUltra => !_isCu;
@@ -145,7 +146,13 @@ class BleService {
     await _notifySub?.cancel();
     _notifySub = _notifyChar!.lastValueStream.listen((value) {
       if (value.isNotEmpty) {
-        _rxController.add(Uint8List.fromList(value));
+        final data = Uint8List.fromList(value);
+        // DFU 响应帧（首字节 0x60）优先交给 DFU 回调
+        if (data.isNotEmpty && data[0] == 0x60 && _dfuCallback != null) {
+          _dfuCallback?.call(value);
+          return;
+        }
+        _rxController.add(data);
       }
     });
 
@@ -268,6 +275,11 @@ class BleService {
       final chunk = data.sublist(i, end);
       await _writeWithRetry(_dfuWriteChar!, chunk, withoutResponse: true);
     }
+  }
+
+  /// 注册 DFU 回调（对齐 CU registerCallback）
+  void registerDfuCallback(void Function(List<int>)? callback) {
+    _dfuCallback = callback;
   }
 
   Future<void> disconnect() async {

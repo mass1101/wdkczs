@@ -349,10 +349,10 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// DFU 固件刷写（进入 DFU → 解析固件包 → 传输镜像）
+  /// DFU 固件刷写（对齐 CU flashFirmware 流程：下载 → 解析 → setPRN → getMTU → flashFirmware）
   Future<void> dfuUpdateFromUrl(
     String url, {
-    void Function(int offset, int size)? onProgress,
+    void Function(int progress)? onProgress,
   }) async {
     final httpRes = await _httpGetBytes(url);
     final zip = DfuZip(httpRes);

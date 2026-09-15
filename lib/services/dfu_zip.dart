@@ -50,9 +50,25 @@ class DfuZip {
       if (dat == null || bin == null) {
         throw Exception('Failed to read ${entry['dat_file']}/${entry['bin_file']} from DFU package');
       }
+      validateImage(dat, bin);
       return (type: key, header: dat, body: bin);
     }
     return null;
+  }
+
+  /// 验证镜像（对齐 CU validateFiles 的基本检查）
+  static void validateImage(Uint8List dat, Uint8List bin) {
+    if (dat.isEmpty || bin.isEmpty) {
+      throw Exception('Empty firmware file');
+    }
+    // 检查 dat 最小大小（nRF DFU header 至少 64 字节）
+    if (dat.length < 64) {
+      throw Exception('Invalid DFU header: too small (${dat.length} bytes)');
+    }
+    // 检查 bin 大小合理性（固件镜像通常 > 1KB）
+    if (bin.length < 1024) {
+      throw Exception('Invalid firmware binary: too small (${bin.length} bytes)');
+    }
   }
 
   /// 获取应用镜像（application）
