@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -157,83 +160,130 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  // ========== 固件刷写 ==========
+  // ========== 固件刷写（对齐 CU flashFile 流程） ==========
+  static const _firmwareUrls = [
+    'https://raw.giteeusercontent.com/zzx1101/JL-version/raw/master/80LXWL-dfu-full.zip',
+  ];
+
   Future<void> _dfuUpdate() async {
     if (!_app.connected) {
       _toast('设备未连接');
       return;
     }
-    const url =
-        'https://raw.giteeusercontent.com/zzx1101/JL-version/raw/master/80LXWL-dfu-full.zip';
-    _toast('正在下载固件...');
+    await _performDfuFlash(
+      title: '正在下载固件...',
+      flash: (onProgress) async {
+        await _app.dfuUpdateFromUrls(_firmwareUrls, onProgress: onProgress);
+      },
+    );
+  }
+
+  Future<void> _dfuUpdateFromLocal() async {
+    if (!_app.connected) {
+      _toast('设备未连接');
+      return;
+    }
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      dialogTitle: '选择固件包',
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final zipBytes = Uint8List.fromList(await File(file.path!).readAsBytes());
+    await _performDfuFlash(
+      title: '正在准备本地固件...',
+      flash: (onProgress) async {
+        await _app.dfuUpdateFromFile(zipBytes, onProgress: onProgress);
+      },
+    );
+  }
+
+  /// 执行 DFU 刷写流程（对齐 CU flashFile：enterDFU → disconnect → wait → scan → connect → flash）
+  Future<void> _performDfuFlash({
+    required String title,
+    required Future<void> Function(void Function(int progress) onProgress) flash,
+  }) async {
+    if (!mounted) return;
+    BuildContext? dialogCtx;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        dialogCtx = ctx;
+        return _dfuProgressDialog(ctx, title);
+      },
+    );
+
     try {
+      // 1. 进入 DFU 模式
       await _dev.cmdDfuEnter();
-      _toast('已进入 DFU 模式，正在连接 bootloader...');
-      final found = await _app.ble.scan(timeout: const Duration(seconds: 8));
-      final target = found.firstWhere(
-        (d) {
-          final n = d.platformName;
-          return n.isNotEmpty && (n.contains('DFU') || n.contains('CU-'));
-        },
-        orElse: () => found.isNotEmpty ? found.first : (throw Exception('未发现 DFU 设备，请确认设备已重启到 bootloader')),
-      );
+
+      // 2. 断开当前连接
+      await _app.ble.disconnect();
+
+      // 3. Android 延迟（BLE 比 USB 出现稍早）
+      if (Platform.isAndroid) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+
+      // 4. 无限循环扫描直到发现 DFU 设备
+      final target = await _scanForDfuDevice();
+      if (!mounted) return;
+
+      // 5. 连接 bootloader
       await _app.ble.connect(target);
 
-      if (!mounted) return;
-      // 显示进度条对话框（对齐 CU 的 SnackBar + progress bar）
-      final progressCompleter = Completer<void>();
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => _dfuProgressDialog(ctx, progressCompleter.future),
-      );
-      try {
-        await _app.dfuUpdateFromUrl(url,
-            onProgress: (progress) {
-          // progress 是百分比 0-100
-        });
-      } finally {
-        if (mounted) Navigator.of(context).pop();
+      // 6. 刷写固件
+      await flash((progress) {
+        if (dialogCtx != null && dialogCtx!.mounted) {
+          _updateDfuDialog(dialogCtx!, progress);
+        }
+      });
+
+      // 7. 成功
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        Navigator.of(dialogCtx!).pop();
+        _toast('刷写成功，设备将自动重启');
       }
-      _toast('刷写成功，设备将自动重启');
     } catch (e) {
-      _toast('刷写失败: $e');
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        Navigator.of(dialogCtx!).pop();
+        _toast('刷写失败: $e');
+      }
     }
   }
 
-  /// DFU 刷写进度对话框（对齐 CU 的进度显示）
-  Widget _dfuProgressDialog(BuildContext ctx, Future<void> future) {
-    return FutureBuilder<void>(
-      future: future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done && snapshot.hasError) {
-          return AlertDialog(
-            title: const Text('刷写失败', style: TextStyle(fontSize: 16)),
-            content: Text(snapshot.error.toString()),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('关闭'),
-              ),
-            ],
-          );
-        }
-        return AlertDialog(
-          title: const Text('固件刷写中...', style: TextStyle(fontSize: 16)),
-          content: const SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(),
-                SizedBox(height: 12),
-                Text('正在传输固件，请勿断开设备'),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+  /// 无限循环扫描 DFU 设备（对齐 CU while 循环）
+  Future<BluetoothDevice> _scanForDfuDevice() async {
+    while (true) {
+      await Future.delayed(const Duration(milliseconds: 250));
+      final found = await _app.ble.scan(timeout: const Duration(milliseconds: 500));
+      final targets = found
+          .where((d) {
+            final n = d.platformName;
+            return n.isNotEmpty && (n.contains('DFU') || n.contains('CU-'));
+          })
+          .toList();
+      if (targets.isEmpty) continue;
+
+      // 多设备检查（对齐 CU）
+      if (targets.length > 1) {
+        throw Exception('发现多个 DFU 设备，请只连接一个设备');
+      }
+
+      return targets[0];
+    }
+  }
+
+  /// 更新 DFU 进度对话框
+  void _updateDfuDialog(BuildContext ctx, int progress) {
+    final state = ctx.findAncestorStateOfType<_DfuDialogState>();
+    if (state != null) state.setProgress(progress);
+  }
+
+  /// DFU 刷写进度对话框
+  Widget _dfuProgressDialog(BuildContext ctx, String initialTitle) {
+    return _DfuDialog(title: initialTitle);
   }
 
   // ========== 配对密钥编辑 ==========
@@ -636,6 +686,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   _sideBtn('清除数据', Icons.cleaning_services, _wipeFds, primary),
                   _sideBtn('清除配对', Icons.link_off, _deleteBonds, primary),
                   _sideBtn('更新固件', Icons.system_update_alt, _dfuUpdate, primary),
+                  _sideBtn('本地刷入', Icons.upload_file, _dfuUpdateFromLocal, primary),
                   _sideBtn('围栏订阅', Icons.fence, _showFenceSubscription, primary),
                   _sideBtn('卡片订阅', Icons.credit_card, _showCardSubscription, primary),
                   _sideBtn('轮询设置', Icons.timer, _showPollingSettings, primary),
@@ -956,6 +1007,47 @@ class _SettingsTabState extends State<SettingsTab> {
       ButtonAction.values,
       (a) => a.label,
       onChanged,
+    );
+  }
+}
+
+/// DFU 刷写进度对话框（带进度百分比显示）
+class _DfuDialog extends StatefulWidget {
+  final String title;
+  const _DfuDialog({required this.title});
+
+  @override
+  State<_DfuDialog> createState() => _DfuDialogState();
+}
+
+class _DfuDialogState extends State<_DfuDialog> {
+  int _progress = 0;
+
+  void setProgress(int progress) {
+    if (!mounted) return;
+    setState(() {
+      _progress = progress;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title, style: const TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LinearProgressIndicator(value: _progress / 100),
+            const SizedBox(height: 12),
+            Text(
+              _progress > 0 ? '正在传输固件 $_progress%，请勿断开设备' : '正在传输固件，请勿断开设备',
+              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

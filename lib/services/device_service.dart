@@ -470,10 +470,9 @@ class DeviceService {
     await _dfu.getMTU();
     await _dfu.flashFirmware(0x01, header, onProgress ?? (_) {});
     await _dfu.flashFirmware(0x02, body, onProgress ?? (_) {});
-    // 等待重启（逆向等待最多 5000ms 后断开）
-    for (var t = 0; t < 50 && isConnected(); t++) {
-      await Future.delayed(const Duration(milliseconds: 10));
-    }
+    debugPrint('Firmware flashed!');
+    await _ble.disconnect();
+    await Future.delayed(const Duration(milliseconds: 500));
   }
 
   /// CRC32（IEEE，对应逆向 db()）

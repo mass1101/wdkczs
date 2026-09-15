@@ -349,13 +349,42 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// DFU 固件刷写（对齐 CU flashFirmware 流程：下载 → 解析 → setPRN → getMTU → flashFirmware）
-  Future<void> dfuUpdateFromUrl(
-    String url, {
+  /// DFU 固件刷写（对齐 CU flashFirmwareFromUrl 流程：多 URL 回退下载 → 解析 → setPRN → getMTU → flashFirmware）
+  Future<void> dfuUpdateFromUrls(
+    List<String> urls, {
     void Function(int progress)? onProgress,
   }) async {
-    final httpRes = await _httpGetBytes(url);
-    final zip = DfuZip(httpRes);
+    Uint8List? content;
+    String? lastError;
+    for (final url in urls) {
+      try {
+        content = await _httpGetBytes(url);
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e.toString();
+      }
+    }
+    if (lastError != null) {
+      throw Exception('All firmware URLs failed: $lastError');
+    }
+    final zip = DfuZip(content!);
+    final image = zip.getAppImage();
+    if (image == null) {
+      throw Exception('无法从固件包解析 application 镜像');
+    }
+    await device.dfuUpdateImage(
+      header: image.header,
+      body: image.body,
+      onProgress: onProgress,
+    );
+  }
+
+  /// DFU 固件刷写（从本地 zip 文件）
+  Future<void> dfuUpdateFromFile(Uint8List zipBytes, {
+    void Function(int progress)? onProgress,
+  }) async {
+    final zip = DfuZip(zipBytes);
     final image = zip.getAppImage();
     if (image == null) {
       throw Exception('无法从固件包解析 application 镜像');
