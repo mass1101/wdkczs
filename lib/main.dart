@@ -24,13 +24,17 @@ void overlayMain() {
   }
 }
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  runApp(const NfcToolApp());
+  _initBackground();
+}
+
+void _initBackground() async {
   await NotificationService.instance.init();
   if (await StorageService().getWatchdogEnabled()) {
     await Watchdog.start();
   }
-  runApp(const NfcToolApp());
 }
 
 class NfcToolApp extends StatelessWidget {

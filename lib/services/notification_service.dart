@@ -30,8 +30,6 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
-
-    await requestPermission();
   }
 
   Future<void> requestPermission() async {

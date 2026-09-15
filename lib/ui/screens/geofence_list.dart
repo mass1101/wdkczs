@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../main.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
+import '../../services/notification_service.dart';
 import '../../services/position_provider.dart';
 import '../../services/storage_service.dart';
 import '../../services/watchdog.dart';
@@ -480,6 +481,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                         onChanged: (v) async {
                           await _storage.setWatchdogEnabled(v);
                           if (v) {
+                            await NotificationService.instance.requestPermission();
                             await Watchdog.start();
                           } else {
                             await Watchdog.stop();
