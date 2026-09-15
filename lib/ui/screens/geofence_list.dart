@@ -9,7 +9,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../helpers/coordinate_converter.dart';
 import '../../main.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
@@ -101,31 +100,17 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
       );
   }
 
-  Future<LatLng?> _getGcjPosition() async {
-    try {
-      final permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        await Geolocator.requestPermission();
-      }
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-      return CoordinateConverter.wgs84ToGcj02(
-        LatLng(position.latitude, position.longitude),
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _locateMe() async {
-    final target = _pos.lastPosition ?? await _getGcjPosition();
+    final target = _pos.lastPosition ?? await _pos.refresh();
     if (!mounted) return;
     if (target == null) {
-      setState(() => _statusMessage = '定位失败：请检查定位权限');
-      _promptLocationPermission();
+      setState(() => _statusMessage = _pos.lastError ?? '定位失败');
+      // 权限已授予仍拿不到位置，通常是系统定位总闸没打开
+      if (_pos.permissionGranted) {
+        _promptLocationService();
+      } else {
+        _promptLocationPermission();
+      }
       return;
     }
     setState(() {
@@ -165,6 +150,22 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             _toast('定位权限已开启，地图开始跟随');
             _locateMe();
           },
+        ),
+      ),
+    );
+  }
+
+  /// 权限已授予但系统定位服务总闸未打开时的引导
+  Future<void> _promptLocationService() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('系统定位服务未开启：请在设置中打开定位开关'),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: '去设置',
+          onPressed: () => Geolocator.openLocationSettings(),
         ),
       ),
     );

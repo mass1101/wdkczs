@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../helpers/coordinate_converter.dart';
 import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/geofence.dart';
@@ -17,10 +15,15 @@ class FenceEditPage extends StatefulWidget {
   final GeofenceProvider provider;
   final Geofence? fence;
 
-  /// 定位源（独立于围栏），为空时回退到一次性定位
-  final PositionProvider? position;
+  /// 定位源（独立于围栏），与列表页共用同一个实例
+  final PositionProvider position;
 
-  const FenceEditPage({super.key, required this.provider, this.fence, this.position});
+  const FenceEditPage({
+    super.key,
+    required this.provider,
+    this.fence,
+    required this.position,
+  });
 
   @override
   State<FenceEditPage> createState() => _FenceEditPageState();
@@ -135,27 +138,9 @@ class _FenceEditPageState extends State<FenceEditPage> {
       );
   }
 
-  Future<LatLng?> _getGcjPosition() async {
-    try {
-      final permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        await Geolocator.requestPermission();
-      }
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-      return CoordinateConverter.wgs84ToGcj02(
-        LatLng(position.latitude, position.longitude),
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _locateMe() async {
-    final target = widget.position?.lastPosition ?? await _getGcjPosition();
+    final target =
+        widget.position.lastPosition ?? await widget.position.refresh();
     if (!mounted || target == null) return;
     await _mapReadyCompleter.future;
     if (!mounted) return;
