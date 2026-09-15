@@ -172,7 +172,18 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
         duration: const Duration(seconds: 4),
         action: SnackBarAction(
           label: '去设置',
-          onPressed: () => Geolocator.openLocationSettings(),
+          onPressed: () async {
+            await Geolocator.openLocationSettings();
+            if (!mounted) return;
+            if (!await Geolocator.isLocationServiceEnabled()) {
+              _toast('定位服务仍未开启，无法定位与跟随');
+              return;
+            }
+            await _pos.start();
+            if (!mounted) return;
+            _toast('定位服务已开启，地图开始跟随');
+            _locateMe();
+          },
         ),
       ),
     );
