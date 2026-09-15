@@ -46,6 +46,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   final Map<String, List<LatLng>> _liveDragPoints = {};
   String? _selectedFenceId;
   final _mapReadyCompleter = Completer<void>();
+  Timer? _locationTimer;
 
   @override
   void initState() {
@@ -58,10 +59,23 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
       _watchdogEnabled = await _storage.getWatchdogEnabled();
       if (mounted) setState(() {});
     });
+    _locationTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!mounted || !_followMe) return;
+      final pos = await _getGcjPosition();
+      if (pos == null || pos == _currentPosition) return;
+      if (!mounted) return;
+      setState(() {
+        _currentPosition = pos;
+        _positionLoaded = true;
+      });
+      final zoom = _mapController.camera.zoom;
+      _mapController.move(pos, zoom);
+    });
   }
 
   @override
   void dispose() {
+    _locationTimer?.cancel();
     _geo.removeListener(_onChange);
     _mapController.dispose();
     super.dispose();
