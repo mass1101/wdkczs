@@ -552,17 +552,5 @@ class _SettingsTabState extends State<SettingsTab> {
       onChanged,
     );
   }
-
-  Widget _switchRow(String label, bool value, ValueChanged<bool> onChanged) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(label,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF333333))),
-        ),
-        Switch(value: value, onChanged: onChanged),
-      ],
-    );
-  }
 }
 
