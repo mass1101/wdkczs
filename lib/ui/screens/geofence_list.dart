@@ -547,7 +547,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     final pos = _geo.lastPosition;
     final matched = _geo.lastMatchedFenceName;
     final events = _geo.eventLogs;
-    final latestEvent = events.isEmpty ? null : events.last.split('] ').last;
     final bg = (isDark ? Colors.black87 : Colors.white).withValues(alpha: 0.9);
     final textStyle = TextStyle(
       fontSize: 11,
@@ -589,15 +588,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             matched != null ? Colors.orange : Colors.grey,
             textStyle,
           ),
-          if (latestEvent != null)
-            _diagRow(
-              latestEvent.contains('命中')
-                  ? Icons.arrow_circle_down
-                  : Icons.exit_to_app,
-              '最新事件 $latestEvent',
-              Colors.purple,
-              textStyle,
-            ),
           if (_geo.uploadStatus != null)
             _diagRow(
               _geo.uploadStatus == '卡片上传成功'
