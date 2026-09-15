@@ -452,9 +452,20 @@ class DeviceService {
 
   // ========== DFU 固件刷写（对齐 CU DFUCommunicator） ==========
 
-  /// 进入 DFU 模式（cmd 1010），设备随后断开进入 bootloader
+  /// 进入 DFU 模式（cmd 1010），发送后设备会断开连接，不等待响应
   Future<void> cmdDfuEnter() async {
-    await _request(Cmd.enterBootloader.value, null);
+    final task = _txQueue.then((_) async {
+      await ensureConnected();
+      init();
+      final frame = UltraFrame.encode(cmd: Cmd.enterBootloader.value, data: Uint8List(0));
+      try {
+        await _ble.send(frame);
+      } catch (_) {
+        // 设备可能已断开
+      }
+    });
+    _txQueue = task.then<void>((_) {}, onError: (_) {});
+    return task;
   }
 
   /// DFU 通信器访问（供外部调用）
