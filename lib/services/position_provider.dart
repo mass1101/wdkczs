@@ -28,6 +28,7 @@ class PositionProvider extends ChangeNotifier {
   StreamSubscription<Position>? _sub;
   Timer? _pollTimer;
   int _refs = 0;
+  bool _polling = false;
 
   LatLng? _lastPosition;
   DateTime? _lastPositionTime;
@@ -76,7 +77,11 @@ class PositionProvider extends ChangeNotifier {
 
     _sub = Geolocator.getPositionStream(
       locationSettings: _locationSettings,
-    ).listen(_onStream, onError: (Object e) => _fail(_describe(e)));
+    ).listen(
+      _onStream,
+      onError: (Object e) => _fail(_describe(e)),
+      onDone: () => _sub = null,
+    );
     _pollTimer ??= Timer.periodic(_pollInterval, (_) => _poll());
     return true;
   }
@@ -122,6 +127,7 @@ class PositionProvider extends ChangeNotifier {
         distanceFilter: 0,
         intervalDuration: const Duration(seconds: 2),
         forceLocationManager: true,
+        timeLimit: const Duration(seconds: 10),
       );
     }
     return const LocationSettings(
@@ -136,10 +142,12 @@ class PositionProvider extends ChangeNotifier {
 
   /// 流长时间无回调时补一次 getCurrentPosition
   Future<void> _poll() async {
-    if (_sub == null) return;
+    if (_sub == null || _polling) return;
     final last = _lastPositionTime;
     if (last != null && DateTime.now().difference(last) < _staleAfter) return;
+    _polling = true;
     await refresh();
+    _polling = false;
   }
 
   Future<bool> _ensurePermission() async {
