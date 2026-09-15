@@ -404,6 +404,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
               padding: const EdgeInsets.all(16),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
+                childAspectRatio: 1.5,
                 crossAxisSpacing: 10,
                 mainAxisSpacing: 10,
               ),
