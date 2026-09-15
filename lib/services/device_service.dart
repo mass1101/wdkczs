@@ -592,7 +592,8 @@ class DeviceService {
         if (r.length > pos) {
           final len = r[pos];
           if (len > 0 && pos + 1 + len <= r.length) {
-            name = String.fromCharCodes(r.sublist(pos + 1, pos + 1 + len));
+            name = utf8.decode(r.sublist(pos + 1, pos + 1 + len),
+                allowMalformed: true);
           }
           pos += 1 + len;
         }
