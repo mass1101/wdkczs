@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import '../../helpers/activation.dart';
 import '../../main.dart';
 import '../../models/enums.dart';
 import '../../services/device_service.dart';
@@ -10,6 +11,7 @@ import '../../state/app_controller.dart';
 import '../screens/card_subscription_screen.dart';
 import '../screens/fence_subscription_screen.dart';
 import '../widgets/common.dart';
+import '../widgets/qr_code_scanner.dart';
 
 /// 设置 Tab：设备信息、全局设置、右侧操作按钮
 class SettingsTab extends StatefulWidget {
@@ -23,6 +25,13 @@ class _SettingsTabState extends State<SettingsTab> {
   AppController get _app => AppScope.instance.controller;
   DeviceService get _dev => _app.device;
   String? _cloudFirmwareVersion;
+  String _chipId = '';
+  late final TextEditingController _activationCodeController = TextEditingController();
+  late final TextEditingController _pollingDelayController = TextEditingController();
+  int? _pollingDelay;
+  bool _pollingEnabled = false;
+  bool _pollingAdaptive = false;
+  List<bool> _pollingSlots = List.filled(80, false);
 
   @override
   void initState() {
@@ -58,6 +67,7 @@ class _SettingsTabState extends State<SettingsTab> {
       await _app.loadEnabledSlots();
       final active = await _dev.cmdSlotGetActive();
       _app.currentSlot = active;
+      if (mounted) setState(() => _chipId = _app.deviceInfo.chipId);
     } catch (_) {}
     if (mounted) setState(() {});
   }
@@ -321,6 +331,198 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                   ),
+                  // 激活功能
+                  SectionCard(
+                    title: '激活功能',
+                    child: Column(
+                      children: [
+                        if (_chipId.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outline,
+                                width: 0.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Text('芯片 ID: ',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withValues(alpha: 0.6),
+                                    )),
+                                Expanded(
+                                  child: Text(
+                                    _chipId,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontFamily: 'monospace',
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.copy, size: 16),
+                                  onPressed: () {
+                                    Clipboard.setData(
+                                        ClipboardData(text: _chipId));
+                                  },
+                                  tooltip: '复制',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                      minWidth: 28, minHeight: 28),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _activationCodeController,
+                                decoration: const InputDecoration(
+                                  labelText: '激活码:',
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 8),
+                                ),
+                                enabled: !_app.isActivated,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.qr_code_scanner),
+                              tooltip: '扫码输入',
+                              onPressed: _app.isActivated
+                                  ? null
+                                  : () async {
+                                      final result = await showDialog<String>(
+                                        context: context,
+                                        builder: (context) =>
+                                            const QrCodeScanner(),
+                                      );
+                                      if (result != null &&
+                                          result.isNotEmpty) {
+                                        setState(() {
+                                          _activationCodeController.text =
+                                              result;
+                                        });
+                                      }
+                                    },
+                            ),
+                            ElevatedButton(
+                              onPressed: _app.isActivated
+                                  ? null
+                                  : () async {
+                                      final code =
+                                          _activationCodeController.text;
+                                      if (code.isEmpty) return;
+                                      if (validateActivationCode(
+                                          _chipId, code)) {
+                                        final rejectMsg =
+                                            await checkActivationOnline(
+                                                _chipId, code);
+                                        if (rejectMsg != null) {
+                                            if (context.mounted) {
+                                              showDialog<void>(
+                                                context: context,
+                                              builder: (dialogContext) =>
+                                                  AlertDialog(
+                                                title: const Text('无法激活'),
+                                                content: Text(rejectMsg),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            dialogContext),
+                                                    child: const Text('好'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }
+                                          return;
+                                        }
+                                      }
+                                      final result = await _app.device
+                                          .cmdSetActivationDebug(_chipId, code);
+                                      final status = result[0] as int;
+                                      final dataHex = result[1] as String;
+                                      if (status == 0x68) {
+                                        await _app.setActivated(true,
+                                            chipId: _chipId);
+                                        _toast('激活成功');
+                                      } else {
+                                        var msg = '激活码无效 (status=0x${status.toRadixString(16).padLeft(2, '0')})';
+                                        if (dataHex.isNotEmpty) {
+                                          msg += ' hash=$dataHex';
+                                        }
+                                        if (context.mounted) {
+                                          showDialog<void>(
+                                            context: context,
+                                            builder: (dialogContext) =>
+                                                AlertDialog(
+                                              title: const Text('无法激活'),
+                                              content: Text(msg),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          dialogContext),
+                                                  child: const Text('好'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _app.isActivated
+                                        ? (_app.remainingBoots > 0
+                                            ? '试用版 (剩余${_app.remainingBoots}次)'
+                                            : '已激活')
+                                        : '激活',
+                                    style: TextStyle(
+                                      color: _app.isActivated
+                                          ? (_app.remainingBoots > 0
+                                              ? const Color(0xFFC0C0C0)
+                                              : null)
+                                          : null,
+                                    ),
+                                  ),
+                                  if (_app.isActivated) ...[
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      _app.remainingBoots > 0
+                                          ? Icons.schedule
+                                          : Icons.verified,
+                                      size: 18,
+                                      color: _app.remainingBoots > 0
+                                          ? const Color(0xFFC0C0C0)
+                                          : const Color(0xFFFFD700),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                   // 全局设置
                   SectionCard(
                     title: '全局设置',
@@ -398,6 +600,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   _sideBtn('更新固件', Icons.system_update_alt, _dfuUpdate, primary),
                   _sideBtn('围栏订阅', Icons.fence, _showFenceSubscription, primary),
                   _sideBtn('卡片订阅', Icons.credit_card, _showCardSubscription, primary),
+                  _sideBtn('轮询设置', Icons.timer, _showPollingSettings, primary),
                   const SizedBox(height: 16),
                 ],
               ),
@@ -405,6 +608,223 @@ class _SettingsTabState extends State<SettingsTab> {
           ],
         );
       },
+    );
+  }
+
+  // ========== 轮询设置弹窗 ==========
+  Future<void> _showPollingSettings() async {
+    try {
+      _pollingDelay = await _dev.cmdGetPollingDelay();
+      _pollingEnabled = await _dev.cmdGetPollingEnable();
+      _pollingAdaptive = await _dev.cmdGetPollingAdaptive();
+      _pollingSlots = await _dev.cmdGetPollingSlots();
+    } catch (_) {}
+    _pollingDelayController.text = (_pollingDelay ?? 0).toString();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('轮询设置', style: TextStyle(fontSize: 16)),
+        content: SizedBox(
+          width: 450,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 轮询延迟
+                const Text('轮询延迟:', style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 8),
+                if (_pollingDelay != null)
+                  Text(
+                    _pollingEnabled
+                        ? '当前轮询延迟: ${_pollingDelay}ms'
+                        : '轮询已关闭',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(ctx)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.6),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _pollingDelayController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: '轮询延迟 (ms)',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () async {
+                        final value =
+                            int.tryParse(_pollingDelayController.text);
+                        if (value == null || value < 0) return;
+                        try {
+                          await _dev.cmdSetPollingDelay(value);
+                          await _dev.cmdSetPollingEnable(true);
+                          await _dev.cmdSlotSaveSettings();
+                          setState(() {
+                            _pollingDelay = value;
+                            _pollingEnabled = true;
+                          });
+                        } catch (_) {}
+                      },
+                      child: const Text('保存'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () async {
+                        try {
+                          if (_pollingEnabled) {
+                            await _dev.cmdSetPollingEnable(false);
+                            await _dev.cmdSlotSaveSettings();
+                            setState(() => _pollingEnabled = false);
+                          } else {
+                            await _dev.cmdSetPollingEnable(true);
+                            await _dev.cmdSlotSaveSettings();
+                            setState(() => _pollingEnabled = true);
+                          }
+                        } catch (_) {}
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _pollingEnabled
+                            ? Colors.red.shade50
+                            : Colors.green.shade50,
+                        foregroundColor: _pollingEnabled
+                            ? Colors.red.shade700
+                            : Colors.green.shade700,
+                      ),
+                      child: Text(_pollingEnabled
+                          ? '关闭轮询'
+                          : '恢复轮询'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // 智能自适应延迟
+                Row(
+                  children: [
+                    const Expanded(child: Text('智能自适应延迟')),
+                    Switch(
+                      value: _pollingAdaptive,
+                      onChanged: (value) async {
+                        setState(() => _pollingAdaptive = value);
+                        try {
+                          await _dev.cmdSetPollingAdaptive(value);
+                          await _dev.cmdSlotSaveSettings();
+                        } catch (_) {}
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '开启后会自动调整卡槽的轮询延迟',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(ctx)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.6),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // 参与轮询的卡槽
+                const Text('参与轮询的卡槽:', style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (var i = 0; i < _pollingSlots.length; i++)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: () => setState(() {
+                          _pollingSlots[i] = !_pollingSlots[i];
+                        }),
+                        child: Container(
+                          width: 36,
+                          height: 26,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _pollingSlots[i]
+                                ? Theme.of(ctx)
+                                    .colorScheme
+                                    .primary
+                                    .withValues(alpha: 0.18)
+                                : Theme.of(ctx)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: _pollingSlots[i]
+                                  ? Theme.of(ctx).colorScheme.primary
+                                  : Theme.of(ctx)
+                                      .colorScheme
+                                      .outlineVariant,
+                            ),
+                          ),
+                          child: Text(
+                            (i + 1).toString(),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _pollingSlots[i]
+                                  ? Theme.of(ctx).colorScheme.primary
+                                  : Theme.of(ctx).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _pollingSlots = List.filled(80, true);
+                      }),
+                      child: const Text('全选'),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _pollingSlots = List.filled(80, false);
+                      }),
+                      child: const Text('清空'),
+                    ),
+                    const Spacer(),
+                    ElevatedButton(
+                      onPressed: () async {
+                        try {
+                          await _dev.cmdSetPollingSlots(_pollingSlots);
+                          await _dev.cmdSlotSaveSettings();
+                        } catch (_) {}
+                      },
+                      child: const Text('保存槽位'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 

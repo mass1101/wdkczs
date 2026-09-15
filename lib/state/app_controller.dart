@@ -34,6 +34,7 @@ class AppController extends ChangeNotifier {
     installAutoBackupHook();
     ble.status.addListener(_onBleStatus);
     _initGeofence();
+    _loadActivationState();
   }
 
   bool get connected => ble.isConnected;
@@ -67,6 +68,12 @@ class AppController extends ChangeNotifier {
   int tabIndex = 0;
   int currentSlot = 0;
   bool _processing = false;
+
+  // 激活状态（对齐 CU appState.isActivated/remainingBoots）
+  bool _isActivated = false;
+  int _remainingBoots = 0;
+  bool get isActivated => _isActivated;
+  int get remainingBoots => _remainingBoots;
 
   /// 每槽的 UID/SAK/ATQA 展示数据（读卡槽时刷新）
   final List<({String uid, String sak, String atqa})> slotCardIds =
@@ -209,6 +216,9 @@ class AppController extends ChangeNotifier {
       deviceInfo.batteryVoltage = '${battery.voltage}mV';
       deviceInfo.batteryLevel = battery.level;
     } catch (_) {}
+    if (deviceInfo.chipId.isNotEmpty) {
+      verifyActivation(deviceInfo.chipId);
+    }
     notifyListeners();
   }
 
@@ -282,6 +292,34 @@ class AppController extends ChangeNotifier {
 
   void setLongPressBtnB(ButtonAction a) {
     settings.longPressBtnB = a;
+    notifyListeners();
+  }
+
+  /// 验证激活状态（对齐 CU verifyActivation）
+  Future<void> verifyActivation(String chipId) async {
+    if (chipId.isEmpty) return;
+    final activated = await storage.getActivated();
+    final remaining = await storage.getRemainingBoots();
+    final forChip = await storage.isActivatedForChip(chipId);
+    if (activated && forChip) {
+      _isActivated = true;
+      _remainingBoots = remaining;
+    }
+    notifyListeners();
+  }
+
+  /// 设置激活状态（对齐 CU setActivated）
+  Future<void> setActivated(bool value, {String? chipId, int? remainingBoots}) async {
+    await storage.setActivated(value, chipId: chipId, remainingBoots: remainingBoots);
+    _isActivated = value;
+    _remainingBoots = remainingBoots ?? 0;
+    notifyListeners();
+  }
+
+  /// 加载激活状态
+  Future<void> _loadActivationState() async {
+    _isActivated = await storage.getActivated();
+    _remainingBoots = await storage.getRemainingBoots();
     notifyListeners();
   }
 

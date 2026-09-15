@@ -304,6 +304,76 @@ class DeviceService {
     return task;
   }
 
+  // ========== 激活命令（cmd 1044-1045） ==========
+
+  Future<List<dynamic>> cmdSetActivationDebug(String chipId, String code) async {
+    final r = await _request(
+        Cmd.setActivation.value, Uint8List.fromList(utf8.encode('$chipId:$code')));
+    final status = r.isNotEmpty ? r[0] : -1;
+    final dataHex = r.length > 1
+        ? r.sublist(1).map((b) => b.toRadixString(16).padLeft(2, '0')).join()
+        : '';
+    return [status, dataHex];
+  }
+
+  Future<(bool, int)> cmdGetActivation() async {
+    final r = await _request(Cmd.getActivation.value, null);
+    if (r.isEmpty) return (false, 0);
+    return (r[0] == 1, r.length > 1 ? r[1] : 0);
+  }
+
+  // ========== 轮询命令（cmd 1041-1052） ==========
+
+  Future<int> cmdGetPollingDelay() async {
+    final r = await _request(Cmd.getPollingDelay.value, null);
+    if (r.length < 2) return 0;
+    return r[0] | (r[1] << 8);
+  }
+
+  Future<void> cmdSetPollingDelay(int ms) async {
+    await _request(Cmd.setPollingDelay.value,
+        Uint8List.fromList([(ms >> 8) & 0xFF, ms & 0xFF]));
+  }
+
+  Future<void> cmdSetPollingEnable(bool enable) async {
+    await _request(Cmd.setPollingEnable.value,
+        Uint8List.fromList([enable ? 1 : 0]));
+  }
+
+  Future<bool> cmdGetPollingEnable() async {
+    final r = await _request(Cmd.getPollingEnable.value, null);
+    return r.isNotEmpty && r[0] == 1;
+  }
+
+  Future<void> cmdSetPollingSlots(List<bool> slots) async {
+    final arr = Uint8List((slots.length + 7) >> 3);
+    for (var i = 0; i < slots.length; i++) {
+      if (slots[i]) arr[i >> 3] |= 1 << (i & 7);
+    }
+    await _request(Cmd.setPollingSlots.value, arr);
+  }
+
+  Future<List<bool>> cmdGetPollingSlots() async {
+    final r = await _request(Cmd.getPollingSlots.value, null);
+    final slots = List<bool>.filled(80, false);
+    for (var i = 0; i < slots.length; i++) {
+      if (i >> 3 < r.length) {
+        slots[i] = (r[i >> 3] & (1 << (i & 7))) != 0;
+      }
+    }
+    return slots;
+  }
+
+  Future<bool> cmdGetPollingAdaptive() async {
+    final r = await _request(Cmd.getPollingAdaptive.value, null);
+    return r.isNotEmpty && r[0] == 1;
+  }
+
+  Future<void> cmdSetPollingAdaptive(bool enable) async {
+    await _request(Cmd.setPollingAdaptive.value,
+        Uint8List.fromList([enable ? 1 : 0]));
+  }
+
   Future<bool> cmdSlotDeleteFreqName(int slot, int freq) async {
     try {
       await _request(Cmd.deleteSlotTagNick.value,
