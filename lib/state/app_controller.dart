@@ -11,6 +11,7 @@ import '../models/models.dart';
 import '../services/card_backup.dart';
 import '../services/card_library.dart';
 import '../services/cloud_service.dart';
+import '../helpers/activation.dart';
 import '../services/device_service.dart';
 import '../services/dfu_zip.dart';
 import '../services/geofence_provider.dart';
@@ -116,6 +117,7 @@ class AppController extends ChangeNotifier {
         }
       },
       isConnected: () => connected,
+      isActivated: () => _isActivated,
       uploadCard: (card, slot) async {
         await slotWriterUpload(card, slot);
       },
@@ -298,14 +300,38 @@ class AppController extends ChangeNotifier {
   /// 验证激活状态（对齐 CU verifyActivation）
   Future<void> verifyActivation(String chipId) async {
     if (chipId.isEmpty) return;
-    final activated = await storage.getActivated();
-    final remaining = await storage.getRemainingBoots();
-    final forChip = await storage.isActivatedForChip(chipId);
-    if (activated && forChip) {
-      _isActivated = true;
-      _remainingBoots = remaining;
-    }
+    await storage.saveChipId(chipId);
+    await _syncActivationFromFirmware(chipId);
     notifyListeners();
+  }
+
+  /// 从设备固件同步激活状态（对齐 CU _syncActivationFromFirmware）
+  Future<void> _syncActivationFromFirmware(String chipId) async {
+    if (!connected) return;
+    try {
+      var (activated, remaining) = await device.cmdGetActivation();
+      // 已激活设备可能被服务端撤销，轮询检查
+      if (activated && chipId.isNotEmpty) {
+        final revoked = await checkChipRevokedOnline(chipId);
+        if (revoked) {
+          final ok = await device.cmdDeactivate();
+          if (ok) {
+            activated = false;
+            remaining = 0;
+          }
+        }
+      }
+      final localActivated = await storage.isActivatedForChip(chipId);
+      final localRemaining = await storage.getRemainingBoots();
+      if (activated != localActivated || remaining != localRemaining) {
+        await storage.setActivated(activated,
+            chipId: chipId, remainingBoots: remaining);
+        _isActivated = activated;
+        _remainingBoots = remaining;
+        notifyListeners();
+      }
+      geofence.refreshEnabledState();
+    } catch (_) {}
   }
 
   /// 设置激活状态（对齐 CU setActivated）

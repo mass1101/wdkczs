@@ -44,6 +44,7 @@ enum Cmd {
   setActivation(1044),
   getActivation(1045),
   getPollingEnable(1046),
+  deactivate(1047),
   getPollingSlots(1048),
   setPollingSlots(1049),
   getPollingAdaptive(1051),

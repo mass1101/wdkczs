@@ -61,6 +61,7 @@ class GeofenceProvider extends ChangeNotifier {
   // 注入的设备/卡库回调
   bool Function(int slot)? _activateSlot; // 返回值=是否成功切换
   bool Function()? _isConnected;
+  bool Function()? _isActivated;
   Future<void> Function(SaveCard card, int slot)? _uploadCard;
   Future<SaveCard?> Function(int slot)? _readHfSlot; // 读 HF 槽 dump
 
@@ -169,11 +170,13 @@ class GeofenceProvider extends ChangeNotifier {
   void setHandlers({
     required bool Function(int slot) activateSlot,
     required bool Function() isConnected,
+    bool Function()? isActivated,
     required Future<void> Function(SaveCard card, int slot) uploadCard,
     required Future<SaveCard?> Function(int slot) readHfSlot,
   }) {
     _activateSlot = activateSlot;
     _isConnected = isConnected;
+    _isActivated = isActivated;
     _uploadCard = uploadCard;
     _readHfSlot = readHfSlot;
   }
@@ -241,8 +244,9 @@ class GeofenceProvider extends ChangeNotifier {
   }
 
   void _syncEnabledState() {
-    final activated = _isConnected?.call() ?? false;
-    _enabled = _userEnabled && activated;
+    final connected = _isConnected?.call() ?? false;
+    final activated = _isActivated?.call() ?? false;
+    _enabled = _userEnabled && connected && activated;
   }
 
   /// 设备连接状态变化后调用：连接态参与围栏总开关的实际生效判定

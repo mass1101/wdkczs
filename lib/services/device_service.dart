@@ -322,6 +322,12 @@ class DeviceService {
     return (r[0] == 1, r.length > 1 ? r[1] : 0);
   }
 
+  /// 清除设备端激活授权（对齐 CU deactivate, cmd 1047）
+  Future<bool> cmdDeactivate() async {
+    final r = await _request(Cmd.deactivate.value, null);
+    return r.isNotEmpty && r[0] == 0x00;
+  }
+
   // ========== 轮询命令（cmd 1041-1052） ==========
 
   Future<int> cmdGetPollingDelay() async {
