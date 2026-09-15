@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import '../../main.dart';
 import '../../models/enums.dart';
@@ -21,11 +22,34 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   AppController get _app => AppScope.instance.controller;
   DeviceService get _dev => _app.device;
+  String? _cloudFirmwareVersion;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refresh();
+      _loadCloudFirmwareVersion();
+    });
+  }
+
+  Future<void> _loadCloudFirmwareVersion() async {
+    try {
+      final resp = await http
+          .get(Uri.parse(
+              'https://raw.giteeusercontent.com/zzx1101/JL-version/raw/master/80lx-version.json'))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return;
+      final lines = resp.body.split('\n');
+      for (final line in lines) {
+        final trimmed = line.trim();
+        if (trimmed.startsWith('version:')) {
+          final v = trimmed.substring('version:'.length).trim();
+          if (mounted) setState(() => _cloudFirmwareVersion = v);
+          return;
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _refresh() async {
@@ -318,7 +342,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     title: '设备信息',
                     child: Column(
                       children: [
-                        _infoRow('固件版本', info.version.isEmpty ? '--' : info.version),
+                        _infoRow('云端固件版本', _cloudFirmwareVersion ?? '加载中...'),
                         _infoRow('Git 版本', info.gitVersion.isEmpty ? '--' : info.gitVersion),
                         _infoRow('芯片编号', info.chipId.isEmpty ? '--' : info.chipId),
                         _infoRow('蓝牙地址', info.bleAddress.isEmpty ? '--' : info.bleAddress),
