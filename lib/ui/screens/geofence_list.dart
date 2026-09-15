@@ -417,7 +417,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                             _statusMessage = v
                                 ? (connected
                                     ? '围栏判定已启动'
-                                    : '已开启：定位持续更新，连接设备后才判定')
+                                    : '')
                                 : '围栏判定已停止';
                           });
                         },
