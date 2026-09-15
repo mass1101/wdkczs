@@ -147,46 +147,16 @@ class _SettingsTabState extends State<SettingsTab> {
 
   // ========== 固件刷写 ==========
   Future<void> _dfuUpdate() async {
-    final controller = TextEditingController();
-    final url = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('固件刷写', style: TextStyle(fontSize: 16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('请输入固件包 zip 的下载地址\n（nRF DFU 格式，含 manifest.json）',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                hintText: 'https://.../firmware.zip',
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('开始刷写'),
-          ),
-        ],
-      ),
-    );
-    if (url == null || url.isEmpty) return;
     if (!_app.connected) {
       _toast('设备未连接');
       return;
     }
+    const url =
+        'https://raw.giteeusercontent.com/zzx1101/JL-version/raw/master/80LXWL-dfu-full.zip';
+    _toast('正在下载固件...');
     try {
-      // 进入 DFU 模式
       await _dev.cmdDfuEnter();
       _toast('已进入 DFU 模式，正在连接 bootloader...');
-      // bootloader 重连由扫描选择
       final found = await _app.ble.scan(timeout: const Duration(seconds: 8));
       final target = found.firstWhere(
         (d) {
@@ -197,7 +167,6 @@ class _SettingsTabState extends State<SettingsTab> {
       );
       await _app.ble.connect(target);
 
-      // 刷写
       if (!mounted) return;
       showDialog(
         context: context,
@@ -425,7 +394,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   _sideBtn('恢复出厂', Icons.refresh, _resetSettings, primary),
                   _sideBtn('清除数据', Icons.cleaning_services, _wipeFds, primary),
                   _sideBtn('清除配对', Icons.link_off, _deleteBonds, primary),
-                  _sideBtn('固件刷写', Icons.system_update_alt, _dfuUpdate, primary),
+                  _sideBtn('更新固件', Icons.system_update_alt, _dfuUpdate, primary),
                   _sideBtn('围栏订阅', Icons.fence, _showFenceSubscription, primary),
                   _sideBtn('卡片订阅', Icons.credit_card, _showCardSubscription, primary),
                   const SizedBox(height: 16),
