@@ -60,15 +60,6 @@ class _IcTabState extends State<IcTab> {
     _keyCtrl.text = _app.card.keys;
     _validateKeys(_app.card.keys);
     // 启动时只默认加载 3 把默认密钥；密钥文件在读卡/解卡流程中按需加载
-    _loadSlots();
-  }
-
-  Future<void> _loadSlots() async {
-    try {
-      await _app.loadEnabledSlots();
-      await _app.loadActiveSlotEmuSettings();
-    } catch (_) {}
-    if (mounted) setState(() {});
   }
 
   @override
