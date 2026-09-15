@@ -56,6 +56,7 @@ class PositionProvider extends ChangeNotifier {
   /// 取消掉页面 B 仍在使用的订阅。
   Future<bool> start() async {
     _refs++;
+    _pollTimer ??= Timer.periodic(_pollInterval, (_) => _poll());
     if (_sub != null) return _permissionGranted;
 
     final granted = await _ensurePermission();
@@ -65,14 +66,6 @@ class PositionProvider extends ChangeNotifier {
       _fail('未获得定位权限');
       return false;
     }
-    // 系统定位总闸关闭时，位置流与 getCurrentPosition 都不会返回数据
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      _refs--;
-      _fail('系统定位服务未开启');
-      return false;
-    }
-    // 权限确认（含系统弹窗）期间页面可能已退出，此时不再建订阅，
-    // 否则残留订阅既不会被取消，也会在无人监听时持续回调
     if (_refs == 0) return false;
 
     _sub = Geolocator.getPositionStream(
@@ -82,7 +75,6 @@ class PositionProvider extends ChangeNotifier {
       onError: (Object e) => _fail(_describe(e)),
       onDone: () => _sub = null,
     );
-    _pollTimer ??= Timer.periodic(_pollInterval, (_) => _poll());
     return true;
   }
 
@@ -142,7 +134,7 @@ class PositionProvider extends ChangeNotifier {
 
   /// 流长时间无回调时补一次 getCurrentPosition
   Future<void> _poll() async {
-    if (_sub == null || _polling) return;
+    if (_refs == 0 || _polling) return;
     final last = _lastPositionTime;
     if (last != null && DateTime.now().difference(last) < _staleAfter) return;
     _polling = true;
