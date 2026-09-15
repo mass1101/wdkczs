@@ -220,7 +220,6 @@ class GeofenceProvider extends ChangeNotifier {
     final i = _fences.indexWhere((f) => f.id == fence.id);
     if (i != -1) {
       _fences[i] = fence;
-      _completedUploads.remove(fence.id);
       _save();
       notifyListeners();
     }
@@ -228,7 +227,6 @@ class GeofenceProvider extends ChangeNotifier {
 
   void deleteFence(String id) {
     _fences.removeWhere((f) => f.id == id);
-    _completedUploads.remove(id);
     _save();
     notifyListeners();
   }
@@ -237,7 +235,6 @@ class GeofenceProvider extends ChangeNotifier {
     final i = _fences.indexWhere((f) => f.id == id);
     if (i != -1) {
       _fences[i].enabled = enabled;
-      if (!enabled) _completedUploads.remove(id);
       _save();
       notifyListeners();
     }
@@ -338,23 +335,27 @@ class GeofenceProvider extends ChangeNotifier {
   String? get _lastMatchedFenceNameFromId => _lastMatchedId;
 
   // ========== 卡库自动上传 ==========
-  final Map<String, Set<String>> _completedUploads = {};
   bool _uploading = false;
 
   Future<void> _uploadCardsToSlots(Geofence match) async {
     if (_uploading) return;
     _uploading = true;
     await Future.delayed(const Duration(seconds: 1));
+    if (match.icCardId == null && match.idCardId == null) {
+      _uploadStatus = '未配置卡片';
+      _log('围栏 ${match.name} 未配置卡片');
+      notifyListeners();
+      _pushOverlayData();
+      _uploading = false;
+      return;
+    }
     _uploadStatus = '正在上传卡片...';
     _log('正在上传卡片...');
     notifyListeners();
     _pushOverlayData();
-    final completed = _completedUploads[match.id] ?? <String>{};
 
     Future<void> uploadOne(String? cardId) async {
       if (cardId == null) return;
-      final key = '$cardId:${match.slotNumber}';
-      if (completed.contains(key)) return;
       for (var attempt = 0; attempt < 4; attempt++) {
         if (attempt > 0) {
           _uploadStatus = '卡片上传失败，3秒后重试...';
@@ -365,7 +366,6 @@ class GeofenceProvider extends ChangeNotifier {
         }
         final result = await _uploadLibraryCardToSlot(cardId, match.slotNumber);
         if (result == 0 || result == 2) {
-          completed.add(key);
           _uploadStatus = '卡片上传成功';
           _log('卡片上传成功');
           notifyListeners();
@@ -382,7 +382,6 @@ class GeofenceProvider extends ChangeNotifier {
     await uploadOne(match.icCardId);
     await uploadOne(match.idCardId);
 
-    _completedUploads[match.id] = completed;
     _uploading = false;
     notifyListeners();
   }
