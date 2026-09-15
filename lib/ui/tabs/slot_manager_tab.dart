@@ -364,6 +364,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 28,
         title: const Text('卡槽管理'),
         actions: [
           PopupMenuButton<String>(
