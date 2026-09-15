@@ -584,8 +584,12 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
           ),
           _diagRow(
             _pos.running ? Icons.my_location : Icons.location_off,
-            time != null ? '定位 ${_fmtTime(time)}' : '暂无定位',
-            time != null ? Colors.blue : Colors.grey,
+            time != null
+                ? '定位 ${_fmtTime(time)}'
+                : (_pos.lastError ?? '暂无定位'),
+            time != null
+                ? Colors.blue
+                : (_pos.lastError != null ? Colors.red : Colors.grey),
             textStyle,
           ),
           if (pos != null)
