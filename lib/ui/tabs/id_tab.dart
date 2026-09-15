@@ -66,7 +66,7 @@ class _IdTabState extends State<IdTab> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (var i = 0; i < 8; i++)
+            for (var i = 0; i < 80; i++)
               ChoiceChip(
                 label: Text(
                   '卡槽 ${i + 1}',
