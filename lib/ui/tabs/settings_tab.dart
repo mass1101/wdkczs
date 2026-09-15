@@ -107,8 +107,9 @@ class _SettingsTabState extends State<SettingsTab> {
     );
     if (ok != true) return;
     try {
-      await _dev.cmdResetSettings();
+      await _dev.cmdFactoryReset();
       _toast('已恢复出厂设置');
+      await _app.disconnect();
       await _refresh();
     } catch (e) {
       _toast('操作失败: $e');

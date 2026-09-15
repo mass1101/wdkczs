@@ -288,6 +288,22 @@ class DeviceService {
     await _request(Cmd.wipeFds.value, null);
   }
 
+  /// 恢复出厂设置（cmd 1020），发送后设备会断开连接，不等待响应
+  Future<void> cmdFactoryReset() async {
+    final task = _txQueue.then((_) async {
+      await ensureConnected();
+      init();
+      final frame = UltraFrame.encode(cmd: Cmd.wipeFds.value, data: Uint8List(0));
+      try {
+        await _ble.send(frame);
+      } catch (_) {
+        // 设备可能已断开
+      }
+    });
+    _txQueue = task.then<void>((_) {}, onError: (_) {});
+    return task;
+  }
+
   Future<bool> cmdSlotDeleteFreqName(int slot, int freq) async {
     try {
       await _request(Cmd.deleteSlotTagNick.value,
