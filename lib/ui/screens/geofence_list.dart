@@ -410,15 +410,16 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                       const Text('总开关', style: TextStyle(fontSize: 12)),
                       Switch(
                         value: _geo.userEnabled,
-                        onChanged: (v) {
-                          _geo.setEnabled(v);
-                          setState(
-                            () => _statusMessage = _geo.monitoring
-                                ? '围栏判定已启动'
-                                : (v
-                                    ? '已开启：定位持续更新，连接设备后才判定'
-                                    : '围栏判定已停止'),
-                          );
+                        onChanged: (v) async {
+                          await _geo.setEnabled(v);
+                          setState(() {
+                            final connected = _geo.connected;
+                            _statusMessage = v
+                                ? (connected
+                                    ? '围栏判定已启动'
+                                    : '已开启：定位持续更新，连接设备后才判定')
+                                : '围栏判定已停止';
+                          });
                         },
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
