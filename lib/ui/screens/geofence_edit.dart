@@ -9,6 +9,7 @@ import '../../models/enums.dart';
 import '../../services/card_library.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
+import '../../services/position_provider.dart';
 
 /// 围栏编辑页：全屏地图 + 表单
 /// （严格对齐 CU geofence_edit.dart，纯在线高德瓦片，无离线底图增强）
@@ -16,7 +17,10 @@ class FenceEditPage extends StatefulWidget {
   final GeofenceProvider provider;
   final Geofence? fence;
 
-  const FenceEditPage({super.key, required this.provider, this.fence});
+  /// 定位源（独立于围栏），为空时回退到一次性定位
+  final PositionProvider? position;
+
+  const FenceEditPage({super.key, required this.provider, this.fence, this.position});
 
   @override
   State<FenceEditPage> createState() => _FenceEditPageState();
@@ -151,7 +155,7 @@ class _FenceEditPageState extends State<FenceEditPage> {
   }
 
   Future<void> _locateMe() async {
-    final target = widget.provider.lastPosition ?? await _getGcjPosition();
+    final target = widget.position?.lastPosition ?? await _getGcjPosition();
     if (!mounted || target == null) return;
     await _mapReadyCompleter.future;
     if (!mounted) return;

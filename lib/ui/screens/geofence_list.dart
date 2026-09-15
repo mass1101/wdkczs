@@ -13,6 +13,7 @@ import '../../helpers/coordinate_converter.dart';
 import '../../main.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
+import '../../services/position_provider.dart';
 import 'geofence_edit.dart';
 
 const _overlayChannel = MethodChannel('com.z.nfc/overlay');
@@ -28,6 +29,7 @@ class GeofenceScreen extends StatefulWidget {
 
 class _GeofenceScreenState extends State<GeofenceScreen> {
   late final GeofenceProvider _geo;
+  late final PositionProvider _pos;
   final MapController _mapController = MapController();
   bool _useSatellite = false;
   LatLng _currentPosition = const LatLng(39.9042, 116.4074);
@@ -47,10 +49,12 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   void initState() {
     super.initState();
     _geo = AppScope.instance.controller.geofence;
+    _pos = AppScope.instance.controller.position;
     _geo.addListener(_onChange);
+    _pos.addListener(_onPosition);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _geo.startMapPositionStream();
+      _pos.start();
       _locateMe();
     });
   }
@@ -58,18 +62,23 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   @override
   void dispose() {
     _geo.removeListener(_onChange);
-    _geo.stopMapPositionStream();
+    _pos.removeListener(_onPosition);
+    _pos.stop();
     _mapController.dispose();
     super.dispose();
   }
 
+  /// 围栏状态变化（命中/离开/上传/总开关等）只需刷新界面
   void _onChange() {
     if (!mounted) return;
-    final pos = _geo.lastPosition;
-    if (pos == null || pos == _currentPosition) {
-      setState(() {});
-      return;
-    }
+    setState(() {});
+  }
+
+  /// 定位回调：只来自独立定位源，与围栏总开关和设备连接无关
+  void _onPosition() {
+    if (!mounted) return;
+    final pos = _pos.lastPosition;
+    if (pos == null || pos == _currentPosition) return;
     setState(() {
       _currentPosition = pos;
       _positionLoaded = true;
@@ -112,7 +121,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   }
 
   Future<void> _locateMe() async {
-    final target = _geo.lastPosition ?? await _getGcjPosition();
+    final target = _pos.lastPosition ?? await _getGcjPosition();
     if (!mounted) return;
     if (target == null) {
       setState(() => _statusMessage = '定位失败：请检查定位权限');
@@ -151,7 +160,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
               _toast('定位权限仍未开启，无法定位与跟随');
               return;
             }
-            await _geo.startMapPositionStream();
+            await _pos.start();
             if (!mounted) return;
             _toast('定位权限已开启，地图开始跟随');
             _locateMe();
@@ -518,7 +527,11 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (context) =>
-                            FenceEditPage(provider: _geo, fence: null),
+                            FenceEditPage(
+                              provider: _geo,
+                              fence: null,
+                              position: _pos,
+                            ),
                       ),
                     );
                   },
@@ -535,8 +548,8 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
 
   Widget _buildDiagnostics(bool isDark) {
     final connected = _geo.connected;
-    final time = _geo.lastPositionTime;
-    final pos = _geo.lastPosition;
+    final time = _pos.lastPositionTime;
+    final pos = _pos.lastPosition;
     final matched = _geo.lastMatchedFenceName;
     final events = _geo.eventLogs;
     final latestEvent = events.isEmpty ? null : events.last.split('] ').last;
@@ -569,7 +582,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             textStyle,
           ),
           _diagRow(
-            _geo.monitoring ? Icons.my_location : Icons.location_off,
+            _pos.running ? Icons.my_location : Icons.location_off,
             time != null ? '定位 ${_fmtTime(time)}' : '暂无定位',
             time != null ? Colors.blue : Colors.grey,
             textStyle,
@@ -814,7 +827,11 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (context) =>
-                                FenceEditPage(provider: _geo, fence: fence),
+                                FenceEditPage(
+                                  provider: _geo,
+                                  fence: fence,
+                                  position: _pos,
+                                ),
                           ),
                         );
                       },
