@@ -52,6 +52,7 @@ dependencies:
   flutter_overlay_window:
     path: third_party/flutter_overlay_window
   flutter_map: ^7.0.2
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:

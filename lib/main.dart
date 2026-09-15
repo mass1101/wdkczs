@@ -5,6 +5,9 @@ import 'helpers/overlay_window.dart';
 import 'state/app_controller.dart';
 import 'ui/home_page.dart';
 import 'ui/widgets/common.dart';
+import 'services/notification_service.dart';
+import 'services/storage_service.dart';
+import 'services/watchdog.dart';
 
 @pragma('vm:entry-point')
 void overlayMain() {
@@ -21,8 +24,12 @@ void overlayMain() {
   }
 }
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService.instance.init();
+  if (await StorageService().getWatchdogEnabled()) {
+    await Watchdog.start();
+  }
   runApp(const NfcToolApp());
 }
 

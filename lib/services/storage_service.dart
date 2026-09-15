@@ -23,6 +23,7 @@ class StorageService {
   static const _kBackupLastMap = 'nfctool_backup_last_map';
   static const _kBackupEndpoint = 'nfctool_backup_endpoint';
   static const _kDefaultBackupEndpoint = 'https://card.zzx1101.tk:6363';
+  static const _kWatchdog = 'nfctool_watchdog';
 
   SharedPreferences? _prefs;
 
@@ -256,6 +257,18 @@ class StorageService {
   Future<void> clearCrackResume() async {
     final p = await _p;
     await p.remove(_kCrackResume);
+  }
+
+  // ========== 后台看门狗（对齐 CU watchdog.dart） ==========
+
+  Future<bool> getWatchdogEnabled() async {
+    final p = await _p;
+    return p.getBool(_kWatchdog) ?? false;
+  }
+
+  Future<void> setWatchdogEnabled(bool value) async {
+    final p = await _p;
+    await p.setBool(_kWatchdog, value);
   }
 
   /// 解析 16 进制字符串为字节

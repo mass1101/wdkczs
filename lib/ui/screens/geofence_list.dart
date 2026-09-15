@@ -13,6 +13,8 @@ import '../../main.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
 import '../../services/position_provider.dart';
+import '../../services/storage_service.dart';
+import '../../services/watchdog.dart';
 import 'geofence_edit.dart';
 
 const _overlayChannel = MethodChannel('com.z.nfc/overlay');
@@ -29,6 +31,8 @@ class GeofenceScreen extends StatefulWidget {
 class _GeofenceScreenState extends State<GeofenceScreen> {
   late final GeofenceProvider _geo;
   late final PositionProvider _pos;
+  late final StorageService _storage = StorageService();
+  bool _watchdogEnabled = false;
   final MapController _mapController = MapController();
   bool _useSatellite = false;
   LatLng _currentPosition = const LatLng(39.9042, 116.4074);
@@ -51,10 +55,12 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     _pos = AppScope.instance.controller.position;
     _geo.addListener(_onChange);
     _pos.addListener(_onPosition);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       _pos.start();
       _locateMe();
+      _watchdogEnabled = await _storage.getWatchdogEnabled();
+      if (mounted) setState(() {});
     });
   }
 
@@ -459,6 +465,26 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                                     ? '已开启：定位持续更新，连接设备后才判定'
                                     : '围栏判定已停止'),
                           );
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('后台看门狗', style: TextStyle(fontSize: 12)),
+                      Switch(
+                        value: _watchdogEnabled,
+                        onChanged: (v) async {
+                          await _storage.setWatchdogEnabled(v);
+                          if (v) {
+                            await Watchdog.start();
+                          } else {
+                            await Watchdog.stop();
+                          }
+                          setState(() => _watchdogEnabled = v);
                         },
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),

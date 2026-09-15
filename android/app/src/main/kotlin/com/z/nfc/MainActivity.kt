@@ -11,6 +11,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         GeofencePlugin.register(flutterEngine, applicationContext)
+        WatchdogPlugin.register(flutterEngine, applicationContext)
 
         val overlayChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
