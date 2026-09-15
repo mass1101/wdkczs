@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import '../../helpers/coordinate_converter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -13,7 +14,6 @@ import '../../main.dart';
 import '../../services/geofence.dart';
 import '../../services/geofence_provider.dart';
 import '../../services/notification_service.dart';
-import '../../services/position_provider.dart';
 import '../../services/storage_service.dart';
 import '../../services/watchdog.dart';
 import 'geofence_edit.dart';
@@ -31,7 +31,6 @@ class GeofenceScreen extends StatefulWidget {
 
 class _GeofenceScreenState extends State<GeofenceScreen> {
   late final GeofenceProvider _geo;
-  late final PositionProvider _pos;
   late final StorageService _storage = StorageService();
   bool _watchdogEnabled = false;
   final MapController _mapController = MapController();
@@ -44,7 +43,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   String? _dragFenceId;
   LatLng? _dragStartLatLng;
   LatLng? _dragHandleLatLng;
-  bool _mapReady = false;
   final Map<String, List<LatLng>> _liveDragPoints = {};
   String? _selectedFenceId;
   final _mapReadyCompleter = Completer<void>();
@@ -53,12 +51,9 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   void initState() {
     super.initState();
     _geo = AppScope.instance.controller.geofence;
-    _pos = AppScope.instance.controller.position;
     _geo.addListener(_onChange);
-    _pos.addListener(_onPosition);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      _pos.start();
       _locateMe();
       _watchdogEnabled = await _storage.getWatchdogEnabled();
       if (mounted) setState(() {});
@@ -68,8 +63,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   @override
   void dispose() {
     _geo.removeListener(_onChange);
-    _pos.removeListener(_onPosition);
-    _pos.stop();
     _mapController.dispose();
     super.dispose();
   }
@@ -80,22 +73,27 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     setState(() {});
   }
 
-  /// 定位回调：只来自独立定位源，与围栏总开关和设备连接无关
-  void _onPosition() {
-    if (!mounted) return;
-    final pos = _pos.lastPosition;
-    if (pos == null || pos == _currentPosition) return;
-    setState(() {
-      _currentPosition = pos;
-      _positionLoaded = true;
-    });
-    if (_followMe) _mapTo(pos);
-  }
-
-  /// 把地图中心移到 [target]，保持当前缩放级别
-  void _mapTo(LatLng target) {
-    if (!_mapReady) return;
-    _mapController.move(target, _mapController.camera.zoom);
+  /// 一次性获取当前位置（WGS84 → GCJ02），失败返回 null
+  Future<LatLng?> _getGcjPosition() async {
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      return CoordinateConverter.wgs84ToGcj02(
+          LatLng(pos.latitude, pos.longitude));
+    } catch (_) {
+      return null;
+    }
   }
 
   void _toast(String msg) {
@@ -108,85 +106,18 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   }
 
   Future<void> _locateMe() async {
-    final target = _pos.lastPosition ?? await _pos.refresh();
+    final target = _geo.lastPosition ?? await _getGcjPosition();
+    if (target == null) return;
     if (!mounted) return;
-    if (target == null) {
-      setState(() => _statusMessage = _pos.lastError ?? '定位失败');
-      // 权限已授予仍拿不到位置，通常是系统定位总闸没打开
-      if (_pos.permissionGranted) {
-        _promptLocationService();
-      } else {
-        _promptLocationPermission();
-      }
-      return;
-    }
     setState(() {
       _currentPosition = target;
       _positionLoaded = true;
-      _statusMessage = '已定位到当前位置';
     });
     try {
       await _mapReadyCompleter.future;
     } catch (_) {}
     if (!mounted) return;
     _mapController.move(target, 16.0);
-  }
-
-  /// 未获得定位权限时的引导：定位权限决定地图定位与跟随能否工作
-  Future<void> _promptLocationPermission() async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: const Text('未获得定位权限：请在系统设置中开启定位，否则地图与跟随不可用'),
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: '去设置',
-          onPressed: () async {
-            await Geolocator.openAppSettings();
-            if (!mounted) return;
-            final st = await Geolocator.checkPermission();
-            final granted = st == LocationPermission.always ||
-                st == LocationPermission.whileInUse;
-            if (!granted) {
-              _toast('定位权限仍未开启，无法定位与跟随');
-              return;
-            }
-            await _pos.start();
-            if (!mounted) return;
-            _toast('定位权限已开启，地图开始跟随');
-            _locateMe();
-          },
-        ),
-      ),
-    );
-  }
-
-  /// 权限已授予但系统定位服务总闸未打开时的引导
-  Future<void> _promptLocationService() async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: const Text('系统定位服务未开启：请在设置中打开定位开关'),
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: '去设置',
-          onPressed: () async {
-            await Geolocator.openLocationSettings();
-            if (!mounted) return;
-            if (!await Geolocator.isLocationServiceEnabled()) {
-              _toast('定位服务仍未开启，无法定位与跟随');
-              return;
-            }
-            await _pos.start();
-            if (!mounted) return;
-            _toast('定位服务已开启，地图开始跟随');
-            _locateMe();
-          },
-        ),
-      ),
-    );
   }
 
   Future<void> _enterFloatingWindow() async {
@@ -375,6 +306,18 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final latest = _geo.lastPosition;
+    if (latest != null && latest != _currentPosition) {
+      _currentPosition = latest;
+      _positionLoaded = true;
+      if (_followMe) {
+        final zoom = _mapController.camera.zoom;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _mapController.move(latest, zoom);
+        });
+      }
+    }
+
     return Scaffold(
       body: Stack(
         children: [
@@ -388,7 +331,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                 flags: InteractiveFlag.all,
               ),
               onMapReady: () {
-                _mapReady = true;
                 if (!_mapReadyCompleter.isCompleted) {
                   _mapReadyCompleter.complete();
                 }
@@ -570,7 +512,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                             FenceEditPage(
                               provider: _geo,
                               fence: null,
-                              position: _pos,
                             ),
                       ),
                     );
@@ -588,8 +529,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
 
   Widget _buildDiagnostics(bool isDark) {
     final connected = _geo.connected;
-    final time = _pos.lastPositionTime;
-    final pos = _pos.lastPosition;
+    final pos = _geo.lastPosition;
     final matched = _geo.lastMatchedFenceName;
     final events = _geo.eventLogs;
     final latestEvent = events.isEmpty ? null : events.last.split('] ').last;
@@ -619,16 +559,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             _geo.monitoring ? Icons.radar : Icons.radar_outlined,
             _geo.monitoring ? '围栏判定中' : '判定未运行',
             _geo.monitoring ? Colors.green : Colors.grey,
-            textStyle,
-          ),
-          _diagRow(
-            _pos.running ? Icons.my_location : Icons.location_off,
-            time != null
-                ? '定位 ${_fmtTime(time)}'
-                : (_pos.lastError ?? '暂无定位'),
-            time != null
-                ? Colors.blue
-                : (_pos.lastError != null ? Colors.red : Colors.grey),
             textStyle,
           ),
           if (pos != null)
@@ -767,11 +697,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     );
   }
 
-  String _fmtTime(DateTime t) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
-  }
-
   Widget _buildBottomSheet(bool isDark) {
     final fences = _geo.fences;
     return DraggableScrollableSheet(
@@ -874,7 +799,6 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                                 FenceEditPage(
                                   provider: _geo,
                                   fence: fence,
-                                  position: _pos,
                                 ),
                           ),
                         );

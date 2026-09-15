@@ -14,7 +14,6 @@ import '../services/cloud_service.dart';
 import '../services/device_service.dart';
 import '../services/dfu_zip.dart';
 import '../services/geofence_provider.dart';
-import '../services/position_provider.dart';
 import '../services/slot_writer.dart';
 import '../services/storage_service.dart';
 
@@ -31,7 +30,6 @@ class AppController extends ChangeNotifier {
     cloud = CloudService(storage);
     final geo = GeofenceProvider();
     geofence = geo;
-    position = PositionProvider();
     device.init();
     installAutoBackupHook();
     ble.status.addListener(_onBleStatus);
@@ -42,9 +40,6 @@ class AppController extends ChangeNotifier {
 
   // 电子围栏
   late final GeofenceProvider geofence;
-
-  // 定位源（独立于围栏：不检查总开关与设备连接）
-  late final PositionProvider position;
 
   // IC 卡状态
   CardState card = CardState.withDefaultData();

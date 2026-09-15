@@ -17,8 +17,7 @@ import 'geofence.dart';
 /// WGS84 转 GCJ02 再做围栏匹配，回调的坐标与命中/离开事件都是 GCJ-02。
 /// 仅在「总开关开 + 设备已连接」时运行——围栏动作要写卡槽，必须连设备。
 ///
-/// 地图定位与显示不从这里取，走独立的 PositionProvider（不检查总开关与设备
-/// 连接），两条链路各自转各自的 GCJ-02，互不写对方的状态。
+/// 地图蓝点与围栏判定共用此处的 lastPosition（原生通道位置，已转 GCJ02）。
 class GeofenceProvider extends ChangeNotifier {
   List<Geofence> _fences = [];
   bool _userEnabled = false;
