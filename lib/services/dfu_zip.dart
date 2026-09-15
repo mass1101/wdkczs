@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:collection/collection.dart';
+import 'package:crypto/crypto.dart';
+import 'package:nfctool_app/protobuf/dfu-cc.pb.dart';
 
 /// nRF DFU 固件包解析（对应逆向 DfuZip）
 ///
@@ -56,18 +59,33 @@ class DfuZip {
     return null;
   }
 
-  /// 验证镜像（对齐 CU validateFiles 的基本检查）
+  /// 验证镜像（对齐 CU validateFiles：签名检查 + 哈希校验）
   static void validateImage(Uint8List dat, Uint8List bin) {
     if (dat.isEmpty || bin.isEmpty) {
       throw Exception('Empty firmware file');
     }
-    // 检查 dat 最小大小（nRF DFU header 至少 64 字节）
-    if (dat.length < 64) {
-      throw Exception('Invalid DFU header: too small (${dat.length} bytes)');
+
+    final metadata = Packet.fromBuffer(dat);
+    if (!metadata.hasSignedCommand()) {
+      throw Exception('Package isn\'t signed');
     }
-    // 检查 bin 大小合理性（固件镜像通常 > 1KB）
-    if (bin.length < 1024) {
-      throw Exception('Invalid firmware binary: too small (${bin.length} bytes)');
+
+    final command = metadata.signedCommand.command;
+    if (!command.hasInit()) {
+      throw Exception('Package command doesn\'t have init');
+    }
+
+    final hash = command.init.hash;
+    final expectedHash = hash.hash.reversed;
+    final actualHash = switch (hash.hashType) {
+      HashType.SHA128 => sha1,
+      HashType.SHA256 => sha256,
+      HashType.SHA512 => sha512,
+      _ => throw Exception('Unsupported hash type ${hash.hashType}'),
+    }.convert(bin).bytes;
+
+    if (!const IterableEquality().equals(expectedHash, actualHash)) {
+      throw Exception('Hashes don\'t match!');
     }
   }
 
