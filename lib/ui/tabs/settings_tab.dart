@@ -395,7 +395,6 @@ class _SettingsTabState extends State<SettingsTab> {
                         _actionRow('长按按钮B', _app.settings.longPressBtnB, (v) {
                           _app.setLongPressBtnB(v);
                         }),
-                        _switchRow('恢复出厂设置', false, (v) {}),
                       ],
                     ),
                   ),
