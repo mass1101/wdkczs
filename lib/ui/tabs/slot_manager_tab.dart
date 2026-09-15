@@ -30,6 +30,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
   List<(String?, String?)> _slotNames = [];
 
   int _progress = -1;
+  int _activeSlot = -1;
 
   static const _slotCount = 80;
 
@@ -46,6 +47,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
       _slotTypes = await _app.device.cmdSlotGetInfo();
       _enabledSlots = await _app.device.cmdSlotGetIsEnable();
       _slotNames = await _app.device.cmdSlotGetFreqNames();
+      _activeSlot = await _app.device.cmdSlotGetActive();
     } catch (_) {}
     if (!mounted) return;
     setState(() => _progress = -1);
@@ -201,6 +203,18 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
       _toast('写入失败: $e');
     } finally {
       _setProgress(-1);
+    }
+  }
+
+  Future<void> _setActiveSlot(int slot) async {
+    try {
+      await _app.device.cmdSlotSetActive(slot);
+      _activeSlot = slot;
+      _toast('已切换到卡槽 ${slot + 1}');
+      if (!mounted) return;
+      setState(() {});
+    } catch (e) {
+      _toast('切换失败: $e');
     }
   }
 
@@ -503,6 +517,21 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                   Icons.settings,
                                   size: 16,
                                   color: Colors.grey,
+                                ),
+                              ),
+                              IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                onPressed: () => _setActiveSlot(index),
+                                icon: Icon(
+                                  Icons.power_settings_new,
+                                  size: 16,
+                                  color: _activeSlot == index
+                                      ? Colors.green
+                                      : Colors.grey,
                                 ),
                               ),
                             ],
