@@ -343,7 +343,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     child: Column(
                       children: [
                         _infoRow('云端固件版本', _cloudFirmwareVersion ?? '加载中...'),
-                        _infoRow('Git 版本', info.gitVersion.isEmpty ? '--' : info.gitVersion),
+                        _infoRow('固件版本', info.version.isEmpty ? '--' : info.version),
                         _infoRow('芯片编号', info.chipId.isEmpty ? '--' : info.chipId),
                         _infoRow('蓝牙地址', info.bleAddress.isEmpty ? '--' : info.bleAddress),
                         _infoRow('电量',
