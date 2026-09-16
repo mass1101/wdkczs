@@ -277,24 +277,40 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setPressBtnA(ButtonAction a) {
+  Future<void> setPressBtnA(ButtonAction a) async {
     settings.pressBtnA = a;
     notifyListeners();
+    try {
+      await device.cmdSetButtonPressAction(65, a);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
-  void setPressBtnB(ButtonAction a) {
+  Future<void> setPressBtnB(ButtonAction a) async {
     settings.pressBtnB = a;
     notifyListeners();
+    try {
+      await device.cmdSetButtonPressAction(66, a);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
-  void setLongPressBtnA(ButtonAction a) {
+  Future<void> setLongPressBtnA(ButtonAction a) async {
     settings.longPressBtnA = a;
     notifyListeners();
+    try {
+      await device.cmdSetButtonLongPressAction(65, a);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
-  void setLongPressBtnB(ButtonAction a) {
+  Future<void> setLongPressBtnB(ButtonAction a) async {
     settings.longPressBtnB = a;
     notifyListeners();
+    try {
+      await device.cmdSetButtonLongPressAction(66, a);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
   /// 验证激活状态（对齐 CU verifyActivation）
