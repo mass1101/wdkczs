@@ -502,7 +502,13 @@ class _SettingsTabState extends State<SettingsTab> {
               margin: const EdgeInsets.fromLTRB(0, 8, 6, 0),
               child: Column(
                 children: [
-                  _sideBtn('激活功能', Icons.verified_user, _showActivationDialog, primary),
+                  _sideBtn(
+                    _app.isActivated ? '已激活' : '激活功能',
+                    _app.isActivated ? Icons.verified : Icons.verified_user,
+                    _showActivationDialog,
+                    primary,
+                    iconColor: _app.isActivated ? const Color(0xFFFFD700) : null,
+                  ),
                   _sideBtn('读取设置', Icons.download, _refresh, primary),
                   _sideBtn('保存设置', Icons.save, _saveSettings, primary),
                   _sideBtn('恢复出厂', Icons.refresh, _resetSettings, primary),
@@ -952,13 +958,14 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  Widget _sideBtn(String label, IconData icon, VoidCallback? onTap, Color color) {
+  Widget _sideBtn(String label, IconData icon, VoidCallback? onTap, Color color, {Color? iconColor}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: ActionButton(
           label: label,
           icon: icon,
           color: color,
+          iconColor: iconColor,
           onTap: onTap,
           enabled: _app.connected || label == '保存设置'),
     );

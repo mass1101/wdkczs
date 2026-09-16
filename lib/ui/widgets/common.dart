@@ -112,6 +112,7 @@ class ActionButton extends StatelessWidget {
   final IconData? icon;
   final VoidCallback? onTap;
   final Color? color;
+  final Color? iconColor;
   final bool enabled;
   final bool stretch;
 
@@ -121,6 +122,7 @@ class ActionButton extends StatelessWidget {
     this.icon,
     this.onTap,
     this.color,
+    this.iconColor,
     this.enabled = true,
     this.stretch = false,
   });
@@ -153,7 +155,7 @@ class ActionButton extends StatelessWidget {
                     : MainAxisAlignment.start,
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 16, color: c),
+                    Icon(icon, size: 16, color: iconColor ?? c),
                     const SizedBox(width: 4),
                   ],
                   Text(label, style: TextStyle(fontSize: 13, color: c)),
