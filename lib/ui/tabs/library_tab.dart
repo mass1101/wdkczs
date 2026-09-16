@@ -15,6 +15,7 @@ import '../../services/storage_service.dart';
 import '../../state/app_controller.dart';
 import '../dialogs/cloud_backup_manager_dialog.dart';
 import '../screens/card_cloud_analyze_screen.dart';
+import '../widgets/slot_picker_dialog.dart';
 import '../screens/card_compare_screen.dart';
 import '../screens/card_create_dialog.dart';
 import '../screens/card_edit_dialog.dart';
@@ -219,11 +220,6 @@ class _LibraryTabState extends State<LibraryTab> {
                 label: '导入',
                 icon: Icons.file_download,
                 onTap: _openImport,
-              ),
-              ActionButton(
-                label: '写入卡槽',
-                icon: Icons.memory,
-                onTap: _connected ? _pickAndWrite : null,
               ),
               ActionButton(
                 label: '云端备份',
@@ -695,29 +691,6 @@ class _LibraryTabState extends State<LibraryTab> {
   }
 
   // ========== 写入卡槽 ==========
-  Future<void> _pickAndWrite() async {
-    final card = await showDialog<SaveCard>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('选择要写入的卡片'),
-        children: _cards.isEmpty
-            ? [const Padding(padding: EdgeInsets.all(20), child: Text('卡库为空'))]
-            : _cards
-                  .map(
-                    (c) => SimpleDialogOption(
-                      onPressed: () => Navigator.pop(ctx, c),
-                      child: Text(
-                        '${c.name.isEmpty ? c.uid : c.name}  [${c.tag.label}]',
-                      ),
-                    ),
-                  )
-                  .toList(),
-      ),
-    );
-    if (card == null) return;
-    await _writeToSlot(card);
-  }
-
   Future<void> _writeToSlot(SaveCard card) async {
     final slot = await _pickSlotDialog();
     if (slot == null) return;
@@ -742,43 +715,13 @@ class _LibraryTabState extends State<LibraryTab> {
     try {
       enables = await _app.device.cmdSlotGetIsEnable();
     } catch (_) {
-      enables = List.generate(8, (_) => (false, false));
+      enables = const [];
     }
     if (!mounted) return null;
-    return showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('选择目标卡槽'),
-        children: [
-          Wrap(
-            children: List.generate(8, (i) {
-              final (hf, lf) = enables[i];
-              final hasCard = hf || lf;
-              return Padding(
-                padding: const EdgeInsets.all(4),
-                child: ChoiceChip(
-                  label: Text(
-                    '卡槽 ${i + 1}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: hasCard ? Colors.black87 : Colors.grey,
-                    ),
-                  ),
-                  selected: false,
-                  onSelected: (_) => Navigator.pop(ctx, i),
-                ),
-              );
-            }),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
-            ),
-          ),
-        ],
-      ),
+    return showSlotPickerDialog(
+      context,
+      enables: enables,
+      title: '选择目标卡槽',
     );
   }
 

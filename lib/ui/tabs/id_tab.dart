@@ -11,6 +11,7 @@ import '../../services/device_service.dart';
 import '../../state/app_controller.dart';
 import '../dialogs/text_input_dialog.dart';
 import '../widgets/common.dart';
+import '../widgets/slot_picker_dialog.dart';
 
 /// ID 卡 Tab：4 密钥 / Hex+Dec 显示 / 卡列表 / 读卡与写卡槽
 class IdTab extends StatefulWidget {
@@ -58,33 +59,7 @@ class _IdTabState extends State<IdTab> {
   // ========== 卡槽选择（弹框） ==========
   /// 弹出卡槽选择对话框，返回所选卡槽索引（取消返回 null）
   Future<int?> _pickSlot() async {
-    final slot = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('选择卡槽', style: TextStyle(fontSize: 16)),
-        content: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (var i = 0; i < 80; i++)
-              ChoiceChip(
-                label: Text(
-                  '卡槽 ${i + 1}',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                selected: i == _slotPage,
-                onSelected: (_) => Navigator.pop(ctx, i),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
+    final slot = await showSlotPickerDialog(context, currentSlot: _slotPage);
     if (slot != null) {
       await _app.selectSlot(slot);
       if (mounted) setState(() => _slotPage = slot);

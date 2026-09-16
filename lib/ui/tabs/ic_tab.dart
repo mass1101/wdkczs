@@ -20,6 +20,7 @@ import '../../ui/dialogs/crack_dialog.dart';
 import '../../ui/dialogs/key_file_sheet.dart';
 import '../../ui/dialogs/text_input_dialog.dart';
 import '../screens/card_cloud_analyze_screen.dart';
+import '../widgets/slot_picker_dialog.dart';
 import '../widgets/common.dart';
 
 /// IC 卡 Tab：密钥卡片、卡类型、扇区数据表、右侧操作按钮
@@ -4080,35 +4081,8 @@ class _IcTabState extends State<IcTab> {
   // ========== 卡槽选择（弹框） ==========
   /// 弹出卡槽选择对话框，返回所选卡槽索引（取消返回 null），选择后切到该卡槽
   Future<int?> _pickSlot() async {
-    final slot = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('选择卡槽', style: TextStyle(fontSize: 16)),
-        content: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (var i = 0; i < 80; i++)
-              ChoiceChip(
-                label: Text(
-                  '卡槽 ${i + 1}',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                selected: i == _slotPage,
-                onSelected: (_) => Navigator.pop(ctx, i),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
+    final slot = await showSlotPickerDialog(context, currentSlot: _slotPage);
     if (slot != null) {
-      // 先切到该卡槽并从设备加载该槽的真实模拟设置与卡片标识
       await _app.selectSlot(slot);
       if (mounted) setState(() => _slotPage = slot);
     }
