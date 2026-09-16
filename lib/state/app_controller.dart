@@ -71,10 +71,11 @@ class AppController extends ChangeNotifier {
   bool _processing = false;
 
   // 激活状态（对齐 CU appState.isActivated/remainingBoots）
+  // CU: isActivated = isActivatedForChip(currentChipId)，启动时 currentChipId='' → false
   bool _isActivated = false;
   int _remainingBoots = 0;
-  bool get isActivated => _isActivated;
-  int get remainingBoots => _remainingBoots;
+  bool get isActivated => deviceInfo.chipId.isNotEmpty && _isActivated;
+  int get remainingBoots => isActivated ? _remainingBoots : 0;
 
   /// 每槽的 UID/SAK/ATQA 展示数据（读卡槽时刷新）
   final List<({String uid, String sak, String atqa})> slotCardIds =
@@ -380,9 +381,9 @@ class AppController extends ChangeNotifier {
   }
 
   /// 加载激活状态
+  /// 对齐 CU：启动时 currentChipId 为空 → isActivated 直接 false，
+  /// 激活状态在连接设备后由 verifyActivation/_syncActivationFromFirmware 刷新
   Future<void> _loadActivationState() async {
-    _isActivated = await storage.getActivated();
-    _remainingBoots = await storage.getRemainingBoots();
     notifyListeners();
   }
 
