@@ -261,7 +261,7 @@ class _SettingsTabState extends State<SettingsTab> {
         },
         onStage: (stage) {
           if (dialogCtx != null && dialogCtx!.mounted) {
-            _setDfuStage(dialogCtx!, '阶段 $stage');
+            _setDfuStage(dialogCtx!, '正在刷写固件...阶段 $stage');
           }
         },
       );
