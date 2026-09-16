@@ -278,6 +278,15 @@ class BleService {
     }
   }
 
+  /// DFU 控制命令写入（对齐 CU write firmware:false）
+  /// 写入 DFU 控制点特征 8EC90001，使用 with-response（控制命令需 ACK）
+  Future<void> dfuControlWrite(Uint8List data) async {
+    if (_writeChar == null) {
+      throw Exception('当前设备不支持 DFU 控制写入');
+    }
+    await _writeWithRetry(_writeChar!, data, withoutResponse: false);
+  }
+
   /// 注册 DFU 回调（对齐 CU registerCallback）
   void registerDfuCallback(void Function(List<int>)? callback) {
     _dfuCallback = callback;

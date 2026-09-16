@@ -175,7 +175,8 @@ class DFUCommunicator {
     _serialInstance.registerDfuCallback(responseCompleter?.complete);
 
     debugPrint('DFU Sending: ${bytesToHex(packet)}');
-    await _serialInstance.dfuWrite(packet);
+    // 控制命令写入 DFU 控制点 8EC90001（with-response），对齐 CU write(firmware:false)
+    await _serialInstance.dfuControlWrite(packet);
 
     List<int>? readBuffer = await responseCompleter?.future;
 

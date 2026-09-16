@@ -100,7 +100,7 @@ class _SettingsTabState extends State<SettingsTab> {
       } else {
         await _dev.cmdBleSetPairingMode(false);
       }
-      await _dev.cmdSlotSaveSettings();
+      await _dev.cmdSaveSettings();
       _toast('设置已保存');
     } catch (e) {
       _toast('保存失败: $e');
@@ -764,7 +764,7 @@ class _SettingsTabState extends State<SettingsTab> {
                         try {
                           await _dev.cmdSetPollingDelay(value);
                           await _dev.cmdSetPollingEnable(true);
-                          await _dev.cmdSlotSaveSettings();
+                          await _dev.cmdSaveSettings();
                           setState(() {
                             _pollingDelay = value;
                             _pollingEnabled = true;
@@ -779,11 +779,11 @@ class _SettingsTabState extends State<SettingsTab> {
                         try {
                           if (_pollingEnabled) {
                             await _dev.cmdSetPollingEnable(false);
-                            await _dev.cmdSlotSaveSettings();
+                            await _dev.cmdSaveSettings();
                             setState(() => _pollingEnabled = false);
                           } else {
                             await _dev.cmdSetPollingEnable(true);
-                            await _dev.cmdSlotSaveSettings();
+                            await _dev.cmdSaveSettings();
                             setState(() => _pollingEnabled = true);
                           }
                         } catch (_) {}
@@ -813,7 +813,7 @@ class _SettingsTabState extends State<SettingsTab> {
                         setState(() => _pollingAdaptive = value);
                         try {
                           await _dev.cmdSetPollingAdaptive(value);
-                          await _dev.cmdSlotSaveSettings();
+                          await _dev.cmdSaveSettings();
                         } catch (_) {}
                       },
                     ),
@@ -900,7 +900,7 @@ class _SettingsTabState extends State<SettingsTab> {
                       onPressed: () async {
                         try {
                           await _dev.cmdSetPollingSlots(_pollingSlots);
-                          await _dev.cmdSlotSaveSettings();
+                          await _dev.cmdSaveSettings();
                         } catch (_) {}
                       },
                       child: const Text('保存槽位'),
