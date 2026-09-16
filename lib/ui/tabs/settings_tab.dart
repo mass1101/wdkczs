@@ -88,10 +88,11 @@ class _SettingsTabState extends State<SettingsTab> {
     try {
       final s = _app.settings;
       await _dev.cmdSetAnimationMode(s.animation);
-      await _dev.cmdSetButtonPressAction(0, s.pressBtnA);
-      await _dev.cmdSetButtonPressAction(1, s.pressBtnB);
-      await _dev.cmdSetButtonLongPressAction(0, s.longPressBtnA);
-      await _dev.cmdSetButtonLongPressAction(1, s.longPressBtnB);
+      // ButtonType: A=65, B=66（对齐固件 ASCII ord，CU ButtonType.a(65)/b(66)）
+      await _dev.cmdSetButtonPressAction(65, s.pressBtnA);
+      await _dev.cmdSetButtonPressAction(66, s.pressBtnB);
+      await _dev.cmdSetButtonLongPressAction(65, s.longPressBtnA);
+      await _dev.cmdSetButtonLongPressAction(66, s.longPressBtnB);
       if (s.blePairing) {
         await _dev.cmdBleSetPairingMode(true);
         if (s.blePairingKey != '0000') {
