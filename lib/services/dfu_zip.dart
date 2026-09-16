@@ -90,6 +90,16 @@ class DfuZip {
   }
 
   /// 获取应用镜像（application）
-  ({String type, Uint8List header, Uint8List body})? getAppImage() =>
-      getImage(['application']);
+  /// 优先读 manifest.json；缺失时 fallback 直接读 application.dat/bin（对齐 CU unpackFirmware）
+  ({String type, Uint8List header, Uint8List body})? getAppImage() {
+    final image = getImage(['application']);
+    if (image != null) return image;
+
+    // fallback：包内无 manifest.json，直接按固定文件名读取（CU 固件包格式）
+    final dat = _fileBytes('application.dat');
+    final bin = _fileBytes('application.bin');
+    if (dat == null || bin == null) return null;
+    validateImage(dat, bin);
+    return (type: 'application', header: dat, body: bin);
+  }
 }

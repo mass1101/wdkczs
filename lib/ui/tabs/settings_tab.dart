@@ -173,9 +173,7 @@ class _SettingsTabState extends State<SettingsTab> {
     }
     await _performDfuFlash(
       title: '正在下载固件...',
-      flash: (onProgress) async {
-        await _app.dfuUpdateFromUrls(_firmwareUrls, onProgress: onProgress);
-      },
+      prepare: () => _app.dfuDownloadAndParse(_firmwareUrls),
     );
   }
 
@@ -193,16 +191,15 @@ class _SettingsTabState extends State<SettingsTab> {
     final zipBytes = Uint8List.fromList(await File(file.path!).readAsBytes());
     await _performDfuFlash(
       title: '正在准备本地固件...',
-      flash: (onProgress) async {
-        await _app.dfuUpdateFromFile(zipBytes, onProgress: onProgress);
-      },
+      prepare: () async => _app.dfuParseFile(zipBytes),
     );
   }
 
-  /// 执行 DFU 刷写流程（对齐 CU flashFile：enterDFU → disconnect → wait → scan → connect → flash）
+  /// 执行 DFU 刷写流程（对齐 CU flashFile）
+  /// 顺序：下载+解析+校验 → enterDFU → disconnect → 扫描 → 连接 → 禁重连 → 刷写
   Future<void> _performDfuFlash({
     required String title,
-    required Future<void> Function(void Function(int progress) onProgress) flash,
+    required Future<({Uint8List header, Uint8List body})> Function() prepare,
   }) async {
     if (!mounted) return;
     BuildContext? dialogCtx;
@@ -216,6 +213,9 @@ class _SettingsTabState extends State<SettingsTab> {
     );
 
     try {
+      // 0. 下载 + 解析 + 校验（进 DFU 之前完成，避免 bootloader 期间下载断连）
+      final image = await prepare();
+
       // 1. 进入 DFU 模式
       await _dev.cmdDfuEnter();
 
@@ -227,19 +227,24 @@ class _SettingsTabState extends State<SettingsTab> {
         await Future.delayed(const Duration(seconds: 1));
       }
 
-      // 4. 无限循环扫描直到发现 DFU 设备
+      // 4. 扫描直到发现 DFU 设备
       final target = await _scanForDfuDevice();
       if (!mounted) return;
 
-      // 5. 连接 bootloader
+      // 5. 连接 bootloader 并禁用自动重连（DFU 传输中断不应后台重连）
       await _app.ble.connect(target);
+      _app.ble.setAutoReconnect(false);
 
       // 6. 刷写固件
-      await flash((progress) {
-        if (dialogCtx != null && dialogCtx!.mounted) {
-          _updateDfuDialog(dialogCtx!, progress);
-        }
-      });
+      await _dev.dfuUpdateImage(
+        header: image.header,
+        body: image.body,
+        onProgress: (progress) {
+          if (dialogCtx != null && dialogCtx!.mounted) {
+            _updateDfuDialog(dialogCtx!, progress);
+          }
+        },
+      );
 
       // 7. 成功
       if (dialogCtx != null && dialogCtx!.mounted) {

@@ -382,6 +382,18 @@ class AppController extends ChangeNotifier {
     List<String> urls, {
     void Function(int progress)? onProgress,
   }) async {
+    final image = await dfuDownloadAndParse(urls);
+    await device.dfuUpdateImage(
+      header: image.header,
+      body: image.body,
+      onProgress: onProgress,
+    );
+  }
+
+  /// 仅下载并解析固件包（不刷写），返回 (header=dat, body=bin)
+  /// 对齐 CU：下载与校验在 enterDFU 之前完成，避免 bootloader 期间下载断连
+  Future<({Uint8List header, Uint8List body})> dfuDownloadAndParse(
+      List<String> urls) async {
     Uint8List? content;
     String? lastError;
     for (final url in urls) {
@@ -401,22 +413,14 @@ class AppController extends ChangeNotifier {
     if (image == null) {
       throw Exception('无法从固件包解析 application 镜像');
     }
-    await device.dfuUpdateImage(
-      header: image.header,
-      body: image.body,
-      onProgress: onProgress,
-    );
+    return (header: image.header, body: image.body);
   }
 
   /// DFU 固件刷写（从本地 zip 文件）
   Future<void> dfuUpdateFromFile(Uint8List zipBytes, {
     void Function(int progress)? onProgress,
   }) async {
-    final zip = DfuZip(zipBytes);
-    final image = zip.getAppImage();
-    if (image == null) {
-      throw Exception('无法从固件包解析 application 镜像');
-    }
+    final image = dfuParseFile(zipBytes);
     await device.dfuUpdateImage(
       header: image.header,
       body: image.body,
@@ -424,10 +428,20 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  /// 仅解析本地固件包（不刷写），返回 (header, body)
+  ({Uint8List header, Uint8List body}) dfuParseFile(Uint8List zipBytes) {
+    final zip = DfuZip(zipBytes);
+    final image = zip.getAppImage();
+    if (image == null) {
+      throw Exception('无法从固件包解析 application 镜像');
+    }
+    return (header: image.header, body: image.body);
+  }
+
   Future<Uint8List> _httpGetBytes(String url) async {
     final res = await http
         .get(Uri.parse(url))
-        .timeout(const Duration(seconds: 30));
+        .timeout(const Duration(seconds: 120));
     if (res.statusCode != 200) {
       throw Exception('下载固件失败: HTTP ${res.statusCode}');
     }

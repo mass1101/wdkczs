@@ -45,6 +45,9 @@ class BleService {
   /// 是否 ChameleonUltra（非 CU- 系列）
   bool get isChameleonUltra => !_isCu;
 
+  /// 设置是否自动重连（DFU 传输期间应关闭，避免断连后台重连与 DFU 状态冲突）
+  void setAutoReconnect(bool v) => _autoReconnect = v;
+
   /// 接收数据流（设备 notify 回调）
   Stream<Uint8List> get rx => _rxController.stream;
 
