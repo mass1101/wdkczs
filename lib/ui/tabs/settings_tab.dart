@@ -202,13 +202,11 @@ class _SettingsTabState extends State<SettingsTab> {
     required Future<({Uint8List header, Uint8List body})> Function() prepare,
   }) async {
     if (!mounted) return;
-    BuildContext? dialogCtx;
     final dfuKey = GlobalKey<_DfuDialogState>();
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        dialogCtx = ctx;
         return _DfuDialog(key: dfuKey, title: title);
       },
     );
@@ -253,10 +251,7 @@ class _SettingsTabState extends State<SettingsTab> {
       // 7. 完成：弹窗切换完成态，由用户点确认关闭
       dfuKey.currentState?.setCompleted();
     } catch (e) {
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        Navigator.of(dialogCtx!).pop();
-        _toast('刷写失败: $e');
-      }
+      dfuKey.currentState?.setFailed('$e');
     }
   }
 
@@ -1056,6 +1051,8 @@ class _DfuDialogState extends State<_DfuDialog> {
   int _progress = 0;
   late String _stageText = widget.title;
   bool _completed = false;
+  bool _failed = false;
+  String _failMsg = '';
 
   void setProgress(int progress) {
     if (!mounted) return;
@@ -1080,11 +1077,19 @@ class _DfuDialogState extends State<_DfuDialog> {
     });
   }
 
+  void setFailed(String msg) {
+    if (!mounted) return;
+    setState(() {
+      _failed = true;
+      _failMsg = msg;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        _completed ? '更新完成' : widget.title,
+        _failed ? '刷写失败' : (_completed ? '更新完成' : widget.title),
         style: const TextStyle(fontSize: 16),
       ),
       content: SizedBox(
@@ -1093,11 +1098,16 @@ class _DfuDialogState extends State<_DfuDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              _stageText,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+              _failed ? _failMsg : _stageText,
+              style: TextStyle(
+                fontSize: 13,
+                color: _failed
+                    ? const Color(0xFFE53935)
+                    : const Color(0xFF666666),
+              ),
             ),
             const SizedBox(height: 12),
-            if (!_completed) ...[
+            if (!_completed && !_failed) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: SizedBox(
@@ -1136,11 +1146,11 @@ class _DfuDialogState extends State<_DfuDialog> {
           ],
         ),
       ),
-      actions: _completed
+      actions: (_completed || _failed)
           ? [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('确定'),
+                child: Text(_completed ? '确定' : '关闭'),
               ),
             ]
           : null,
