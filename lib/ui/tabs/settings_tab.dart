@@ -433,198 +433,6 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                   ),
-                  // 激活功能
-                  SectionCard(
-                    title: '激活功能',
-                    child: Column(
-                      children: [
-                        if (_chipId.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outline,
-                                width: 0.5,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Text('芯片 ID: ',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withValues(alpha: 0.6),
-                                    )),
-                                Expanded(
-                                  child: Text(
-                                    _chipId,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontFamily: 'monospace',
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.copy, size: 16),
-                                  onPressed: () {
-                                    Clipboard.setData(
-                                        ClipboardData(text: _chipId));
-                                  },
-                                  tooltip: '复制',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                      minWidth: 28, minHeight: 28),
-                                ),
-                              ],
-                            ),
-                          ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _activationCodeController,
-                                decoration: const InputDecoration(
-                                  labelText: '激活码:',
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 8),
-                                ),
-                                enabled: !_app.isActivated,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.qr_code_scanner),
-                              tooltip: '扫码输入',
-                              onPressed: _app.isActivated
-                                  ? null
-                                  : () async {
-                                      final result = await showDialog<String>(
-                                        context: context,
-                                        builder: (context) =>
-                                            const QrCodeScanner(),
-                                      );
-                                      if (result != null &&
-                                          result.isNotEmpty) {
-                                        setState(() {
-                                          _activationCodeController.text =
-                                              result;
-                                        });
-                                      }
-                                    },
-                            ),
-                            ElevatedButton(
-                              onPressed: _app.isActivated
-                                  ? null
-                                  : () async {
-                                      final code =
-                                          _activationCodeController.text;
-                                      if (code.isEmpty) return;
-                                      if (validateActivationCode(
-                                          _chipId, code)) {
-                                        final rejectMsg =
-                                            await checkActivationOnline(
-                                                _chipId, code);
-                                        if (rejectMsg != null) {
-                                            if (context.mounted) {
-                                              showDialog<void>(
-                                                context: context,
-                                              builder: (dialogContext) =>
-                                                  AlertDialog(
-                                                title: const Text('无法激活'),
-                                                content: Text(rejectMsg),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                            dialogContext),
-                                                    child: const Text('好'),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          }
-                                          return;
-                                        }
-                                      }
-                                      final result = await _app.device
-                                          .cmdSetActivationDebug(_chipId, code);
-                                      final status = result[0] as int;
-                                      final dataHex = result[1] as String;
-                                      if (status == 0x68) {
-                                        await _app.setActivated(true,
-                                            chipId: _chipId);
-                                        _toast('激活成功');
-                                      } else {
-                                        var msg = '激活码无效 (status=0x${status.toRadixString(16).padLeft(2, '0')})';
-                                        if (dataHex.isNotEmpty) {
-                                          msg += ' hash=$dataHex';
-                                        }
-                                        if (context.mounted) {
-                                          showDialog<void>(
-                                            context: context,
-                                            builder: (dialogContext) =>
-                                                AlertDialog(
-                                              title: const Text('无法激活'),
-                                              content: Text(msg),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () =>
-                                                      Navigator.pop(
-                                                          dialogContext),
-                                                  child: const Text('好'),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                        }
-                                      }
-                                    },
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _app.isActivated
-                                        ? (_app.remainingBoots > 0
-                                            ? '试用版 (剩余${_app.remainingBoots}次)'
-                                            : '已激活')
-                                        : '激活',
-                                    style: TextStyle(
-                                      color: _app.isActivated
-                                          ? (_app.remainingBoots > 0
-                                              ? const Color(0xFFC0C0C0)
-                                              : null)
-                                          : null,
-                                    ),
-                                  ),
-                                  if (_app.isActivated) ...[
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      _app.remainingBoots > 0
-                                          ? Icons.schedule
-                                          : Icons.verified,
-                                      size: 18,
-                                      color: _app.remainingBoots > 0
-                                          ? const Color(0xFFC0C0C0)
-                                          : const Color(0xFFFFD700),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
                   // 全局设置
                   SectionCard(
                     title: '全局设置',
@@ -694,6 +502,7 @@ class _SettingsTabState extends State<SettingsTab> {
               margin: const EdgeInsets.fromLTRB(0, 8, 6, 0),
               child: Column(
                 children: [
+                  _sideBtn('激活功能', Icons.verified_user, _showActivationDialog, primary),
                   _sideBtn('读取设置', Icons.download, _refresh, primary),
                   _sideBtn('保存设置', Icons.save, _saveSettings, primary),
                   _sideBtn('恢复出厂', Icons.refresh, _resetSettings, primary),
@@ -711,6 +520,216 @@ class _SettingsTabState extends State<SettingsTab> {
           ],
         );
       },
+    );
+  }
+
+  // ========== 激活功能弹窗 ==========
+  Future<void> _showActivationDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, sbSetState) => AlertDialog(
+          title: const Text('激活功能'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_chipId.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Theme.of(ctx).colorScheme.outline,
+                        width: 0.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text('芯片 ID: ',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(ctx)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.6),
+                            )),
+                        Expanded(
+                          child: Text(
+                            _chipId,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontFamily: 'monospace',
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 16),
+                          onPressed: () {
+                            Clipboard.setData(
+                                ClipboardData(text: _chipId));
+                          },
+                          tooltip: '复制',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                              minWidth: 28, minHeight: 28),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _activationCodeController,
+                        decoration: const InputDecoration(
+                          labelText: '激活码:',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                        ),
+                        enabled: !_app.isActivated,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.qr_code_scanner),
+                      tooltip: '扫码输入',
+                      onPressed: _app.isActivated
+                          ? null
+                          : () async {
+                              final result = await showDialog<String>(
+                                context: ctx,
+                                builder: (scanCtx) =>
+                                    const QrCodeScanner(),
+                              );
+                              if (result != null &&
+                                  result.isNotEmpty) {
+                                sbSetState(() {
+                                  _activationCodeController.text =
+                                      result;
+                                });
+                              }
+                            },
+                    ),
+                    ElevatedButton(
+                      onPressed: _app.isActivated
+                          ? null
+                          : () async {
+                              final code =
+                                  _activationCodeController.text;
+                              if (code.isEmpty) return;
+                              if (validateActivationCode(
+                                  _chipId, code)) {
+                                final rejectMsg =
+                                    await checkActivationOnline(
+                                        _chipId, code);
+                                if (rejectMsg != null) {
+                                  if (mounted) {
+                                    showDialog<void>(
+                                      context: context,
+                                      builder: (dialogContext) =>
+                                          AlertDialog(
+                                        title: const Text('无法激活'),
+                                        content: Text(rejectMsg),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(
+                                                    dialogContext),
+                                            child: const Text('好'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+                              }
+                              final result = await _app.device
+                                  .cmdSetActivationDebug(_chipId, code);
+                              final status = result[0] as int;
+                              final dataHex = result[1] as String;
+                              if (status == 0x68) {
+                                await _app.setActivated(true,
+                                    chipId: _chipId);
+                                _toast('激活成功');
+                                sbSetState(() {});
+                              } else {
+                                var msg = '激活码无效 (status=0x${status.toRadixString(16).padLeft(2, '0')})';
+                                if (dataHex.isNotEmpty) {
+                                  msg += ' hash=$dataHex';
+                                }
+                                if (mounted) {
+                                  showDialog<void>(
+                                    context: context,
+                                    builder: (dialogContext) =>
+                                        AlertDialog(
+                                      title: const Text('无法激活'),
+                                      content: Text(msg),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(
+                                                  dialogContext),
+                                          child: const Text('好'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _app.isActivated
+                                ? (_app.remainingBoots > 0
+                                    ? '试用版 (剩余${_app.remainingBoots}次)'
+                                    : '已激活')
+                                : '激活',
+                            style: TextStyle(
+                              color: _app.isActivated
+                                  ? (_app.remainingBoots > 0
+                                      ? const Color(0xFFC0C0C0)
+                                      : null)
+                                  : null,
+                            ),
+                          ),
+                          if (_app.isActivated) ...[
+                            const SizedBox(width: 6),
+                            Icon(
+                              _app.remainingBoots > 0
+                                  ? Icons.schedule
+                                  : Icons.verified,
+                              size: 18,
+                              color: _app.remainingBoots > 0
+                                  ? const Color(0xFFC0C0C0)
+                                  : const Color(0xFFFFD700),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
