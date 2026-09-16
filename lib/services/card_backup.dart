@@ -187,6 +187,7 @@ Future<bool> uploadCards(
   List<SaveCard> cards, {
   String? chipId,
   Map<String, dynamic>? deviceStatus,
+  String source = 'auto',
 }) async {
   final id = await _resolveChipId(storage, chipId: chipId);
   if (id.isEmpty) return false;
@@ -195,6 +196,7 @@ Future<bool> uploadCards(
   final payload = <String, dynamic>{
     'chip_id': id,
     'cards': cardsPayload,
+    'source': source,
     if (deviceStatus != null && deviceStatus.isNotEmpty)
       'device_status': deviceStatus,
   };
@@ -293,6 +295,7 @@ Future<BackupResult> backupAllCardsToCloud(
     all,
     chipId: chipId,
     deviceStatus: deviceStatus,
+    source: 'manual',
   );
   if (ok) {
     final now = DateTime.now();
