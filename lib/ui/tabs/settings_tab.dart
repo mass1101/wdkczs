@@ -259,6 +259,11 @@ class _SettingsTabState extends State<SettingsTab> {
             _updateDfuDialog(dialogCtx!, progress);
           }
         },
+        onStage: (stage) {
+          if (dialogCtx != null && dialogCtx!.mounted) {
+            _setDfuStage(dialogCtx!, '阶段 $stage');
+          }
+        },
       );
 
       // 7. 完成：弹窗切换完成态，由用户点确认关闭
@@ -1138,7 +1143,29 @@ class _DfuDialogState extends State<_DfuDialog> {
             ),
             const SizedBox(height: 12),
             if (!_completed) ...[
-              LinearProgressIndicator(value: _progress / 100),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: SizedBox(
+                  height: 6,
+                  width: double.infinity,
+                  child: Stack(
+                    children: [
+                      Container(color: const Color(0xFFE8E8E8)),
+                      FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: (_progress / 100).clamp(0.0, 1.0),
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Colors.white, Color(0xFF4A90E2)],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 _progress > 0 ? '$_progress%' : '准备中...',

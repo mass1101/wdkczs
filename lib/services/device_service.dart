@@ -479,10 +479,13 @@ class DeviceService {
     required Uint8List header,
     required Uint8List body,
     void Function(int progress)? onProgress,
+    void Function(int stage)? onStage,
   }) async {
     await _dfu.setPRN();
     await _dfu.getMTU();
+    onStage?.call(1);
     await _dfu.flashFirmware(0x01, header, onProgress ?? (_) {});
+    onStage?.call(2);
     await _dfu.flashFirmware(0x02, body, onProgress ?? (_) {});
     debugPrint('Firmware flashed!');
     await _ble.disconnect();
