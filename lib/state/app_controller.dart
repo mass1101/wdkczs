@@ -10,7 +10,6 @@ import '../models/enums.dart';
 import '../models/models.dart';
 import '../services/card_backup.dart';
 import '../services/card_library.dart';
-import '../services/cloud_service.dart';
 import '../helpers/activation.dart';
 import '../services/device_service.dart';
 import '../services/dfu_zip.dart';
@@ -23,12 +22,10 @@ class AppController extends ChangeNotifier {
   final BleService ble = BleService();
   late final DeviceService device;
   late final StorageService storage;
-  late final CloudService cloud;
 
   AppController() {
     device = DeviceService(ble);
     storage = StorageService();
-    cloud = CloudService(storage);
     final geo = GeofenceProvider();
     geofence = geo;
     device.init();

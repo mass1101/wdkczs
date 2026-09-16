@@ -644,7 +644,7 @@ class _IdTabState extends State<IdTab> {
                   ),
                   const SizedBox(height: 8),
                   ActionButton(
-                    label: '添加到列表',
+                    label: '保存卡片',
                     icon: Icons.add,
                     color: primary,
                     onTap: _addCard,

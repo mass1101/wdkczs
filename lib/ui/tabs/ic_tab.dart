@@ -19,6 +19,7 @@ import '../../state/app_controller.dart';
 import '../../ui/dialogs/crack_dialog.dart';
 import '../../ui/dialogs/key_file_sheet.dart';
 import '../../ui/dialogs/text_input_dialog.dart';
+import '../screens/card_cloud_analyze_screen.dart';
 import '../widgets/common.dart';
 
 /// IC 卡 Tab：密钥卡片、卡类型、扇区数据表、右侧操作按钮
@@ -3857,39 +3858,23 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 电梯卡分析 ==========
+  // ========== 云端分析（对齐卡库云端分析：上传 dump 字节到 analyze.flippercn.com） ==========
   Future<void> _liftAnalyze() async {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) =>
-          const CrackProgressDialog(title: '云端分析中...', onCancel: null),
+    final lines = _app.card
+        .toDumpText()
+        .trim()
+        .split('\n')
+        .where((e) => e.trim().isNotEmpty)
+        .map((e) => e.trim())
+        .toList();
+    final saveCard = SaveCard(
+      uid: _app.card.uid,
+      name: _app.card.uid,
+      tag: TagType.mifare1K,
+      data: lines,
     );
-    try {
-      final dump = _app.card.toDumpText();
-      final result = await _app.cloud.analyzeLift(dump);
-      if (mounted) Navigator.of(context).pop();
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('电梯卡分析', style: TextStyle(fontSize: 16)),
-          content: SingleChildScrollView(
-            child: Text(result, style: const TextStyle(fontSize: 12)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('关闭'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (mounted) Navigator.of(context).pop();
-      _toast('分析失败: $e');
-    }
+    await CardCloudAnalyzeScreen.launch(context, saveCard);
   }
 
   // ========== UI ==========
