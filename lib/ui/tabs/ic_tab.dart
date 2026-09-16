@@ -3415,188 +3415,6 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 导入 / 导出 / 管理数据 ==========
-  Future<void> _importCard() async {
-    try {
-      // 从文件选择导入（对齐小程序 btnImportFromMsg，支持 dump/mfd/bin 二进制与 txt/mct 文本）
-      final pick = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['dump', 'mfd', 'bin', 'txt', 'mct'],
-        withData: true,
-      );
-      if (pick == null || pick.files.isEmpty) return;
-      final file = pick.files.first;
-      final data = file.bytes;
-      if (data == null) {
-        _toast('无法读取文件');
-        return;
-      }
-      final ext = file.name.split('.').last.toLowerCase();
-      final List<String> lines;
-      if (ext == 'txt' || ext == 'mct') {
-        final text = utf8.decode(data, allowMalformed: true);
-        lines = text.trim().split('\n').map((e) => e.trim()).toList();
-      } else {
-        // dump/mfd/bin：原始二进制 1024 字节 → 每块 16 字节转 MCT 行
-        if (data.length != 1024) {
-          _toast('dump 大小无效：${data.length} 字节');
-          return;
-        }
-        lines = List.generate(
-          64,
-          (b) => _hexStr(data.sublist(b * 16, b * 16 + 16)),
-        );
-      }
-      if (lines.length < 64) {
-        _toast('数据行数不足 64');
-        return;
-      }
-      final state = CardState.fromDumpText(lines);
-      setState(() {
-        _app.card = state;
-        _uidCtrl.text = state.uid;
-        _atqaCtrl.text = state.atqa;
-        _sakCtrl.text = state.sak;
-        _atsCtrl.text = state.ats;
-      });
-      _toast('导入完成');
-    } catch (e) {
-      _toast('导入失败: $e');
-    }
-  }
-
-  Future<void> _exportCard() async {
-    final dump = _app.card.toDumpText();
-    // 对齐小程序：默认文件名预填 UID_日期.dump
-    final uid = _app.card.uid.trim().toUpperCase();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => TextInputDialog(
-        title: '保存 Dump',
-        hint: '输入文件名',
-        initial: uid.isEmpty ? '' : '${uid}_${_dateStamp()}.dump',
-      ),
-    );
-    if (name == null || name.isEmpty) return;
-    await _app.storage.saveCard(name, dump);
-    _toast('已保存：$name');
-  }
-
-  /// 默认导出文件名日期戳（对齐小程序 getDate：yyyy-MM-dd）
-  String _dateStamp() => DateTime.now().toIso8601String().split('T')[0];
-
-  Future<void> _manageData() async {
-    final names = await _app.storage.getCardNames();
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  ActionButton(
-                    label: '导入文件',
-                    icon: Icons.download,
-                    color: Colors.grey,
-                    onTap: _importCard,
-                  ),
-                  const SizedBox(width: 8),
-                  ActionButton(
-                    label: '导出文件',
-                    icon: Icons.upload,
-                    color: Colors.grey,
-                    onTap: _exportCard,
-                  ),
-                ],
-              ),
-            ),
-            const ListTile(
-              title: Text(
-                '已保存的 Dump',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (names.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  '暂无已保存的 Dump',
-                  style: TextStyle(color: Colors.grey),
-                ),
-              )
-            else
-              ...names.entries.map(
-                (e) => ListTile(
-                  title: Text(e.key),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await _loadDump(e.key);
-                  },
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.upload, size: 18),
-                        tooltip: '加载到扇区数据',
-                        onPressed: () async {
-                          Navigator.pop(ctx);
-                          await _loadDump(e.key);
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.delete_outline,
-                          color: Colors.grey,
-                          size: 18,
-                        ),
-                        tooltip: '删除',
-                        onPressed: () async {
-                          await _app.storage.delCard(e.key);
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _toast('已删除 ${e.key}');
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 从已保存的 Dump 加载到扇区数据（对齐小程序 load_dump）
-  Future<void> _loadDump(String name) async {
-    try {
-      final text = await _app.storage.getCard(name);
-      final lines = text
-          .trim()
-          .split('\n')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-      if (lines.length < 64) {
-        _toast('数据行数不足 64');
-        return;
-      }
-      final state = CardState.fromDumpText(lines);
-      setState(() {
-        _app.card = state;
-        _uidCtrl.text = state.uid;
-        _atqaCtrl.text = state.atqa;
-        _sakCtrl.text = state.sak;
-      });
-      _toast('加载完成：$name');
-    } catch (e) {
-      _toast('加载失败: $e');
-    }
-  }
-
   // ========== 更多功能（格式化/改卡号/锁卡/双卡破解/云） ==========
   Future<void> _moreFeatures() async {
     if (!mounted) return;
@@ -4260,7 +4078,6 @@ class _IcTabState extends State<IcTab> {
               _sideBtn('导出', Icons.library_add, _exportToLibrary, primary),
               _sideBtn('导入', Icons.library_books, _importFromLibrary, primary),
               _sideBtn('算密钥', Icons.calculate, _mfkey, primary),
-              _sideBtn('管理数据', Icons.folder, _manageData, primary),
               _sideBtn('更多功能', Icons.more_horiz, _moreFeatures, primary),
               const SizedBox(height: 8),
               ConnectionBanner(
@@ -4440,8 +4257,7 @@ class _IcTabState extends State<IcTab> {
           enabled:
               _app.connected ||
               label == '导入' ||
-              label == '导出' ||
-              label == '管理数据',
+              label == '导出',
         ),
       ),
     );
