@@ -345,16 +345,89 @@ Future<(List<CloudCard>, int)?> fetchCloudCards(
   }
 }
 
-/// 删除云端指定卡片。返回成功删除张数；未配置或服务器不支持返回 -1。
-Future<int> deleteCloudCards(
-  StorageService storage,
-  List<String> cardIds, {
-  String? chipId,
-}) async {
-  if (cardIds.isEmpty) return 0;
-  final id = await _resolveChipId(storage, chipId: chipId);
-  if (id.isEmpty) return -1;
+/// 云端备份记录（一次备份上报）
+class CloudBackupEntry {
+  const CloudBackupEntry({
+    required this.id,
+    required this.timestamp,
+    required this.cards,
+  });
 
+  final int id;
+  final String timestamp;
+  final List<CloudBackupCardItem> cards;
+}
+
+/// 备份记录中的单张卡片，index 为所在备份内的下标（删除时回传）
+class CloudBackupCardItem {
+  const CloudBackupCardItem({
+    required this.backupId,
+    required this.index,
+    this.uid = '',
+    this.name = '',
+    this.tagType = '',
+    this.hasBin = false,
+  });
+
+  final int backupId;
+  final int index;
+  final String uid;
+  final String name;
+  final String tagType;
+  final bool hasBin;
+}
+
+/// 拉取云端全部备份记录（按时间倒序）；未配置令牌或失败返回 null。
+Future<List<CloudBackupEntry>?> fetchCloudBackups(StorageService storage) async {
+  final token = await storage.getBackupToken();
+  if (token.isEmpty) return null;
+
+  final endpoint = await storage.getBackupEndpoint();
+  try {
+    final response = await http
+        .get(
+          Uri.parse('$endpoint/api/device/backups'),
+          headers: {'X-Device-Token': token},
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) return null;
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = List<dynamic>.from(body['backups'] ?? []);
+    final out = <CloudBackupEntry>[];
+    for (final item in items) {
+      final map = item as Map<String, dynamic>;
+      final id = (map['id'] as num?)?.toInt() ?? -1;
+      final cards = <CloudBackupCardItem>[];
+      for (final c in List<dynamic>.from(map['cards'] ?? [])) {
+        final m = c as Map<String, dynamic>;
+        cards.add(CloudBackupCardItem(
+          backupId: id,
+          index: (m['index'] as num?)?.toInt() ?? 0,
+          uid: m['uid']?.toString() ?? '',
+          name: m['name']?.toString() ?? '',
+          tagType: m['tag_type']?.toString() ?? '',
+          hasBin: m['has_bin'] == true,
+        ));
+      }
+      out.add(CloudBackupEntry(
+        id: id,
+        timestamp: map['timestamp']?.toString() ?? '',
+        cards: cards,
+      ));
+    }
+    return out;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 删除指定备份记录中的单张卡片。返回该备份剩余张数；失败返回 -1。
+Future<int> deleteCloudBackupCard(
+  StorageService storage,
+  int backupId,
+  int cardIndex,
+) async {
   final token = await storage.getBackupToken();
   if (token.isEmpty) return -1;
 
@@ -362,21 +435,43 @@ Future<int> deleteCloudCards(
   try {
     final response = await http
         .delete(
-          Uri.parse('$endpoint/api/backup'),
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Device-Token': token,
-          },
-          body: jsonEncode({'chip_id': id, 'card_ids': cardIds}),
+          Uri.parse('$endpoint/api/device/backups/$backupId/cards/$cardIndex'),
+          headers: {'X-Device-Token': token},
         )
         .timeout(const Duration(seconds: 10));
-    if (response.statusCode < 200 || response.statusCode >= 300) return -1;
+    if (response.statusCode != 200) return -1;
     final decoded = jsonDecode(response.body);
-    if (decoded is Map<String, dynamic>) {
-      final n = decoded['deleted'];
-      if (n is num) return n.toInt();
+    if (decoded is Map<String, dynamic> && decoded['remaining'] is num) {
+      return (decoded['remaining'] as num).toInt();
     }
-    return cardIds.length;
+    return 0;
+  } catch (_) {
+    return -1;
+  }
+}
+
+/// 删除指定备份记录（含其下全部卡片）。返回删除张数；失败返回 -1。
+Future<int> deleteCloudBackup(
+  StorageService storage,
+  int backupId,
+) async {
+  final token = await storage.getBackupToken();
+  if (token.isEmpty) return -1;
+
+  final endpoint = await storage.getBackupEndpoint();
+  try {
+    final response = await http
+        .delete(
+          Uri.parse('$endpoint/api/device/backups/$backupId'),
+          headers: {'X-Device-Token': token},
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) return -1;
+    final decoded = jsonDecode(response.body);
+    if (decoded is Map<String, dynamic> && decoded['deleted'] is num) {
+      return (decoded['deleted'] as num).toInt();
+    }
+    return 0;
   } catch (_) {
     return -1;
   }
