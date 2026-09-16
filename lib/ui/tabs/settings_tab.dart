@@ -203,12 +203,13 @@ class _SettingsTabState extends State<SettingsTab> {
   }) async {
     if (!mounted) return;
     BuildContext? dialogCtx;
+    final dfuKey = GlobalKey<_DfuDialogState>();
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
         dialogCtx = ctx;
-        return _dfuProgressDialog(ctx, title);
+        return _DfuDialog(key: dfuKey, title: title);
       },
     );
 
@@ -217,15 +218,11 @@ class _SettingsTabState extends State<SettingsTab> {
       final image = await prepare();
 
       // 1. 进入 DFU 模式
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        _setDfuStage(dialogCtx, '正在进入 DFU 模式...');
-      }
+      dfuKey.currentState?.setStage('正在进入 DFU 模式...');
       await _dev.cmdDfuEnter();
 
       // 2. 断开当前连接
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        _setDfuStage(dialogCtx, '正在断开连接...');
-      }
+      dfuKey.currentState?.setStage('正在断开连接...');
       await _app.ble.disconnect();
 
       // 3. Android 延迟（BLE 比 USB 出现稍早）
@@ -234,42 +231,27 @@ class _SettingsTabState extends State<SettingsTab> {
       }
 
       // 4. 扫描直到发现 DFU 设备
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        _setDfuStage(dialogCtx, '正在扫描 DFU 设备...');
-      }
+      dfuKey.currentState?.setStage('正在扫描 DFU 设备...');
       final target = await _scanForDfuDevice();
       if (!mounted) return;
 
       // 5. 连接 bootloader 并禁用自动重连（DFU 传输中断不应后台重连）
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        _setDfuStage(dialogCtx, '正在连接设备...');
-      }
+      dfuKey.currentState?.setStage('正在连接设备...');
       await _app.ble.connect(target);
       _app.ble.setAutoReconnect(false);
 
       // 6. 刷写固件
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        _setDfuStage(dialogCtx, '正在刷写固件...');
-      }
+      dfuKey.currentState?.setStage('正在刷写固件...');
       await _dev.dfuUpdateImage(
         header: image.header,
         body: image.body,
-        onProgress: (progress) {
-          if (dialogCtx != null && dialogCtx!.mounted) {
-            _updateDfuDialog(dialogCtx!, progress);
-          }
-        },
-        onStage: (stage) {
-          if (dialogCtx != null && dialogCtx!.mounted) {
-            _setDfuStage(dialogCtx!, '正在刷写固件...阶段 $stage');
-          }
-        },
+        onProgress: (p) => dfuKey.currentState?.setProgress(p),
+        onStage: (s) =>
+            dfuKey.currentState?.setStage('正在刷写固件...阶段 $s'),
       );
 
       // 7. 完成：弹窗切换完成态，由用户点确认关闭
-      if (dialogCtx != null && dialogCtx!.mounted) {
-        _setDfuComplete(dialogCtx);
-      }
+      dfuKey.currentState?.setCompleted();
     } catch (e) {
       if (dialogCtx != null && dialogCtx!.mounted) {
         Navigator.of(dialogCtx!).pop();
@@ -302,33 +284,6 @@ class _SettingsTabState extends State<SettingsTab> {
       if (attempt >= 4 && found.length == 1) return found[0];
     }
     throw Exception('未发现 DFU 设备，请确认设备已进入 DFU 模式');
-  }
-
-  /// 更新 DFU 进度对话框
-  void _updateDfuDialog(BuildContext ctx, int progress) {
-    final state = ctx.findAncestorStateOfType<_DfuDialogState>();
-    if (state != null) state.setProgress(progress);
-  }
-
-  /// 更新 DFU 阶段文案
-  void _setDfuStage(BuildContext? ctx, String stage) {
-    if (ctx != null && ctx.mounted) {
-      final state = ctx.findAncestorStateOfType<_DfuDialogState>();
-      if (state != null) state.setStage(stage);
-    }
-  }
-
-  /// 标记 DFU 完成（弹窗切换完成态并显示确认按钮）
-  void _setDfuComplete(BuildContext? ctx) {
-    if (ctx != null && ctx.mounted) {
-      final state = ctx.findAncestorStateOfType<_DfuDialogState>();
-      if (state != null) state.setCompleted();
-    }
-  }
-
-  /// DFU 刷写进度对话框
-  Widget _dfuProgressDialog(BuildContext ctx, String initialTitle) {
-    return _DfuDialog(title: initialTitle);
   }
 
   // ========== 配对密钥编辑 ==========
@@ -1091,7 +1046,7 @@ class _SettingsTabState extends State<SettingsTab> {
 /// DFU 刷写进度对话框（带进度百分比显示）
 class _DfuDialog extends StatefulWidget {
   final String title;
-  const _DfuDialog({required this.title});
+  const _DfuDialog({super.key, required this.title});
 
   @override
   State<_DfuDialog> createState() => _DfuDialogState();
