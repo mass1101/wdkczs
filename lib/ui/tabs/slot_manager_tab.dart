@@ -363,43 +363,42 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     final columns = screenWidth >= 1000 ? 4 : (screenWidth >= 700 ? 3 : 2);
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 28,
-        title: const Text('卡槽管理'),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.cloud_upload),
-            onSelected: (value) {
-              if (value == 'batch_library') _batchBackupToLibrary();
-              if (value == 'batch_cloud') _batchBackupToCloud();
-            },
-            itemBuilder: (ctx) => [
-              PopupMenuItem(
-                value: 'batch_library',
-                child: Row(
-                  children: [
-                    const Icon(Icons.save, size: 16),
-                    const SizedBox(width: 8),
-                    const Text('备份到卡库'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'batch_cloud',
-                child: Row(
-                  children: [
-                    const Icon(Icons.cloud_upload, size: 16),
-                    const SizedBox(width: 8),
-                    const Text('备份到云端'),
-                  ],
-                ),
+      body: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.cloud_upload),
+                onSelected: (value) {
+                  if (value == 'batch_library') _batchBackupToLibrary();
+                  if (value == 'batch_cloud') _batchBackupToCloud();
+                },
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 'batch_library',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.save, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('备份到卡库'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'batch_cloud',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cloud_upload, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('备份到云端'),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
-      body: Column(
-        children: [
           Expanded(
             child: GridView.builder(
               padding: const EdgeInsets.all(16),
