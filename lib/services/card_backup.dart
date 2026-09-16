@@ -345,6 +345,43 @@ Future<(List<CloudCard>, int)?> fetchCloudCards(
   }
 }
 
+/// 删除云端指定卡片。返回成功删除张数；未配置或服务器不支持返回 -1。
+Future<int> deleteCloudCards(
+  StorageService storage,
+  List<String> cardIds, {
+  String? chipId,
+}) async {
+  if (cardIds.isEmpty) return 0;
+  final id = await _resolveChipId(storage, chipId: chipId);
+  if (id.isEmpty) return -1;
+
+  final token = await storage.getBackupToken();
+  if (token.isEmpty) return -1;
+
+  final endpoint = await storage.getBackupEndpoint();
+  try {
+    final response = await http
+        .delete(
+          Uri.parse('$endpoint/api/backup'),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Device-Token': token,
+          },
+          body: jsonEncode({'chip_id': id, 'card_ids': cardIds}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) return -1;
+    final decoded = jsonDecode(response.body);
+    if (decoded is Map<String, dynamic>) {
+      final n = decoded['deleted'];
+      if (n is num) return n.toInt();
+    }
+    return cardIds.length;
+  } catch (_) {
+    return -1;
+  }
+}
+
 /// 合并云端与本地卡库（云端优先，保留本地独有卡）
 class MergeResult {
   final List<SaveCard> cards;

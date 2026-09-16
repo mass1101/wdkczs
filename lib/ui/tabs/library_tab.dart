@@ -13,6 +13,7 @@ import '../../services/card_save_converters.dart';
 import '../../services/slot_writer.dart';
 import '../../services/storage_service.dart';
 import '../../state/app_controller.dart';
+import '../dialogs/cloud_backup_manager_dialog.dart';
 import '../screens/card_cloud_analyze_screen.dart';
 import '../screens/card_compare_screen.dart';
 import '../screens/card_create_dialog.dart';
@@ -233,6 +234,11 @@ class _LibraryTabState extends State<LibraryTab> {
                 label: '云端还原',
                 icon: Icons.cloud_download,
                 onTap: _cloudRestore,
+              ),
+              ActionButton(
+                label: '云端备份管理',
+                icon: Icons.cloud_queue,
+                onTap: _cloudBackupManager,
               ),
             ],
           ),
@@ -945,6 +951,22 @@ class _LibraryTabState extends State<LibraryTab> {
             : '还原完成：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}',
       );
     });
+  }
+
+  Future<void> _cloudBackupManager() async {
+    final chipId = await _ensureChipId();
+    if (chipId.isEmpty) {
+      _toast('未设置芯片编号');
+      return;
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => CloudBackupManagerDialog(
+        storage: _app.storage,
+        chipId: chipId,
+      ),
+    );
   }
 }
 
