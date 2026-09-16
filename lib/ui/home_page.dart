@@ -125,9 +125,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           // TabBar
           Container(
             color: Colors.white,
-            child: TabBar(
-              controller: _tabController,
-              indicatorColor: primary,
+             child: TabBar(
+               controller: _tabController,
+               isScrollable: true,
+               indicatorColor: primary,
               indicatorSize: TabBarIndicatorSize.label,
               labelColor: primary,
               unselectedLabelColor: const Color(0xFF666666),
