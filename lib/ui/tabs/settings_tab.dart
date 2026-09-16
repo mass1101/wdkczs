@@ -217,9 +217,15 @@ class _SettingsTabState extends State<SettingsTab> {
       final image = await prepare();
 
       // 1. 进入 DFU 模式
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        _setDfuStage(dialogCtx, '正在进入 DFU 模式...');
+      }
       await _dev.cmdDfuEnter();
 
       // 2. 断开当前连接
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        _setDfuStage(dialogCtx, '正在断开连接...');
+      }
       await _app.ble.disconnect();
 
       // 3. Android 延迟（BLE 比 USB 出现稍早）
@@ -228,14 +234,23 @@ class _SettingsTabState extends State<SettingsTab> {
       }
 
       // 4. 扫描直到发现 DFU 设备
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        _setDfuStage(dialogCtx, '正在扫描 DFU 设备...');
+      }
       final target = await _scanForDfuDevice();
       if (!mounted) return;
 
       // 5. 连接 bootloader 并禁用自动重连（DFU 传输中断不应后台重连）
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        _setDfuStage(dialogCtx, '正在连接设备...');
+      }
       await _app.ble.connect(target);
       _app.ble.setAutoReconnect(false);
 
       // 6. 刷写固件
+      if (dialogCtx != null && dialogCtx!.mounted) {
+        _setDfuStage(dialogCtx, '正在刷写固件...');
+      }
       await _dev.dfuUpdateImage(
         header: image.header,
         body: image.body,
@@ -246,10 +261,9 @@ class _SettingsTabState extends State<SettingsTab> {
         },
       );
 
-      // 7. 成功
+      // 7. 完成：弹窗切换完成态，由用户点确认关闭
       if (dialogCtx != null && dialogCtx!.mounted) {
-        Navigator.of(dialogCtx!).pop();
-        _toast('刷写成功，设备将自动重启');
+        _setDfuComplete(dialogCtx);
       }
     } catch (e) {
       if (dialogCtx != null && dialogCtx!.mounted) {
@@ -289,6 +303,22 @@ class _SettingsTabState extends State<SettingsTab> {
   void _updateDfuDialog(BuildContext ctx, int progress) {
     final state = ctx.findAncestorStateOfType<_DfuDialogState>();
     if (state != null) state.setProgress(progress);
+  }
+
+  /// 更新 DFU 阶段文案
+  void _setDfuStage(BuildContext? ctx, String stage) {
+    if (ctx != null && ctx.mounted) {
+      final state = ctx.findAncestorStateOfType<_DfuDialogState>();
+      if (state != null) state.setStage(stage);
+    }
+  }
+
+  /// 标记 DFU 完成（弹窗切换完成态并显示确认按钮）
+  void _setDfuComplete(BuildContext? ctx) {
+    if (ctx != null && ctx.mounted) {
+      final state = ctx.findAncestorStateOfType<_DfuDialogState>();
+      if (state != null) state.setCompleted();
+    }
   }
 
   /// DFU 刷写进度对话框
@@ -1064,6 +1094,8 @@ class _DfuDialog extends StatefulWidget {
 
 class _DfuDialogState extends State<_DfuDialog> {
   int _progress = 0;
+  late String _stageText = widget.title;
+  bool _completed = false;
 
   void setProgress(int progress) {
     if (!mounted) return;
@@ -1072,24 +1104,64 @@ class _DfuDialogState extends State<_DfuDialog> {
     });
   }
 
+  void setStage(String stageText) {
+    if (!mounted) return;
+    setState(() {
+      _stageText = stageText;
+    });
+  }
+
+  void setCompleted() {
+    if (!mounted) return;
+    setState(() {
+      _completed = true;
+      _progress = 100;
+      _stageText = '更新已完成，双击 B 键开机。';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.title, style: const TextStyle(fontSize: 16)),
+      title: Text(
+        _completed ? '更新完成' : widget.title,
+        style: const TextStyle(fontSize: 16),
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            LinearProgressIndicator(value: _progress / 100),
-            const SizedBox(height: 12),
             Text(
-              _progress > 0 ? '正在传输固件 $_progress%，请勿断开设备' : '正在传输固件，请勿断开设备',
+              _stageText,
               style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
             ),
+            const SizedBox(height: 12),
+            if (!_completed) ...[
+              LinearProgressIndicator(value: _progress / 100),
+              const SizedBox(height: 8),
+              Text(
+                _progress > 0 ? '$_progress%' : '准备中...',
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '请勿断开设备',
+                style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+              ),
+            ],
           ],
         ),
       ),
+      actions: _completed
+          ? [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('确定'),
+              ),
+            ]
+          : null,
     );
   }
 }
