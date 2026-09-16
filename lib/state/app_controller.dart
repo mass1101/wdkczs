@@ -211,6 +211,13 @@ class AppController extends ChangeNotifier {
       // 连接即缓存芯片编号（对齐 CU verifyActivation → saveChipId）
       if (deviceInfo.chipId.isNotEmpty) {
         await storage.saveChipId(deviceInfo.chipId);
+        // 切换设备：立即按当前 chipId 的本地激活状态重置内存
+        // （对齐 CU isActivated getter 实时查 isActivatedForChip(currentChipId)，
+        //  避免显示上一台设备的状态；固件实时值由下方 verifyActivation 刷新）
+        _isActivated = await storage.isActivatedForChip(deviceInfo.chipId);
+        _remainingBoots =
+            _isActivated ? await storage.getRemainingBoots() : 0;
+        notifyListeners();
       }
       deviceInfo.bleAddress = await this.device.cmdBleGetAddress();
       deviceInfo.model = (await this.device.cmdGetDeviceModel()).toString();
