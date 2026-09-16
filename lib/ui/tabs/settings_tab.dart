@@ -688,10 +688,31 @@ class _SettingsTabState extends State<SettingsTab> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(_app.isActivated ? '已激活' : '激活'),
+                          Text(
+                            _app.isActivated
+                                ? (_app.remainingBoots > 0
+                                    ? '试用版 (剩余${_app.remainingBoots}次)'
+                                    : '已激活')
+                                : '激活',
+                            style: TextStyle(
+                              color: _app.isActivated
+                                  ? (_app.remainingBoots > 0
+                                      ? const Color(0xFFC0C0C0)
+                                      : null)
+                                  : null,
+                            ),
+                          ),
                           if (_app.isActivated) ...[
                             const SizedBox(width: 6),
-                            const Icon(Icons.verified, size: 18, color: Color(0xFFFFD700)),
+                            Icon(
+                              _app.remainingBoots > 0
+                                  ? Icons.schedule
+                                  : Icons.verified,
+                              size: 18,
+                              color: _app.remainingBoots > 0
+                                  ? const Color(0xFFC0C0C0)
+                                  : const Color(0xFFFFD700),
+                            ),
                           ],
                         ],
                       ),
