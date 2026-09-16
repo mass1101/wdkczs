@@ -369,7 +369,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               PopupMenuButton<String>(
-                icon: const Icon(Icons.cloud_upload),
+                icon: Icon(Icons.cloud_upload, color: primary),
                 onSelected: (value) {
                   if (value == 'batch_library') _batchBackupToLibrary();
                   if (value == 'batch_cloud') _batchBackupToCloud();
