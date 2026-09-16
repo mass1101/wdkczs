@@ -228,17 +228,17 @@ class _LibraryTabState extends State<LibraryTab> {
               ActionButton(
                 label: '云端备份',
                 icon: Icons.cloud_upload,
-                onTap: _cloudBackup,
+                onTap: _connected ? _cloudBackup : null,
               ),
               ActionButton(
                 label: '云端还原',
                 icon: Icons.cloud_download,
-                onTap: _cloudRestore,
+                onTap: _connected ? _cloudRestore : null,
               ),
               ActionButton(
                 label: '云端备份管理',
                 icon: Icons.cloud_queue,
-                onTap: _cloudBackupManager,
+                onTap: _connected ? _cloudBackupManager : null,
               ),
             ],
           ),
