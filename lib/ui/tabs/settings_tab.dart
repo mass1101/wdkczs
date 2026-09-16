@@ -716,37 +716,38 @@ class _SettingsTabState extends State<SettingsTab> {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('轮询设置', style: TextStyle(fontSize: 16)),
-        content: SizedBox(
-          width: 450,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 轮询延迟
-                const Text('轮询延迟:', style: TextStyle(fontSize: 13)),
-                const SizedBox(height: 8),
-                if (_pollingDelay != null)
-                  Text(
-                    _pollingEnabled
-                        ? '当前轮询延迟: ${_pollingDelay}ms'
-                        : '轮询已关闭',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(ctx)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.6),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, sbSetState) => AlertDialog(
+          title: const Text('轮询设置', style: TextStyle(fontSize: 16)),
+          content: SizedBox(
+            width: 450,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 轮询延迟
+                  const Text('轮询延迟:', style: TextStyle(fontSize: 13)),
+                  const SizedBox(height: 8),
+                  if (_pollingDelay != null)
+                    Text(
+                      _pollingEnabled
+                          ? '当前轮询延迟: ${_pollingDelay}ms'
+                          : '轮询已关闭',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(ctx)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.6),
+                      ),
                     ),
-                  ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _pollingDelayController,
-                        keyboardType: TextInputType.number,
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _pollingDelayController,
+                          keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: '轮询延迟 (ms)',
                           isDense: true,
@@ -765,7 +766,7 @@ class _SettingsTabState extends State<SettingsTab> {
                           await _dev.cmdSetPollingDelay(value);
                           await _dev.cmdSetPollingEnable(true);
                           await _dev.cmdSaveSettings();
-                          setState(() {
+                          sbSetState(() {
                             _pollingDelay = value;
                             _pollingEnabled = true;
                           });
@@ -780,11 +781,11 @@ class _SettingsTabState extends State<SettingsTab> {
                           if (_pollingEnabled) {
                             await _dev.cmdSetPollingEnable(false);
                             await _dev.cmdSaveSettings();
-                            setState(() => _pollingEnabled = false);
+                            sbSetState(() => _pollingEnabled = false);
                           } else {
                             await _dev.cmdSetPollingEnable(true);
                             await _dev.cmdSaveSettings();
-                            setState(() => _pollingEnabled = true);
+                            sbSetState(() => _pollingEnabled = true);
                           }
                         } catch (_) {}
                       },
@@ -810,7 +811,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     Switch(
                       value: _pollingAdaptive,
                       onChanged: (value) async {
-                        setState(() => _pollingAdaptive = value);
+                        sbSetState(() => _pollingAdaptive = value);
                         try {
                           await _dev.cmdSetPollingAdaptive(value);
                           await _dev.cmdSaveSettings();
@@ -841,7 +842,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     for (var i = 0; i < _pollingSlots.length; i++)
                       InkWell(
                         borderRadius: BorderRadius.circular(4),
-                        onTap: () => setState(() {
+                        onTap: () => sbSetState(() {
                           _pollingSlots[i] = !_pollingSlots[i];
                         }),
                         child: Container(
@@ -884,13 +885,13 @@ class _SettingsTabState extends State<SettingsTab> {
                 Row(
                   children: [
                     TextButton(
-                      onPressed: () => setState(() {
+                      onPressed: () => sbSetState(() {
                         _pollingSlots = List.filled(80, true);
                       }),
                       child: const Text('全选'),
                     ),
                     TextButton(
-                      onPressed: () => setState(() {
+                      onPressed: () => sbSetState(() {
                         _pollingSlots = List.filled(80, false);
                       }),
                       child: const Text('清空'),
@@ -917,6 +918,7 @@ class _SettingsTabState extends State<SettingsTab> {
             child: const Text('关闭'),
           ),
         ],
+      ),
       ),
     );
   }
