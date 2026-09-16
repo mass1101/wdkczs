@@ -351,13 +351,15 @@ class AppController extends ChangeNotifier {
       }
       final localActivated = await storage.isActivatedForChip(chipId);
       final localRemaining = await storage.getRemainingBoots();
+      // 仅当与本地存储不一致时才写存储；但内存状态始终同步固件
+      // （切换设备时即使值相同也需更新 _isActivated，避免显示上一台设备的状态）
       if (activated != localActivated || remaining != localRemaining) {
         await storage.setActivated(activated,
             chipId: chipId, remainingBoots: remaining);
-        _isActivated = activated;
-        _remainingBoots = remaining;
-        notifyListeners();
       }
+      _isActivated = activated;
+      _remainingBoots = remaining;
+      notifyListeners();
       geofence.refreshEnabledState();
     } catch (_) {}
   }
