@@ -65,7 +65,8 @@ class BleService {
       for (final r in results) {
         final name = r.device.platformName;
         final services = r.advertisementData.serviceUuids;
-        final isCu = (name.isNotEmpty && name.startsWith('CU-')) ||
+        final isCu = (name.isNotEmpty &&
+                (name.startsWith('CU-') || name.startsWith('CL-'))) ||
             services.any((u) => u.toString().toLowerCase().startsWith('fe59'));
         final isUltra = name.isNotEmpty && name.contains('ChameleonUltra');
         if (isCu || isUltra) {
@@ -159,7 +160,7 @@ class BleService {
     status.value = BleStatus(BleState.connected);
   }
 
-  /// 发现服务并按设备分型确定特征（ChameleonUltra: NUS / CU-: fe59）
+  /// 发现服务并按设备分型确定特征（ChameleonUltra: NUS / CU-、CL-: fe59）
   Future<void> _discoverChars(BluetoothDevice device) async {
     final services = await device.discoverServices();
     final name = device.platformName;

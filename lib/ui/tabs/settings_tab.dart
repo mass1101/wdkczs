@@ -253,26 +253,30 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  /// 无限循环扫描 DFU 设备（对齐 CU while 循环）
+  /// 扫描 DFU 设备（对齐 CU：CU-/CL- 前缀为 DFU bootloader）
   Future<BluetoothDevice> _scanForDfuDevice() async {
-    while (true) {
+    for (var attempt = 0; attempt < 60; attempt++) {
       await Future.delayed(const Duration(milliseconds: 250));
       final found = await _app.ble.scan(timeout: const Duration(milliseconds: 500));
       final targets = found
           .where((d) {
             final n = d.platformName;
-            return n.isNotEmpty && (n.contains('DFU') || n.contains('CU-'));
+            return n.startsWith('CU-') ||
+                n.startsWith('CL-') ||
+                n.contains('DFU');
           })
           .toList();
-      if (targets.isEmpty) continue;
 
       // 多设备检查（对齐 CU）
       if (targets.length > 1) {
         throw Exception('发现多个 DFU 设备，请只连接一个设备');
       }
+      if (targets.length == 1) return targets[0];
 
-      return targets[0];
+      // 兜底：bootloader 广播名可能读取为空，等待 1s 后唯一候选即视为 DFU 设备
+      if (attempt >= 4 && found.length == 1) return found[0];
     }
+    throw Exception('未发现 DFU 设备，请确认设备已进入 DFU 模式');
   }
 
   /// 更新 DFU 进度对话框

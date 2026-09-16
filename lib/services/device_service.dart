@@ -21,6 +21,13 @@ class DeviceException implements Exception {
       '${DeviceStatus.message(status)} (status=$status) $message';
 }
 
+/// 设备错误状态码集合（对应逆向 rk：HF 1-8 / LF 65-67 / 通用错误）
+/// 成功码：0 (HF), 64 (LF), 104 (Device) 均不在该集合中
+final Set<int> _errorStatuses = {1, 2, 3, 4, 5, 6, 7, 8, 65, 66, 67, 96, 102, 103, 105, 112, 113, 114};
+
+/// 是否错误状态码
+bool _isErrStatus(int s) => _errorStatuses.contains(s);
+
 /// 设备命令层：封装 UltraFrame 协议的全部命令（对应逆向 Kk 类）
 class DeviceService {
   final BleService _ble;
@@ -56,39 +63,35 @@ class DeviceService {
             }
           }
           if (magicAt < 0) {
-            if (buf.length > 4096) {
-              buf = Uint8List.fromList(buf.sublist(buf.length - 2));
-            }
+            buf = Uint8List(0);
             break;
           }
-          if (magicAt > 0) {
-            buf = Uint8List.fromList(buf.sublist(magicAt));
-          }
-          // 解析帧长度
-          if (buf.length < 8) break;
-          final len = buf[6] | (buf[7] << 8);
-          final totalLen = len + 8 + 4; // magic(2) + seq(4) + data(len) + crc(4)
-          if (buf.length < totalLen) break;
-          // CRC32 校验
-          final payload = buf.sublist(2, totalLen - 4);
-          final crcStored = buf[totalLen - 4] | (buf[totalLen - 3] << 8) | (buf[totalLen - 2] << 16) | (buf[totalLen - 1] << 24);
-          final crcCalc = _crc32(payload);
-          if (crcCalc != crcStored) {
-            buf = Uint8List.fromList(buf.sublist(magicAt + 2));
+          if (magicAt > 0) buf = buf.sublist(magicAt);
+          if (buf.length < 10) break;
+          // 头 LRC 校验（第 0..7 字节，第 8 字节为 LRC）
+          if (!UltraFrame.checkHeadLrc(buf)) {
+            buf = buf.sublist(1);
             continue;
           }
-          // 解析命令 ID 和数据
-          final cmdId = buf[2] | (buf[3] << 8) | (buf[4] << 16) | (buf[5] << 24);
-          final data = buf.sublist(8, totalLen - 4);
-          final completer = _pending.remove(cmdId);
+          final bd = ByteData.sublistView(buf);
+          final len = bd.getUint16(6);
+          final total = len + 10;
+          if (buf.length < total) break; // 等待后续分片
+          final frame = buf.sublist(0, total);
+          buf = buf.sublist(total);
+          if (!UltraFrame.checkLrc(frame)) continue;
+          final (cmd, status, data) = UltraFrame.decode(frame);
+          final completer = _pending.remove(cmd);
           if (completer != null) {
-            completer.complete(data);
+            if (_isErrStatus(status)) {
+              completer.completeError(DeviceException(status, ''));
+            } else {
+              completer.complete(data);
+            }
           }
-          buf = Uint8List.fromList(buf.sublist(totalLen));
         }
       } catch (e) {
-        debugPrint('Frame parse error: $e');
-        buf = Uint8List(0);
+        debugPrint('frame decode error: $e');
       }
     });
   }
@@ -484,28 +487,6 @@ class DeviceService {
     debugPrint('Firmware flashed!');
     await _ble.disconnect();
     await Future.delayed(const Duration(milliseconds: 500));
-  }
-
-  /// CRC32（IEEE，对应逆向 db()）
-  static final Uint8List _crcTable = _buildCrcTable();
-  static Uint8List _buildCrcTable() {
-    final table = Uint8List(256);
-    for (var i = 0; i < 256; i++) {
-      var c = i;
-      for (var k = 0; k < 8; k++) {
-        c = (c & 1) == 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
-      }
-      table[i] = c & 0xFF;
-    }
-    return table;
-  }
-
-  static int _crc32(Uint8List data) {
-    var crc = 0xFFFFFFFF;
-    for (final b in data) {
-      crc = (crc >> 8) ^ _crcTable[(crc ^ b) & 0xFF];
-    }
-    return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
   }
 
   Future<int> cmdGetDeviceModel() async {
