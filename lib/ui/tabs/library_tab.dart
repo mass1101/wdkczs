@@ -224,17 +224,17 @@ class _LibraryTabState extends State<LibraryTab> {
               ActionButton(
                 label: '云端备份',
                 icon: Icons.cloud_upload,
-                onTap: _connected ? _cloudBackup : null,
+                onTap: _connected ? _cloudBackup : () => _toast('请先连接设备后使用'),
               ),
               ActionButton(
                 label: '云端还原',
                 icon: Icons.cloud_download,
-                onTap: _connected ? _cloudRestore : null,
+                onTap: _connected ? _cloudRestore : () => _toast('请先连接设备后使用'),
               ),
               ActionButton(
                 label: '云端备份管理',
                 icon: Icons.cloud_queue,
-                onTap: _connected ? _cloudBackupManager : null,
+                onTap: _connected ? _cloudBackupManager : () => _toast('请先连接设备后使用'),
               ),
             ],
           ),
