@@ -432,7 +432,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                     borderRadius: BorderRadius.circular(12),
                     side: BorderSide(
                       color: hasContent
-                          ? primary.withValues(alpha: 0.3)
+                          ? primary.withValues(alpha: 0.7)
                           : Colors.grey.withValues(alpha: 0.2),
                     ),
                   ),
@@ -452,19 +452,47 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                 color: hasContent ? primary : Colors.grey,
                               ),
                               const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  '卡槽 ${index + 1}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                               Expanded(
+                                 child: Text(
+                                   '卡槽 ${index + 1}',
+                                   maxLines: 1,
+                                   overflow: TextOverflow.ellipsis,
+                                   style: TextStyle(
+                                     fontWeight: FontWeight.w600,
+                                     fontSize: 13,
+                                   ),
+                                 ),
+                               ),
+                               IconButton(
+                                 padding: EdgeInsets.zero,
+                                 constraints: const BoxConstraints(
+                                   minWidth: 32,
+                                   minHeight: 32,
+                                 ),
+                                 onPressed: () => _showSlotSettings(index),
+                                 icon: const Icon(
+                                   Icons.settings,
+                                   size: 16,
+                                   color: Colors.grey,
+                                 ),
+                               ),
+                               IconButton(
+                                 padding: EdgeInsets.zero,
+                                 constraints: const BoxConstraints(
+                                   minWidth: 32,
+                                   minHeight: 32,
+                                 ),
+                                 onPressed: () => _setActiveSlot(index),
+                                 icon: Icon(
+                                   Icons.power_settings_new,
+                                   size: 16,
+                                   color: _activeSlot == index
+                                       ? Colors.green
+                                       : Colors.grey,
+                                 ),
+                               ),
+                             ],
+                           ),
                           const SizedBox(height: 6),
                           Row(
                             children: [
@@ -501,47 +529,19 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                   '${lfName ?? '空'} (${_tagName(lfType)})',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF888888),
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 32,
-                                  minHeight: 32,
-                                ),
-                                onPressed: () => _showSlotSettings(index),
-                                icon: const Icon(
-                                  Icons.settings,
-                                  size: 16,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 32,
-                                  minHeight: 32,
-                                ),
-                                onPressed: () => _setActiveSlot(index),
-                                icon: Icon(
-                                  Icons.power_settings_new,
-                                  size: 16,
-                                  color: _activeSlot == index
-                                      ? Colors.green
-                                      : Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
+                                   style: const TextStyle(
+                                     fontSize: 11,
+                                     color: Color(0xFF888888),
+                                   ),
+                                 ),
+                               ),
+                             ],
+                           ),
+                         ],
+                       ),
+                     ),
+                   ),
+                 );
               },
             ),
           ),
