@@ -262,19 +262,31 @@ class AppController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void setAnimationMode(AnimationMode mode) {
+  Future<void> setAnimationMode(AnimationMode mode) async {
     settings.animation = mode;
     notifyListeners();
+    try {
+      await device.cmdSetAnimationMode(mode);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
-  void setBlePairingKey(String key) {
+  Future<void> setBlePairingKey(String key) async {
     settings.blePairingKey = key;
     notifyListeners();
+    try {
+      await device.cmdBleSetPairingKey(key);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
-  void setBlePairing(bool v) {
+  Future<void> setBlePairing(bool v) async {
     settings.blePairing = v;
     notifyListeners();
+    try {
+      await device.cmdBleSetPairingMode(v);
+      await device.cmdSaveSettings();
+    } catch (_) {}
   }
 
   Future<void> setPressBtnA(ButtonAction a) async {

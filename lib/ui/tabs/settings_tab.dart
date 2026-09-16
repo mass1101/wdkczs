@@ -314,8 +314,12 @@ class _SettingsTabState extends State<SettingsTab> {
       ),
     );
     if (result != null && result.isNotEmpty) {
-      _app.setBlePairingKey(result);
-      _toast('已设置配对密钥');
+      try {
+        await _app.setBlePairingKey(result);
+        _toast('已设置配对密钥');
+      } catch (e) {
+        _toast('设置失败: $e');
+      }
     }
   }
 
