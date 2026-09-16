@@ -393,11 +393,16 @@ String bytesToHex(Uint8List bytes) {
 int calculateCRC32(List<int> toTransmit, int crc) {
   final crcTable = _crcTable;
 
+  // 跨包连续计算的状态反转：首次 crc=0 → 0xFFFFFFFF（标准 CRC32 初始值）
+  crc = 0xFFFFFFFF - crc;
+
   for (int i in toTransmit) {
     crc = (crc >> 8) ^ crcTable[(crc ^ i) & 0xFF];
   }
 
-  return crc ^ 0xFFFFFFFF;
+  crc = crc ^ 0xFFFFFFFF;
+
+  return crc;
 }
 
 final Uint32List _crcTable = _buildCrcTable();
