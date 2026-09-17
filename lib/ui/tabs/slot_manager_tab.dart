@@ -363,43 +363,45 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     final columns = screenWidth >= 1000 ? 4 : (screenWidth >= 700 ? 3 : 2);
 
     return Scaffold(
-      body: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              PopupMenuButton<String>(
-                icon: Icon(Icons.cloud_upload, color: primary),
-                onSelected: (value) {
-                  if (value == 'batch_library') _batchBackupToLibrary();
-                  if (value == 'batch_cloud') _batchBackupToCloud();
-                },
-                itemBuilder: (ctx) => [
-                  PopupMenuItem(
-                    value: 'batch_library',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.save, size: 16),
-                        const SizedBox(width: 8),
-                        const Text('备份到卡库'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'batch_cloud',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cloud_upload, size: 16),
-                        const SizedBox(width: 8),
-                        const Text('备份到云端'),
-                      ],
-                    ),
-                  ),
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          color: primary,
+          shape: BoxShape.circle,
+        ),
+        padding: const EdgeInsets.all(8),
+        child: PopupMenuButton<String>(
+          icon: const Icon(Icons.cloud_upload, color: Colors.white),
+          onSelected: (value) {
+            if (value == 'batch_library') _batchBackupToLibrary();
+            if (value == 'batch_cloud') _batchBackupToCloud();
+          },
+          itemBuilder: (ctx) => [
+            PopupMenuItem(
+              value: 'batch_library',
+              child: Row(
+                children: [
+                  const Icon(Icons.save, size: 16),
+                  const SizedBox(width: 8),
+                  const Text('备份到卡库'),
                 ],
               ),
-            ],
-          ),
-          Expanded(
+            ),
+            PopupMenuItem(
+              value: 'batch_cloud',
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_upload, size: 16),
+                  const SizedBox(width: 8),
+                  const Text('备份到云端'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
             child: GridView.builder(
               padding: const EdgeInsets.all(16),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -465,10 +467,10 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                ),
                                IconButton(
                                  padding: EdgeInsets.zero,
-                                 constraints: const BoxConstraints(
-                                   minWidth: 32,
-                                   minHeight: 32,
-                                 ),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 25,
+                                    minHeight: 25,
+                                  ),
                                  onPressed: () => _showSlotSettings(index),
                                  icon: const Icon(
                                    Icons.settings,
@@ -478,10 +480,10 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                ),
                                IconButton(
                                  padding: EdgeInsets.zero,
-                                 constraints: const BoxConstraints(
-                                   minWidth: 32,
-                                   minHeight: 32,
-                                 ),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 25,
+                                    minHeight: 25,
+                                  ),
                                  onPressed: () => _setActiveSlot(index),
                                  icon: Icon(
                                    Icons.power_settings_new,
@@ -545,20 +547,23 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
               },
             ),
           ),
-          if (_progress != -1) ...[
-            const SizedBox(height: 16),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text('正在处理...', style: TextStyle(fontSize: 13)),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: LinearProgressIndicator(
-                value: (_progress / 100).toDouble(),
+          if (_progress != -1)
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('正在处理...', style: TextStyle(fontSize: 13)),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: (_progress / 100).toDouble(),
+                  ),
+                ],
               ),
             ),
-          ],
         ],
       ),
     );
