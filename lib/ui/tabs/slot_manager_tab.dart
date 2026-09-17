@@ -480,25 +480,25 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                  size: 16,
                                  color: hasContent ? primary : Colors.grey,
                                ),
-                               IconButton(
-                                  padding: EdgeInsets.zero,
-                                   constraints: const BoxConstraints.tightFor(
-                                     width: 20,
-                                     height: 20,
-                                   ),
-                                  onPressed: () => _showSlotSettings(index),
-                                 icon: const Icon(
-                                   Icons.settings,
-                                   size: 16,
-                                   color: Colors.grey,
-                                 ),
-                               ),
-                               IconButton(
-                                  padding: EdgeInsets.zero,
-                                   constraints: const BoxConstraints.tightFor(
-                                     width: 20,
-                                     height: 20,
-                                   ),
+                                IconButton(
+                                   padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 18,
+                                      height: 18,
+                                    ),
+                                   onPressed: () => _showSlotSettings(index),
+                                  icon: const Icon(
+                                    Icons.settings,
+                                    size: 16,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                IconButton(
+                                   padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 18,
+                                      height: 18,
+                                    ),
                                   onPressed: () => _setActiveSlot(index),
                                  icon: Icon(
                                    Icons.power_settings_new,
