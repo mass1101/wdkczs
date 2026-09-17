@@ -425,10 +425,14 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Text('总开关', style: TextStyle(fontSize: 12)),
-                      Switch(
-                        value: _geo.userEnabled,
-                        onChanged: (v) async {
-                          await _geo.setEnabled(v);
+                       Switch(
+                         value: _geo.userEnabled,
+                         onChanged: (v) async {
+                           if (!AppScope.instance.controller.isActivated) {
+                             _toast('激活后使用该功能');
+                             return;
+                           }
+                           await _geo.setEnabled(v);
                           setState(() {
                             final connected = _geo.connected;
                             _statusMessage = v

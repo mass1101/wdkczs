@@ -309,6 +309,10 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
   }
 
   Future<void> _batchBackupToCloud() async {
+    if (!_app.isActivated) {
+      _toast('激活后使用该功能');
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -803,6 +807,10 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
   }
 
   Future<void> _backupToCloud(bool isHf) async {
+    if (!widget.app.isActivated) {
+      widget.onToast('激活后使用该功能');
+      return;
+    }
     final accepted = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
