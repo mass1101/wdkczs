@@ -362,48 +362,52 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     final screenWidth = MediaQuery.of(context).size.width;
     final columns = screenWidth >= 1000 ? 4 : (screenWidth >= 700 ? 3 : 2);
 
-    return Scaffold(
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          color: primary,
-          shape: BoxShape.circle,
-        ),
-        padding: const EdgeInsets.all(8),
-        child: PopupMenuButton<String>(
-          icon: const Icon(Icons.cloud_upload, color: Colors.white),
-          onSelected: (value) {
-            if (value == 'batch_library') _batchBackupToLibrary();
-            if (value == 'batch_cloud') _batchBackupToCloud();
-          },
-          itemBuilder: (ctx) => [
-            PopupMenuItem(
-              value: 'batch_library',
-              child: Row(
-                children: [
-                  const Icon(Icons.save, size: 16),
-                  const SizedBox(width: 8),
-                  const Text('备份到卡库'),
-                ],
-              ),
-            ),
-            PopupMenuItem(
-              value: 'batch_cloud',
-              child: Row(
-                children: [
-                  const Icon(Icons.cloud_upload, size: 16),
-                  const SizedBox(width: 8),
-                  const Text('备份到云端'),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+     return Scaffold(
       body: Stack(
         children: [
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Container(
+              decoration: BoxDecoration(
+                color: primary,
+                shape: BoxShape.circle,
+              ),
+              padding: const EdgeInsets.all(8),
+              child: PopupMenuButton<String>(
+                icon: const Icon(Icons.cloud_upload, color: Colors.white),
+                onSelected: (value) {
+                  if (value == 'batch_library') _batchBackupToLibrary();
+                  if (value == 'batch_cloud') _batchBackupToCloud();
+                },
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 'batch_library',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.save, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('备份到卡库'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'batch_cloud',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cloud_upload, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('备份到云端'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           Positioned.fill(
             child: GridView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 64, 16, 16),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 childAspectRatio: 1.5,
@@ -549,7 +553,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
           ),
           if (_progress != -1)
             Positioned(
-              top: 16,
+              top: 64,
               left: 16,
               right: 16,
               child: Column(
