@@ -920,6 +920,9 @@ class _LibraryTabState extends State<LibraryTab> {
       builder: (ctx) => CloudBackupManagerDialog(
         storage: _app.storage,
         chipId: chipId,
+        onRestored: () {
+          _reload();
+        },
       ),
     );
   }

@@ -476,6 +476,53 @@ Future<int> deleteCloudBackup(
   }
 }
 
+/// 从云端备份记录中拉取选中卡片的完整数据（按 backupId → indexes 分组请求）。
+/// 未配置令牌或任一请求失败返回 null。
+Future<List<CloudCard>?> restoreCloudBackupCards(
+  StorageService storage, {
+  required Map<int, List<int>> byBackup,
+  String? chipId,
+}) async {
+  final token = await storage.getBackupToken();
+  if (token.isEmpty) return null;
+  if (byBackup.isEmpty) return const [];
+
+  final endpoint = await storage.getBackupEndpoint();
+  final out = <CloudCard>[];
+  for (final group in byBackup.entries) {
+    final uri = Uri.parse('$endpoint/api/device/backups/cards');
+    final target = (chipId != null && chipId.isNotEmpty)
+        ? uri.replace(queryParameters: {'chip_id': chipId})
+        : uri;
+    try {
+      final response = await http
+          .post(
+            target,
+            headers: {
+              'X-Device-Token': token,
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'backup_id': group.key,
+              'indexes': group.value,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      for (final item in List<dynamic>.from(body['cards'] ?? [])) {
+        final map = item as Map<String, dynamic>;
+        final card = cloudJsonToSaveCard(map);
+        if (card == null) continue;
+        out.add(CloudCard(card: card, raw: map));
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+  return out;
+}
+
 /// 合并云端与本地卡库（云端优先，保留本地独有卡）
 class MergeResult {
   final List<SaveCard> cards;

@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../../services/card_backup.dart';
+import '../../services/card_library.dart';
 import '../../services/storage_service.dart';
 
-/// 云端备份管理弹窗：查看云端备份记录，支持多选批量删除单卡或整条备份
+/// 云端备份管理弹窗：查看云端备份记录，支持多选批量删除、批量还原、整条备份删除
 class CloudBackupManagerDialog extends StatefulWidget {
   final StorageService storage;
   final String chipId;
+  final void Function()? onRestored;
 
   const CloudBackupManagerDialog({
     super.key,
     required this.storage,
     required this.chipId,
+    this.onRestored,
   });
 
   @override
@@ -77,6 +80,83 @@ class _CloudBackupManagerDialogState
     });
   }
 
+  Map<int, List<int>> _groupByBackup() {
+    final byBackup = <int, List<int>>{};
+    for (final key in _selected) {
+      final parts = key.split('#');
+      if (parts.length != 2) continue;
+      final id = int.tryParse(parts[0]);
+      final idx = int.tryParse(parts[1]);
+      if (id == null || idx == null) continue;
+      byBackup.putIfAbsent(id, () => []).add(idx);
+    }
+    return byBackup;
+  }
+
+  Future<void> _restoreSelected() async {
+    if (_selected.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('云端还原选中卡片'),
+        content: Text(
+          '确定将选中的 ${_selected.length} 张卡片还原到本地卡包吗？同名卡以云端内容为准。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('还原'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final byBackup = _groupByBackup();
+    if (byBackup.isEmpty) return;
+
+    setState(() => _loading = true);
+    final cloud = await restoreCloudBackupCards(
+      widget.storage,
+      byBackup: byBackup,
+      chipId: widget.chipId,
+    );
+    if (!mounted) return;
+    if (cloud == null || cloud.isEmpty) {
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(cloud == null ? '还原失败：网络异常或令牌失效' : '选中卡片无可还原数据'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      return;
+    }
+
+    final lib = CardLibraryStorage();
+    final local = await lib.getCards();
+    final result = mergeCloudCards(local, cloud, 0);
+    await lib.saveCards(result.cards);
+    widget.onRestored?.call();
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('已还原 ${cloud.length} 张：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
   Future<void> _deleteSelected() async {
     if (_selected.isEmpty) return;
     final ok = await showDialog<bool>(
@@ -100,15 +180,7 @@ class _CloudBackupManagerDialogState
     );
     if (ok != true || !mounted) return;
 
-    final byBackup = <int, List<int>>{};
-    for (final key in _selected) {
-      final parts = key.split('#');
-      if (parts.length != 2) continue;
-      final id = int.tryParse(parts[0]);
-      final idx = int.tryParse(parts[1]);
-      if (id == null || idx == null) continue;
-      byBackup.putIfAbsent(id, () => []).add(idx);
-    }
+    final byBackup = _groupByBackup();
 
     setState(() => _loading = true);
     var deleted = 0;
@@ -207,7 +279,15 @@ class _CloudBackupManagerDialogState
           child: const Text('关闭'),
         ),
         ElevatedButton(
-          onPressed: _selected.isEmpty ? null : _deleteSelected,
+          onPressed: (_selected.isEmpty || _loading) ? null : _restoreSelected,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+          ),
+          child: Text('还原选中 (${_selected.length})'),
+        ),
+        ElevatedButton(
+          onPressed: (_selected.isEmpty || _loading) ? null : _deleteSelected,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.red,
             foregroundColor: Colors.white,
