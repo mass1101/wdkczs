@@ -239,7 +239,7 @@ void installAutoBackupHook() {
   CardLibraryStorage.onCardsChanged = () => scheduleAutoBackup();
 }
 
-/// 增量备份：仅上传有改动的卡片（对齐 CU backupCards）
+/// 全量备份：每次上传全部卡片，不区分备份时间（对齐 CU backupCards）
 Future<int> backupCards(
   StorageService storage, {
   List<SaveCard>? all,
@@ -248,16 +248,9 @@ Future<int> backupCards(
   Map<String, dynamic>? deviceStatus,
   bool Function(int uploaded)? onComplete,
 }) async {
-  // 未显式传入时自读卡库与上次备份时间（供自动增量备份复用）
   final cards = all ?? await CardLibraryStorage().getCards();
   final last = lastBackup ?? await storage.getCardLastBackupMap();
-  final toUpload = cards.where((card) {
-    final lb = last[card.id];
-    if (lb == null) return true;
-    final updated = card.updatedAt;
-    if (updated == null) return true;
-    return updated.isAfter(lb);
-  }).toList();
+  final toUpload = List<SaveCard>.of(cards);
 
   if (toUpload.isEmpty) return 0;
 
@@ -320,12 +313,11 @@ Future<(List<CloudCard>, int)?> fetchCloudCards(
   if (token.isEmpty) return null;
 
   final endpoint = await storage.getBackupEndpoint();
+  final uri = Uri.parse('$endpoint/api/backup');
+  final target = id.isEmpty ? uri : uri.replace(queryParameters: {'chip_id': id});
   try {
     final response = await http
-        .get(
-          Uri.parse('$endpoint/api/backup'),
-          headers: {'X-Device-Token': token},
-        )
+        .get(target, headers: {'X-Device-Token': token})
         .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) return null;
 
