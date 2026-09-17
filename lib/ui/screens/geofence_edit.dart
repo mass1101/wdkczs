@@ -68,7 +68,7 @@ class _FenceEditPageState extends State<FenceEditPage> {
       _idCardId = widget.fence!.idCardId;
       _rollingCode = widget.fence!.rollingCode;
     }
-    // 同步缓存卡库，供 _selectedICCard/_selectedIDCard 同步查询
+    // 同步缓存卡包，供 _selectedICCard/_selectedIDCard 同步查询
     // （CU 用同步 SharedPreferences，这里用一次性缓存等价实现）
     CardLibraryStorage().getCards().then((cards) {
       if (mounted && cards.isNotEmpty) {
@@ -168,7 +168,7 @@ class _FenceEditPageState extends State<FenceEditPage> {
     final cards = all.where((c) => ic ? isHfCard(c.tag) : isLf(c.tag)).toList()
       ..sort((a, b) => a.name.compareTo(b.name));
     if (cards.isEmpty) {
-      _toast('卡库为空，请先添加卡片');
+      _toast('卡包为空，请先添加卡片');
       return;
     }
     final result = await showDialog<String>(
@@ -542,7 +542,7 @@ class _FenceEditPageState extends State<FenceEditPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      '卡库模式',
+                      '卡包模式',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -604,7 +604,7 @@ class _FenceEditPageState extends State<FenceEditPage> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '刷卡后数据自动同步回卡库',
+                          '刷卡后数据自动同步回卡包',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey.shade500,
@@ -720,7 +720,7 @@ class _FenceEditPageState extends State<FenceEditPage> {
   }
 }
 
-/// 卡库卡片选择对话框（对齐 CU showSearch + CardSearchDelegate：
+/// 卡包卡片选择对话框（对齐 CU showSearch + CardSearchDelegate：
 /// 带搜索过滤、颜色与卡类型展示）
 class _CardPickerDialog extends StatefulWidget {
   const _CardPickerDialog({required this.cards, required this.title});

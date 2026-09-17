@@ -149,7 +149,7 @@ class _DumpEditorState extends State<DumpEditor> {
         .where((c) => c.data.isNotEmpty)
         .toList();
     if (candidates.isEmpty) {
-      _toast('卡库中没有其他同卡型且有数据的卡片');
+      _toast('卡包中没有其他同卡型且有数据的卡片');
       return;
     }
     final picked = await showModalBottomSheet<SaveCard>(

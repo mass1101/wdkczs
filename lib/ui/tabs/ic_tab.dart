@@ -772,7 +772,7 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 导出到卡库 / 从卡库导入（对齐 CU 把当前编辑卡存入 savedCards） ==========
+  // ========== 导出到卡包 / 从卡包导入（对齐 CU 把当前编辑卡存入 savedCards） ==========
   Future<void> _exportToLibrary() async {
     final uid = _uidCtrl.text.replaceAll(RegExp(r'[\s-]'), '');
     if (!RegExp(r'^[0-9a-fA-F]{8}$').hasMatch(uid)) {
@@ -783,7 +783,7 @@ class _IcTabState extends State<IcTab> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => TextInputDialog(
-        title: '导出到卡库',
+        title: '导出到卡包',
         hint: '输入卡片名称',
         initial: _app.card.name.isEmpty ? uidSpaced : _app.card.name,
       ),
@@ -805,10 +805,10 @@ class _IcTabState extends State<IcTab> {
       data: blocks,
     );
     await CardLibraryStorage().upsertCard(card);
-    _toast('已导出到卡库：${name.trim()}');
+    _toast('已导出到卡包：${name.trim()}');
   }
 
-  /// SAK 文本转卡库 int 值（默认 0）
+  /// SAK 文本转卡包 int 值（默认 0）
   int _sakToValue() {
     final hex = _ctrlHex(_sakCtrl.text);
     if (hex.length < 2) return 0;
@@ -819,13 +819,13 @@ class _IcTabState extends State<IcTab> {
   /// 去掉输入框里的空格与分隔符，保留纯 hex
   String _ctrlHex(String text) => text.replaceAll(RegExp(r'[\s-]'), '').trim();
 
-  /// 从卡库选择一张 IC 卡，把它的 dump 灌回扇区数据与卡号输入框
+  /// 从卡包选择一张 IC 卡，把它的 dump 灌回扇区数据与卡号输入框
   Future<void> _importFromLibrary() async {
     final cards = (await CardLibraryStorage().getCards())
         .where((c) => isMifareClassic(c.tag))
         .toList();
     if (cards.isEmpty) {
-      _toast('卡库中没有 IC 卡可导入');
+      _toast('卡包中没有 IC 卡可导入');
       return;
     }
     if (!mounted) return;
@@ -833,7 +833,7 @@ class _IcTabState extends State<IcTab> {
     final picked = await showDialog<SaveCard>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('从卡库选择'),
+        title: const Text('从卡包选择'),
         children: cards
             .map(
               (c) => SimpleDialogOption(
@@ -867,7 +867,7 @@ class _IcTabState extends State<IcTab> {
           : state.sak;
       _atsCtrl.text = _ctrlHex(picked.ats);
     });
-    _toast('已从卡库导入：${picked.name.isEmpty ? picked.uid : picked.name}');
+    _toast('已从卡包导入：${picked.name.isEmpty ? picked.uid : picked.name}');
   }
 
   // ========== 解卡（对齐小程序 btnCrack + Crack() 完整流程） ==========
@@ -3859,7 +3859,7 @@ class _IcTabState extends State<IcTab> {
     }
   }
 
-  // ========== 云端分析（对齐卡库云端分析：上传 dump 字节到 analyze.flippercn.com） ==========
+  // ========== 云端分析（对齐卡包云端分析：上传 dump 字节到 analyze.flippercn.com） ==========
   Future<void> _liftAnalyze() async {
     if (!mounted) return;
     final lines = _app.card

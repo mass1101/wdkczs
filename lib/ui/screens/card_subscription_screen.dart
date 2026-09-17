@@ -7,7 +7,7 @@ import '../../services/card_library.dart';
 import '../../services/card_subscription.dart';
 import '../../state/app_controller.dart';
 
-/// 卡库卡片订阅管理页（对齐 CU card_subscription_page.dart）
+/// 卡包卡片订阅管理页（对齐 CU card_subscription_page.dart）
 class CardSubscriptionScreen extends StatefulWidget {
   const CardSubscriptionScreen({super.key});
 
@@ -142,7 +142,7 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
         await lib.upsertCard(card);
       }
       if (!mounted) return;
-      _toast('已导入 $imported 张卡片到卡库');
+      _toast('已导入 $imported 张卡片到卡包');
     } catch (e) {
       if (!mounted) return;
       _toast('导入失败: $e');
@@ -270,7 +270,7 @@ class _CardSubscriptionScreenState extends State<CardSubscriptionScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('卡库订阅'),
+        title: const Text('卡包订阅'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -486,7 +486,7 @@ class _SubscriptionTile extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.download_outlined, size: 20),
               onPressed: onImport,
-              tooltip: '导入卡库',
+              tooltip: '导入卡包',
             ),
           if (onLeave != null)
             IconButton(

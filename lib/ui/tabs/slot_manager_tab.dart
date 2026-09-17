@@ -12,7 +12,7 @@ import '../../state/app_controller.dart';
 import '../screens/mfkey32_screen.dart';
 
 /// 卡槽管理 Tab（对齐 CU slot_manager.dart）
-/// 网格展示所有卡槽 + 点击写入卡库卡片 + 单槽设置 + 批量备份
+/// 网格展示所有卡槽 + 点击写入卡包卡片 + 单槽设置 + 批量备份
 class SlotManagerTab extends StatefulWidget {
   const SlotManagerTab({super.key});
 
@@ -116,7 +116,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     final cards = List<SaveCard>.from(_cards)
       ..sort((a, b) => a.name.compareTo(b.name));
     if (cards.isEmpty) {
-      _toast('卡库为空，请先添加卡片');
+      _toast('卡包为空，请先添加卡片');
       return;
     }
 
@@ -259,8 +259,8 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('批量备份到卡库'),
-        content: Text('将读取所有 $_slotCount 个卡槽的数据并添加到卡库，确定继续？'),
+        title: const Text('批量备份到卡包'),
+        content: Text('将读取所有 $_slotCount 个卡槽的数据并添加到卡包，确定继续？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -596,7 +596,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                       children: [
                         const Icon(Icons.save, size: 16),
                         const SizedBox(width: 8),
-                        const Text('备份到卡库'),
+                        const Text('备份到卡包'),
                       ],
                     ),
                   ),
@@ -777,9 +777,9 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
     final accepted = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('备份到卡库'),
+        title: const Text('备份到卡包'),
         content: Text(
-          '确定读取卡槽 ${widget.slot + 1} ${isHf ? '高频' : '低频'}数据并添加到卡库？',
+          '确定读取卡槽 ${widget.slot + 1} ${isHf ? '高频' : '低频'}数据并添加到卡包？',
         ),
         actions: [
           TextButton(
@@ -803,7 +803,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
     card.name = isHf ? _hfName : _lfName;
     card.updatedAt = DateTime.now();
     await widget.lib.upsertCard(card);
-    widget.onToast('已添加到卡库');
+    widget.onToast('已添加到卡包');
   }
 
   Future<void> _backupToCloud(bool isHf) async {
@@ -870,7 +870,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
                       context: context,
                       builder: (ctx) => AlertDialog(
                         title: const Text('导出'),
-                        content: Text('备份到卡库: ${widget.slot + 1}'),
+                        content: Text('备份到卡包: ${widget.slot + 1}'),
                         actions: [
                           TextButton(
                             onPressed: () async {
@@ -879,7 +879,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
                                 await _backupToLibrary(isHf);
                               }
                             },
-                            child: const Text('导出到卡库'),
+                            child: const Text('导出到卡包'),
                           ),
                           TextButton(
                             onPressed: () async {
@@ -927,7 +927,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
                   }
                 },
                 icon: const Icon(Icons.save),
-                label: const Text('备份到卡库'),
+                label: const Text('备份到卡包'),
               ),
             ),
             const SizedBox(height: 8),

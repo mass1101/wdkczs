@@ -157,7 +157,7 @@ class _CardCompareScreenState extends State<CardCompareScreen> {
             const Icon(Icons.swap_horiz, size: 48, color: Colors.grey),
             const SizedBox(height: 16),
             Text(
-              '卡库中没有其他 ${widget.card.tag.label} 卡可用于比较',
+              '卡包中没有其他 ${widget.card.tag.label} 卡可用于比较',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 14, color: Color(0xFF666666)),
             ),

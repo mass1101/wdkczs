@@ -405,7 +405,7 @@ class _IdTabState extends State<IdTab> {
       _cards = [..._cards, IdCardItem(id: hex, name: cardName)];
     });
     await _app.storage.saveIdCards(_cards);
-    // 同步导入到卡库：按 UID+卡型去重，已存在则复用原 id 刷新名称
+    // 同步导入到卡包：按 UID+卡型去重，已存在则复用原 id 刷新名称
     final tag = _cardType == 'HID Prox' ? TagType.hidProx : TagType.em410X;
     final lib = CardLibraryStorage();
     final cards = await lib.getCards();
@@ -416,7 +416,7 @@ class _IdTabState extends State<IdTab> {
         ? SaveCard(id: cards[idx].id, uid: hex, name: cardName, tag: tag)
         : SaveCard(uid: hex, name: cardName, tag: tag);
     await lib.upsertCard(card);
-    _toast('已保存到列表，并导入卡库');
+    _toast('已保存到列表，并导入卡包');
   }
 
   // ========== UI ==========

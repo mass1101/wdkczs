@@ -84,7 +84,7 @@ class _CloudBackupManagerDialogState
       builder: (ctx) => AlertDialog(
         title: const Text('删除云端备份'),
         content: Text(
-          '确定从云端删除选中的 ${_selected.length} 张卡片备份吗？本地卡库不受影响。',
+          '确定从云端删除选中的 ${_selected.length} 张卡片备份吗？本地卡包不受影响。',
         ),
         actions: [
           TextButton(
@@ -147,7 +147,7 @@ class _CloudBackupManagerDialogState
       builder: (ctx) => AlertDialog(
         title: const Text('删除备份记录'),
         content: Text(
-          '确定删除备份 #${entry.id} 的全部 ${entry.cards.length} 张卡片吗？本地卡库不受影响。',
+          '确定删除备份 #${entry.id} 的全部 ${entry.cards.length} 张卡片吗？本地卡包不受影响。',
         ),
         actions: [
           TextButton(
