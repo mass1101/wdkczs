@@ -468,7 +468,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                 color: hasContent ? primary : Colors.grey,
                               ),
                               const SizedBox(width: 4),
-                               Expanded(
+                               Flexible(
                                  child: Text(
                                    '卡槽 ${index + 1}',
                                    maxLines: 1,
@@ -479,6 +479,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                    ),
                                  ),
                                ),
+                               const Spacer(),
                                IconButton(
                                  padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(
