@@ -474,12 +474,6 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                    ),
                                  ),
                                ),
-                               const SizedBox(width: 2),
-                               Icon(
-                                 Icons.nfc,
-                                 size: 16,
-                                 color: hasContent ? primary : Colors.grey,
-                               ),
                                 IconButton(
                                    padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints.tightFor(
