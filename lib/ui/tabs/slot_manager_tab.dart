@@ -66,6 +66,30 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     setState(() => _progress = p);
   }
 
+  /// 卡槽卡片右下角 IC 芯片触点水印
+  Widget _chipWatermark(Color base) {
+    final c = base.withValues(alpha: 0.20);
+    return SizedBox(
+      width: 22,
+      height: 16,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(color: c, width: 1.2),
+              ),
+            ),
+          ),
+          Positioned(left: 4, right: 4, top: 0, child: SizedBox(height: 1.2, child: ColoredBox(color: c))),
+          Positioned(left: 4, right: 4, bottom: 0, child: SizedBox(height: 1.2, child: ColoredBox(color: c))),
+          Positioned(left: 0, right: 0, top: 4, bottom: 4, child: Center(child: SizedBox(width: 1.2, child: ColoredBox(color: c)))),
+        ],
+      ),
+    );
+  }
+
   String _tagName(int tagValue) {
     if (tagValue == 0 || tagValue == 4) return '未设置';
     try {
@@ -445,7 +469,33 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _onSlotTap(index),
-                    child: Padding(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: hasContent
+                                    ? [primary.withValues(alpha: 0.10), primary.withValues(alpha: 0.20)]
+                                    : [Colors.grey.withValues(alpha: 0.05), Colors.grey.withValues(alpha: 0.12)],
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: 4,
+                          top: 4,
+                          child: Icon(Icons.contactless, size: 24, color: (hasContent ? primary : Colors.grey).withValues(alpha: 0.15)),
+                        ),
+                        Positioned(
+                          right: 6,
+                          bottom: 6,
+                          child: _chipWatermark(hasContent ? primary : Colors.grey),
+                        ),
+                        Padding(
                       padding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -541,15 +591,17 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                    ),
                                  ),
                                ),
-                             ],
-                           ),
-                         ],
-                       ),
-                     ),
-                   ),
-                 );
-              },
-            ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      ],
+                    ),
+                    ),
+                  );
+                },
+              ),
           ),
           if (_progress != -1)
             Positioned(
