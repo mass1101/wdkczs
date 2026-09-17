@@ -315,6 +315,10 @@ class _SettingsTabState extends State<SettingsTab> {
 
   // ========== 订阅入口（弹窗显示） ==========
   Future<void> _showFenceSubscription() async {
+    if (!_app.isActivated) {
+      _toast('激活后使用该功能');
+      return;
+    }
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.5),
@@ -323,6 +327,10 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   Future<void> _showCardSubscription() async {
+    if (!_app.isActivated) {
+      _toast('激活后使用该功能');
+      return;
+    }
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.5),
