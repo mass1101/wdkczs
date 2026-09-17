@@ -444,12 +444,26 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                        ),
-                        Positioned(
-                          left: 4,
-                          top: 4,
-                          child: Icon(Icons.contactless, size: 24, color: (hasContent ? primary : Colors.grey).withValues(alpha: 0.15)),
-                        ),
+                         ),
+                         Positioned.fill(
+                           child: IgnorePointer(
+                             child: Center(
+                               child: Text(
+                                 '${index + 1}',
+                                 style: const TextStyle(
+                                   fontSize: 42,
+                                   fontWeight: FontWeight.w700,
+                                   color: Color(0x4DA5D6A7),
+                                 ),
+                               ),
+                             ),
+                           ),
+                         ),
+                         Positioned(
+                           left: 4,
+                           top: 4,
+                           child: Icon(Icons.contactless, size: 24, color: (hasContent ? primary : Colors.grey).withValues(alpha: 0.15)),
+                         ),
                         Positioned(
                           right: 6,
                           bottom: 6,
@@ -460,20 +474,9 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Row(
-                             children: [
-                               Expanded(
-                                 child: Text(
-                                   '卡槽 ${index + 1}',
-                                   maxLines: 1,
-                                   overflow: TextOverflow.ellipsis,
-                                   style: TextStyle(
-                                     fontWeight: FontWeight.w600,
-                                     fontSize: 13,
-                                     color: hasContent ? primary : Colors.black87,
-                                   ),
-                                 ),
-                               ),
+                           Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
                                 IconButton(
                                    padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints.tightFor(
