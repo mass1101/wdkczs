@@ -36,6 +36,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _tabController.addListener(() {
       _app.setTab(_tabController.index);
     });
+    _app.addListener(_onAppChanged);
     _overlaySub = FlutterOverlayWindow.overlayListener.listen(_onOverlayEvent);
     _overlayDataTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (_app.geofence.overlayActive) {
@@ -46,10 +47,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _app.removeListener(_onAppChanged);
     _overlayDataTimer?.cancel();
     _overlaySub?.cancel();
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _onAppChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onOverlayEvent(dynamic event) {
