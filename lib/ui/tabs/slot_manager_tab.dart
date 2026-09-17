@@ -389,46 +389,6 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
      return Scaffold(
       body: Stack(
         children: [
-          Positioned(
-            top: 12,
-            right: 12,
-            child: Container(
-              decoration: BoxDecoration(
-                color: primary,
-                shape: BoxShape.circle,
-              ),
-              padding: const EdgeInsets.all(8),
-              child: PopupMenuButton<String>(
-                icon: const Icon(Icons.cloud_upload, color: Colors.white),
-                onSelected: (value) {
-                  if (value == 'batch_library') _batchBackupToLibrary();
-                  if (value == 'batch_cloud') _batchBackupToCloud();
-                },
-                itemBuilder: (ctx) => [
-                  PopupMenuItem(
-                    value: 'batch_library',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.save, size: 16),
-                        const SizedBox(width: 8),
-                        const Text('备份到卡库'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'batch_cloud',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cloud_upload, size: 16),
-                        const SizedBox(width: 8),
-                        const Text('备份到云端'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           Positioned.fill(
             child: GridView.builder(
               padding: const EdgeInsets.fromLTRB(16, 64, 16, 16),
@@ -602,6 +562,53 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                   );
                 },
               ),
+          ),
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Container(
+              decoration: BoxDecoration(
+                color: primary,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(8),
+              child: PopupMenuButton<String>(
+                icon: const Icon(Icons.cloud_upload, color: Colors.white),
+                onSelected: (value) {
+                  if (value == 'batch_library') _batchBackupToLibrary();
+                  if (value == 'batch_cloud') _batchBackupToCloud();
+                },
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 'batch_library',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.save, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('备份到卡库'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'batch_cloud',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cloud_upload, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('备份到云端'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           if (_progress != -1)
             Positioned(
