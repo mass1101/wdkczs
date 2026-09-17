@@ -40,6 +40,7 @@ class BleService {
   StreamSubscription<List<int>>? _notifySub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   bool _autoReconnect = false;
+  int _connectGen = 0;
   void Function(List<int>)? _dfuCallback;
 
   /// 是否 ChameleonUltra（非 CU- 系列）
@@ -89,7 +90,14 @@ class BleService {
 
   /// 连接指定设备
   Future<void> connect(BluetoothDevice device) async {
-    if (isConnected) await disconnect();
+    // 递增连接代次：正在进行的自动重连立即退出，避免其失败路径覆盖本次连接状态
+    _connectGen++;
+    _autoReconnect = false;
+    await _cancelSubs();
+    if (isConnected) {
+      await disconnect();
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
     _device = device;
     status.value = BleStatus(BleState.connecting);
     try {
@@ -101,14 +109,25 @@ class BleService {
     }
   }
 
+  Future<void> _cancelSubs() async {
+    await _notifySub?.cancel();
+    _notifySub = null;
+    await _connSub?.cancel();
+    _connSub = null;
+  }
+
   /// 建立连接：连接重试 + 服务/特征发现重试（对齐小程序 adapter 层）
   Future<void> _establish() async {
     final device = _device!;
 
-    // 断连监听：订阅一次，断开时广播状态并自动重连（对齐小程序 need_reconnect）
-    _connSub ??= device.connectionState.listen((s) {
+    // 断连监听：每次建立前重新订阅，确保换设备后仍能收到断连事件
+    await _cancelSubs();
+    _connSub = device.connectionState.listen((s) {
       if (s == BluetoothConnectionState.disconnected) {
         _rxController.add(Uint8List(0));
+        // 清理特征引用：让 isConnected 立即变假，send 报「未连接」而非底层异常
+        _writeChar = null;
+        _dfuWriteChar = null;
         status.value = BleStatus(BleState.disconnected);
         if (_autoReconnect && _device != null) {
           _reconnect();
@@ -116,10 +135,16 @@ class BleService {
       }
     });
 
-    // 连接重试 5 次，每次 2s（对齐小程序 createBLEConnection 5×2000ms）
+    // 连接重试 5 次，每次 2s；失败后等 2s 让 Android GATT 释放句柄再重试
+    // （flutter_blue_plus disconnect 注释：stranded connection 需 ≥2s 间隔，
+    //  https://issuetracker.google.com/issues/37121040）
     Object? lastErr;
     for (var attempt = 0; attempt < 5; attempt++) {
       try {
+        if (device.isConnected) {
+          lastErr = null;
+          break;
+        }
         await device.connect(
             license: License.nonprofit, timeout: const Duration(seconds: 2));
         lastErr = null;
@@ -129,6 +154,9 @@ class BleService {
         try {
           await device.disconnect();
         } catch (_) {}
+        if (attempt < 4) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+        }
       }
     }
     if (lastErr != null) {
@@ -219,17 +247,20 @@ class BleService {
 
   /// 断连自动重连（对齐小程序 need_reconnect/btnAdapterCon）：最多尝试 5 次
   Future<void> _reconnect() async {
+    final gen = _connectGen;
     for (var attempt = 0; attempt < 5; attempt++) {
-      if (!_autoReconnect || _device == null) return;
+      if (gen != _connectGen || !_autoReconnect || _device == null) return;
       try {
         await Future<void>.delayed(const Duration(seconds: 1));
-        if (!_autoReconnect) return;
+        if (gen != _connectGen || !_autoReconnect) return;
         status.value = BleStatus(BleState.connecting);
         await _establish();
         return;
       } catch (_) {}
     }
     // 重连失败：停止自动重连，等待用户手动连接
+    // （用户已发起新的手动连接时不更新状态，避免覆盖手动连接结果）
+    if (gen != _connectGen) return;
     _autoReconnect = false;
     status.value = BleStatus(BleState.disconnected);
   }
@@ -296,12 +327,10 @@ class BleService {
   }
 
   Future<void> disconnect() async {
-    // 主动断开：取消自动重连，避免断连事件触发 _reconnect
+    // 主动断开：作废进行中的自动重连，取消订阅
+    _connectGen++;
     _autoReconnect = false;
-    await _notifySub?.cancel();
-    _notifySub = null;
-    await _connSub?.cancel();
-    _connSub = null;
+    await _cancelSubs();
     try {
       await _device?.disconnect();
     } catch (_) {}
