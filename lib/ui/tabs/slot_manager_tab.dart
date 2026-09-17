@@ -492,12 +492,12 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                  ),
                                ),
                              ],
-                           ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.credit_card,
+                            ),
+                           const SizedBox(height: 3),
+                           Row(
+                             children: [
+                               Icon(
+                                 Icons.credit_card,
                                 size: 12,
                                 color: Colors.grey[500],
                               ),
