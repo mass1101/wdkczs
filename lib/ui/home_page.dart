@@ -137,7 +137,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 Tab(text: 'ID卡'),
                 Tab(text: '卡槽'),
                 Tab(text: '卡库'),
-                Tab(text: '电子围栏'),
+                 Tab(text: '围栏'),
                 Tab(text: '设置'),
               ],
             ),
