@@ -121,7 +121,10 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
 
   Future<void> _locateMe() async {
     final target = _geo.lastPosition ?? await _getGcjPosition();
-    if (target == null) return;
+    if (target == null) {
+      _toast('定位失败：请检查定位权限/GPS信号');
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _currentPosition = target;
