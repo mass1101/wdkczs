@@ -127,7 +127,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             color: Colors.white,
              child: TabBar(
                controller: _tabController,
-               isScrollable: true,
                indicatorColor: primary,
               indicatorSize: TabBarIndicatorSize.label,
               labelColor: primary,
@@ -147,6 +146,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Expanded(
             child: TabBarView(
               controller: _tabController,
+              physics: const NeverScrollableScrollPhysics(),
               children: [
                 const IcTab(),
                 const IdTab(),
