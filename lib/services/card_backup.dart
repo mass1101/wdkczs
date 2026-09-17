@@ -381,17 +381,21 @@ class CloudBackupCardItem {
 }
 
 /// 拉取云端全部备份记录（按时间倒序）；未配置令牌或失败返回 null。
-Future<List<CloudBackupEntry>?> fetchCloudBackups(StorageService storage) async {
+Future<List<CloudBackupEntry>?> fetchCloudBackups(
+  StorageService storage, {
+  String? chipId,
+}) async {
   final token = await storage.getBackupToken();
   if (token.isEmpty) return null;
 
   final endpoint = await storage.getBackupEndpoint();
+  final uri = Uri.parse('$endpoint/api/device/backups');
+  final target = (chipId != null && chipId.isNotEmpty)
+      ? uri.replace(queryParameters: {'chip_id': chipId})
+      : uri;
   try {
     final response = await http
-        .get(
-          Uri.parse('$endpoint/api/device/backups'),
-          headers: {'X-Device-Token': token},
-        )
+        .get(target, headers: {'X-Device-Token': token})
         .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) return null;
 
@@ -429,18 +433,18 @@ Future<List<CloudBackupEntry>?> fetchCloudBackups(StorageService storage) async 
 Future<int> deleteCloudBackupCard(
   StorageService storage,
   int backupId,
-  int cardIndex,
-) async {
+  int cardIndex, {
+  String? chipId,
+}) async {
   final token = await storage.getBackupToken();
   if (token.isEmpty) return -1;
 
   final endpoint = await storage.getBackupEndpoint();
+  var url = '$endpoint/api/device/backups/$backupId/cards/$cardIndex';
+  if (chipId != null && chipId.isNotEmpty) url += '?chip_id=$chipId';
   try {
     final response = await http
-        .delete(
-          Uri.parse('$endpoint/api/device/backups/$backupId/cards/$cardIndex'),
-          headers: {'X-Device-Token': token},
-        )
+        .delete(Uri.parse(url), headers: {'X-Device-Token': token})
         .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) return -1;
     final decoded = jsonDecode(response.body);
@@ -456,18 +460,18 @@ Future<int> deleteCloudBackupCard(
 /// 删除指定备份记录（含其下全部卡片）。返回删除张数；失败返回 -1。
 Future<int> deleteCloudBackup(
   StorageService storage,
-  int backupId,
-) async {
+  int backupId, {
+  String? chipId,
+}) async {
   final token = await storage.getBackupToken();
   if (token.isEmpty) return -1;
 
   final endpoint = await storage.getBackupEndpoint();
+  var url = '$endpoint/api/device/backups/$backupId';
+  if (chipId != null && chipId.isNotEmpty) url += '?chip_id=$chipId';
   try {
     final response = await http
-        .delete(
-          Uri.parse('$endpoint/api/device/backups/$backupId'),
-          headers: {'X-Device-Token': token},
-        )
+        .delete(Uri.parse(url), headers: {'X-Device-Token': token})
         .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) return -1;
     final decoded = jsonDecode(response.body);

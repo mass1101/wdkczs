@@ -37,7 +37,7 @@ class _CloudBackupManagerDialogState
       _loading = true;
       _error = null;
     });
-    final entries = await fetchCloudBackups(widget.storage);
+    final entries = await fetchCloudBackups(widget.storage, chipId: widget.chipId);
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -120,6 +120,7 @@ class _CloudBackupManagerDialogState
           widget.storage,
           entry.key,
           idx,
+          chipId: widget.chipId,
         );
         if (remaining < 0) {
           failed++;
@@ -163,7 +164,7 @@ class _CloudBackupManagerDialogState
     if (ok != true || !mounted) return;
 
     setState(() => _loading = true);
-    final n = await deleteCloudBackup(widget.storage, entry.id);
+    final n = await deleteCloudBackup(widget.storage, entry.id, chipId: widget.chipId);
     if (!mounted) return;
     await _load();
     if (!mounted) return;
