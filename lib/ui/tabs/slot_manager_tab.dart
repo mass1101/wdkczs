@@ -579,11 +579,11 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                   ),
                 ],
               ),
-              padding: const EdgeInsets.all(4),
+              padding: EdgeInsets.zero,
               child: PopupMenuButton<String>(
                 icon: const Icon(Icons.cloud_upload, color: Colors.white, size: 18),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 27, minHeight: 27),
+                constraints: const BoxConstraints(minWidth: 25, minHeight: 25),
                 onSelected: (value) {
                   if (value == 'batch_library') _batchBackupToLibrary();
                   if (value == 'batch_cloud') _batchBackupToCloud();
