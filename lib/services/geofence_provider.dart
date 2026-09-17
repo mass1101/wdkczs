@@ -244,9 +244,8 @@ class GeofenceProvider extends ChangeNotifier {
   }
 
   void _syncEnabledState() {
-    final connected = _isConnected?.call() ?? false;
     final activated = _isActivated?.call() ?? false;
-    _enabled = _userEnabled && connected && activated;
+    _enabled = _userEnabled && activated;
   }
 
   /// 设备连接状态变化后调用：连接态参与围栏总开关的实际生效判定
