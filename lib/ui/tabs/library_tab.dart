@@ -52,7 +52,7 @@ const _folderColors = <Color>[
   Color(0xFFF44336),
 ];
 
-/// 卡库 Tab：已保存卡片列表 + 文件夹树形导航 + 写卡槽 + 导入/导出
+/// 卡包 Tab：已保存卡片列表 + 文件夹树形导航 + 写卡槽 + 导入/导出
 class LibraryTab extends StatefulWidget {
   const LibraryTab({super.key});
 
@@ -267,7 +267,7 @@ class _LibraryTabState extends State<LibraryTab> {
     if (folders.isEmpty && cards.isEmpty) {
       return Center(
         child: Text(
-          _folderId == null ? '卡库为空，点击「创建卡片」或「导入」' : '此文件夹为空',
+          _folderId == null ? '卡包为空，点击「创建卡片」或「导入」' : '此文件夹为空',
           style: const TextStyle(color: Colors.grey, fontSize: 13),
         ),
       );
@@ -846,12 +846,12 @@ class _LibraryTabState extends State<LibraryTab> {
 
   Future<void> _cloudBackup() async {
     if (_cards.isEmpty) {
-      _toast('卡库为空，无需备份');
+      _toast('卡包为空，无需备份');
       return;
     }
     if (!await _confirm(
       '备份到云端',
-      '将把卡库中的 ${_cards.length} 张卡片上传到云端服务器。',
+      '将把卡包中的 ${_cards.length} 张卡片上传到云端服务器。',
       '备份',
     )) {
       return;
@@ -875,7 +875,7 @@ class _LibraryTabState extends State<LibraryTab> {
   }
 
   Future<void> _cloudRestore() async {
-    if (!await _confirm('从云端还原', '将从云端拉取备份并与本地卡库合并，同一张卡以云端内容为准。', '还原')) {
+    if (!await _confirm('从云端还原', '将从云端拉取备份并与本地卡包合并，同一张卡以云端内容为准。', '还原')) {
       return;
     }
     final storage = _app.storage;
