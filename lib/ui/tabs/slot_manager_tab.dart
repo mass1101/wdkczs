@@ -391,7 +391,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
         children: [
           Positioned.fill(
             child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 64, 16, 16),
+              padding: const EdgeInsets.fromLTRB(16, 30, 16, 16),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 childAspectRatio: 1.5,
