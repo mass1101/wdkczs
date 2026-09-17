@@ -460,25 +460,26 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '卡槽 ${index + 1}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                color: hasContent ? primary : Colors.black87,
-                              ),
-                            ),
-                          ),
                           Row(
                              children: [
+                               Expanded(
+                                 child: Text(
+                                   '卡槽 ${index + 1}',
+                                   maxLines: 1,
+                                   overflow: TextOverflow.ellipsis,
+                                   style: TextStyle(
+                                     fontWeight: FontWeight.w600,
+                                     fontSize: 13,
+                                     color: hasContent ? primary : Colors.black87,
+                                   ),
+                                 ),
+                               ),
+                               const SizedBox(width: 4),
                                Icon(
                                  Icons.nfc,
                                  size: 16,
                                  color: hasContent ? primary : Colors.grey,
                                ),
-                               const Spacer(),
                                IconButton(
                                  padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(
