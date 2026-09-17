@@ -457,7 +457,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                                  style: const TextStyle(
                                    fontSize: 42,
                                    fontWeight: FontWeight.w700,
-                                   color: Color(0x4DA5D6A7),
+                                   color: Color(0x70A5D6A7),
                                  ),
                                ),
                              ),
@@ -478,16 +478,22 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                           Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                IconButton(
-                                   padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 18,
-                                      height: 18,
-                                    ),
-                                   onPressed: () => _showSlotSettings(index),
+                            Row(
+                               mainAxisAlignment: MainAxisAlignment.end,
+                               children: [
+                                 Icon(
+                                   Icons.nfc,
+                                   size: 16,
+                                   color: hasContent ? primary : Colors.grey,
+                                 ),
+                                 const SizedBox(width: 2),
+                                 IconButton(
+                                    padding: EdgeInsets.zero,
+                                     constraints: const BoxConstraints.tightFor(
+                                       width: 18,
+                                       height: 18,
+                                     ),
+                                    onPressed: () => _showSlotSettings(index),
                                   icon: const Icon(
                                     Icons.settings,
                                     size: 16,
