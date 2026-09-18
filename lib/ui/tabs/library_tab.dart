@@ -231,15 +231,6 @@ class _LibraryTabState extends State<LibraryTab> {
                 },
               ),
               ActionButton(
-                label: '云端还原',
-                icon: Icons.cloud_download,
-                onTap: () {
-                  if (!_app.isActivated) return _toast('激活后使用该功能');
-                  if (!_connected) return _toast('请先连接设备后使用');
-                  _cloudRestore();
-                },
-              ),
-              ActionButton(
                 label: '云端备份管理',
                 icon: Icons.cloud_queue,
                 onTap: () {
@@ -871,40 +862,6 @@ class _LibraryTabState extends State<LibraryTab> {
       );
       if (!mounted) return;
       _toast(result.success ? '备份成功：${result.uploaded} 张卡片' : '备份失败，请检查网络或服务器');
-    });
-  }
-
-  Future<void> _cloudRestore() async {
-    if (!await _confirm('从云端还原', '将从云端拉取备份并与本地卡包合并，同一张卡以云端内容为准。', '还原')) {
-      return;
-    }
-    final storage = _app.storage;
-    final chipId = await _ensureChipId();
-    if (chipId.isEmpty) return;
-    final token = await storage.getBackupToken();
-    if (token.isEmpty) {
-      _toast('尚无备份记录，请先备份');
-      return;
-    }
-    await _runBusy('正在从云端拉取...', () async {
-      final cloud = await fetchCloudCards(storage, chipId: chipId);
-      if (!mounted) return;
-      if (cloud == null) {
-        _toast('还原失败或无备份数据');
-        return;
-      }
-      if (cloud.$1.isEmpty) {
-        _toast('云端没有可还原的卡片');
-        return;
-      }
-      final result = mergeCloudCards(_cards, cloud.$1, cloud.$2);
-      await _lib.saveCards(result.cards);
-      await _reload();
-      _toast(
-        result.failed > 0
-            ? '还原完成：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}，失败 ${result.failed}'
-            : '还原完成：新增 ${result.added}，更新 ${result.updated}，保留 ${result.kept}',
-      );
     });
   }
 

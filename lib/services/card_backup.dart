@@ -301,45 +301,6 @@ Future<BackupResult> backupAllCardsToCloud(
   return BackupResult(success: ok, uploaded: all.length);
 }
 
-/// 从云端拉取完整卡库。返回 (卡列表, 无法解析条数)；无数据或失败返回 null。
-Future<(List<CloudCard>, int)?> fetchCloudCards(
-  StorageService storage, {
-  String? chipId,
-}) async {
-  final id = await _resolveChipId(storage, chipId: chipId);
-  if (id.isEmpty) return null;
-
-  final token = await storage.getBackupToken();
-  if (token.isEmpty) return null;
-
-  final endpoint = await storage.getBackupEndpoint();
-  final uri = Uri.parse('$endpoint/api/backup');
-  final target = id.isEmpty ? uri : uri.replace(queryParameters: {'chip_id': id});
-  try {
-    final response = await http
-        .get(target, headers: {'X-Device-Token': token})
-        .timeout(const Duration(seconds: 10));
-    if (response.statusCode != 200) return null;
-
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    final items = List<dynamic>.from(body['cards'] ?? []);
-    final out = <CloudCard>[];
-    var failed = 0;
-    for (final item in items) {
-      final map = item as Map<String, dynamic>;
-      final card = cloudJsonToSaveCard(map);
-      if (card == null) {
-        failed++;
-        continue;
-      }
-      out.add(CloudCard(card: card, raw: map));
-    }
-    return (out, failed);
-  } catch (_) {
-    return null;
-  }
-}
-
 /// 云端备份记录（一次备份上报）
 class CloudBackupEntry {
   const CloudBackupEntry({
