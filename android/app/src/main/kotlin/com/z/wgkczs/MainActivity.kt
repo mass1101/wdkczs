@@ -1,4 +1,4 @@
-package com.z.nfc
+package com.z.wgkczs
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -6,7 +6,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
-    private val overlayChannelName = "com.z.nfc/overlay"
+    private val overlayChannelName = "com.z.wgkczs/overlay"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

@@ -1,4 +1,4 @@
-package com.z.nfc
+package com.z.wgkczs
 
 import android.app.Service
 import android.content.Intent

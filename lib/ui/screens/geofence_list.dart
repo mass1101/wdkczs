@@ -18,7 +18,7 @@ import '../../services/storage_service.dart';
 import '../../services/watchdog.dart';
 import 'geofence_edit.dart';
 
-const _overlayChannel = MethodChannel('com.z.nfc/overlay');
+const _overlayChannel = MethodChannel('com.z.wgkczs/overlay');
 
 /// 电子围栏列表页：全屏地图 + 浮动控件 + 底部可拖拽围栏列表
 /// （严格对齐 CU geofence_list.dart，纯在线高德瓦片，无离线底图增强）
@@ -360,7 +360,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                     ? 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}'
                     : 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
                 subdomains: const ['1', '2', '3', '4'],
-                userAgentPackageName: 'com.z.nfc',
+                userAgentPackageName: 'com.z.wgkczs',
               ),
               PolygonLayer(polygons: _buildPolygons()),
               MarkerLayer(markers: _buildFenceCenterMarkers()),
