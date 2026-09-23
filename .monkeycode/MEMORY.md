@@ -143,8 +143,8 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - 默认 `git push github/gitee` 会失败：credential.helper 指向 `/app/agent/bin/agent git-credential-helper`，它依赖 `/tmp/codingmatrix-git-credential.sock`；套接字缺失时报 `dial unix ... connect: no such file or directory` → `could not read Username`。
   - 有效凭据在 `/root/.git-credentials`（store 格式，含 github.com 与 gitee.com）。`/root/.netrc` 里的 github.com token 已失效（GitHub 返回 `Invalid username or token`），勿再用。
-  - 推送方式：`C=$(grep -m1 '^https://[^@]*@github.com$' /root/.git-credentials) && git -c credential.helper= push "${C}/mass1101/NFCapp.git" main`；gitee 把 host 换成 `gitee.com`、仓库路径换成 `zzx1101/NFCapp.git`。
-  - 远端：github=`https://github.com/mass1101/NFCapp.git`、gitee=`https://gitee.com/zzx1101/NFCapp.git`，默认分支均 `main`；环境无 `ssh` 二进制，只能走 HTTPS。
+  - 推送方式：`C=$(grep -m1 '^https://[^@]*@github.com$' /root/.git-credentials) && git -c credential.helper= push "${C}/mass1101/wdkczs.git" main`；gitee 把 host 换成 `gitee.com`、仓库路径换成 `zzx1101/NFCapp.git`。
+  - 远端：github=`https://github.com/mass1101/wdkczs.git`、gitee=`https://gitee.com/zzx1101/NFCapp.git`，默认分支均 `main`；环境无 `ssh` 二进制，只能走 HTTPS。
   - 打印 git 输出前先 `sed 's|//[^@]*@|//***@|g'` 脱敏，勿在回复中展示 token。
   - Flutter 在 `/opt/flutter/bin/flutter`（3.44.9 / Dart 3.12.2），不在 PATH；`flutter` 命令不可用，必须用绝对路径。
   - **该 SDK 的 `dart:math` 是精简版，未导出 `floor`/`ceil`/`sinh`/`cosh`/`tanh`**（`pow`/`log`/`exp`/`atan`/`tan`/`sqrt`/`pi`/`ln10` 正常）。取整用 `(x).floor()`，双曲函数按定义实现：`sinh(x) = (exp(x) - exp(-x)) / 2`。`Random.secure()` 可用，生成 token 优先用它，勿自写 LCG。

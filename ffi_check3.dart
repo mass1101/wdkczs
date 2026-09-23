@@ -3,7 +3,7 @@ import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
-import 'package:nfctool_app/services/crypto1.dart';
+import 'package:wgkczs/services/crypto1.dart';
 
 // hardnested 的 Dart FFI 绑定层 smoke test
 // 注：合成 hard 卡样本无法从外部复刻固件采集输出语义（par 位与明文/加密视角

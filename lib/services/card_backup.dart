@@ -12,17 +12,17 @@ import 'storage_service.dart';
 /// 云端卡库备份/还原（对齐 CU helpers/backup.dart，接 card.zzx1101.tk 服务器）。
 /// 序列化采用 CU CardSave JSON 形状 + bin_data，保证与 CU 服务器/客户端互操作。
 
-/// nfcapp TagType → CU TagType.name（服务器 `tag_type` 字段用 CU 枚举名）
+/// 无感刷卡助手 TagType → CU TagType.name（服务器 `tag_type` 字段用 CU 枚举名）
 /// 两者成员命名已完全对齐，直接取 name
 String _cuTagName(TagType tag) => tag.name;
 
-/// CU TagType.name → nfcapp TagType
+/// CU TagType.name → 无感刷卡助手 TagType
 TagType? _tagByName(String? name) {
   if (name == null) return null;
   return TagType.values.where((e) => e.name == name).firstOrNull;
 }
 
-/// 将 nfcapp SaveCard 序列化为 CU CardSave JSON 形状（字节数组版），并附 bin_data。
+/// 将无感刷卡助手 SaveCard 序列化为 CU CardSave JSON 形状（字节数组版），并附 bin_data。
 Map<String, dynamic> _saveCardToCuJson(SaveCard card) {
   final atqa = card.atqa.isEmpty
       ? <int>[]
@@ -89,11 +89,11 @@ class CloudCard {
   const CloudCard({required this.card, required this.raw});
 }
 
-/// 将 nfcapp SaveCard 转成字节：Classic 需按块导出同 CU，这里统一按行拼接。
+/// 将无感刷卡助手 SaveCard 转成字节：Classic 需按块导出同 CU，这里统一按行拼接。
 Map<String, dynamic> saveCardToJsonForUpload(SaveCard card) =>
     _saveCardToCuJson(card);
 
-/// 云端条目还原为 nfcapp SaveCard（兼容 CU CardSave JSON 与 nfcapp 两种形状）
+/// 云端条目还原为无感刷卡助手 SaveCard（兼容 CU CardSave JSON 与无感刷卡助手 两种形状）
 SaveCard? cloudJsonToSaveCard(Map<String, dynamic> map) {
   try {
     // 兼容 CU 返回：含 id 且 data 为 List 时按 CU 形状解析

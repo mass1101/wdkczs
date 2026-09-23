@@ -5,7 +5,7 @@ import '../models/enums.dart';
 import 'card_library.dart';
 import 'storage_service.dart';
 
-/// 导入转换器：PM3/Flipper/MCT（对齐 CU card_save_converters，输出 nfcapp SaveCard）
+/// 导入转换器：PM3/Flipper/MCT（对齐 CU card_save_converters，输出无感刷卡助手 SaveCard）
 
 /// 由块数推断 MIFARE Classic 卡型（对齐 CU mfClassicGetChameleonTagType）
 TagType _tagTypeByBlockCount(int blockCount) {
@@ -107,7 +107,7 @@ SaveCard flipperNfcToSaveCard(String data) {
   );
 }
 
-/// MCT（磁卡工具，+Sector 格式，与 nfcapp toDumpFileText 一致）
+/// MCT（磁卡工具，+Sector 格式，与无感刷卡助手 toDumpFileText 一致）
 SaveCard mctToSaveCard(String data) {
   final lines = data.split('\n');
   if (lines.length < 2) throw const FormatException('无效的 MCT 文件');
@@ -245,7 +245,7 @@ SaveCard binToSaveCard(Uint8List bytes, {String? name}) {
     if (bytes.length < 16) throw FormatException('Classic dump 至少 16 字节');
     uid = StorageService.bytesToHex(bytes.sublist(0, 4));
     sak = bytes[5];
-    // block0 中 ATQA 存为大端 [hi, lo]，转 CU/nfcapp 约定的 [lo, hi]
+    // block0 中 ATQA 存为大端 [hi, lo]，转 CU/无感刷卡助手约定的 [lo, hi]
     atqa = StorageService.bytesToHex(Uint8List.fromList([bytes[7], bytes[6]]));
     for (int i = 0; i + 16 <= bytes.length; i += 16) {
       blocks.add(StorageService.bytesToHex(bytes.sublist(i, i + 16)));
@@ -319,13 +319,13 @@ SaveCard? autoDetectToSaveCard(Uint8List bytes, {String? fileName}) {
   }
 }
 
-/// CU 单卡 JSON（CardSave）→ nfcapp SaveCard
+/// CU 单卡 JSON（CardSave）→ 无感刷卡助手 SaveCard
 /// CU 的 data/atqa/ats 是字节数组、color 是 hex 字符串、extra 装 ultralight 字段
 SaveCard cuJsonToSaveCard(String json) {
   final d = jsonDecode(json) as Map<String, dynamic>;
   final extra = (d['extra'] ?? const {}) as Map<String, dynamic>;
 
-  // CU 字节数组 → nfcapp 紧凑 hex 字符串
+  // CU 字节数组 → 无感刷卡助手 紧凑 hex 字符串
   String cuHex(List<dynamic>? l) => StorageService.bytesToHex(
     Uint8List.fromList((l ?? const []).map((e) => e as int).toList()),
   );

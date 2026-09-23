@@ -32,7 +32,8 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
   int _progress = -1;
   int _activeSlot = -1;
 
-  static const _slotCount = 80;
+  /// 槽位数以固件 `getSlotInfo` 返回为准（围栏固件 8/16 槽动态适配）
+  int get _slotCount => _slotTypes.isEmpty ? 8 : _slotTypes.length;
 
   @override
   void initState() {
@@ -47,7 +48,15 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
       _slotTypes = await _app.device.cmdSlotGetInfo();
       _enabledSlots = await _app.device.cmdSlotGetIsEnable();
       _slotNames = await _app.device.cmdSlotGetFreqNames();
-      _activeSlot = await _app.device.cmdSlotGetActive();
+      try {
+        _activeSlot = await _app.device.cmdSlotGetActive();
+        if (_activeSlot >= 0) {
+          await _app.storage.setCurrentSlot(_activeSlot);
+        }
+      } catch (_) {
+        // 围栏固件无 getActiveSlot 命令，回退到本地缓存的激活槽
+        _activeSlot = await _app.storage.getCurrentSlot();
+      }
     } catch (_) {}
     if (!mounted) return;
     setState(() => _progress = -1);
@@ -234,6 +243,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     try {
       await _app.device.cmdSlotSetActive(slot);
       _activeSlot = slot;
+      await _app.storage.setCurrentSlot(slot);
       _toast('已切换到卡槽 ${slot + 1}');
       if (!mounted) return;
       setState(() {});
@@ -281,7 +291,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     for (var slot = 0; slot < _slotCount; slot++) {
       _setProgress(((slot + 1) / _slotCount * 100).round());
       for (final isHf in [true, false]) {
-        final card = await readSlotDump(_app.device, slot, isHf);
+        final card = await readSlotDump(_app.device, slot, isHf, readCmd: 6070);
         if (card == null) {
           skipped++;
           continue;
@@ -309,10 +319,6 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
   }
 
   Future<void> _batchBackupToCloud() async {
-    if (!_app.isActivated) {
-      _toast('激活后使用该功能');
-      return;
-    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -338,7 +344,7 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     for (var slot = 0; slot < _slotCount; slot++) {
       _setProgress(((slot + 1) / _slotCount * 100).round());
       for (final isHf in [true, false]) {
-        final card = await readSlotDump(_app.device, slot, isHf);
+        final card = await readSlotDump(_app.device, slot, isHf, readCmd: 6070);
         if (card == null) continue;
         card.name = _slotName(
           slot,
@@ -391,11 +397,11 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     final columns = screenWidth >= 1000 ? 4 : (screenWidth >= 700 ? 3 : 2);
 
      return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 30, 16, 16),
+       body: Stack(
+         children: [
+           Positioned.fill(
+             child: GridView.builder(
+               padding: const EdgeInsets.fromLTRB(16, 70, 16, 16),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 childAspectRatio: 1.5,
@@ -569,10 +575,10 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                     ),
                   );
                 },
-              ),
-          ),
-          Positioned(
-            top: 12,
+               ),
+           ),
+            Positioned(
+              top: 12,
             right: 12,
             child: Container(
               decoration: BoxDecoration(
@@ -801,7 +807,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
     );
     if (accepted != true) return;
 
-    final card = await readSlotDump(widget.app.device, widget.slot, isHf);
+    final card = await readSlotDump(widget.app.device, widget.slot, isHf, readCmd: 6070);
     if (card == null) {
       widget.onToast('卡槽为空');
       return;
@@ -813,10 +819,6 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
   }
 
   Future<void> _backupToCloud(bool isHf) async {
-    if (!widget.app.isActivated) {
-      widget.onToast('激活后使用该功能');
-      return;
-    }
     final accepted = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -838,7 +840,7 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
     );
     if (accepted != true) return;
 
-    final card = await readSlotDump(widget.app.device, widget.slot, isHf);
+    final card = await readSlotDump(widget.app.device, widget.slot, isHf, readCmd: 6070);
     if (card == null) {
       widget.onToast('卡槽为空');
       return;
@@ -2061,5 +2063,144 @@ class _SlotEditDialogState extends State<SlotEditDialog> {
       ..showSnackBar(
         SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
       );
+  }
+}
+
+/// 原始命令对话框（调试用）
+class RawCommandDialog extends StatefulWidget {
+  final AppController app;
+  const RawCommandDialog({super.key, required this.app});
+
+  @override
+  State<RawCommandDialog> createState() => _RawCommandDialogState();
+}
+
+class _RawCommandDialogState extends State<RawCommandDialog> {
+  final TextEditingController _cmdCtrl = TextEditingController();
+  final TextEditingController _dataCtrl = TextEditingController();
+  Uint8List? _response;
+  String? _error;
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _cmdCtrl.dispose();
+    _dataCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final cmdText = _cmdCtrl.text.trim();
+    if (cmdText.isEmpty) {
+      setState(() => _error = '请输入命令号');
+      return;
+    }
+    final cmd = int.tryParse(cmdText);
+    if (cmd == null) {
+      setState(() => _error = '命令号无效');
+      return;
+    }
+
+    Uint8List? data;
+    final dataText = _dataCtrl.text.trim();
+    if (dataText.isNotEmpty) {
+      try {
+        data = hexToUint8List(dataText);
+      } catch (e) {
+        setState(() => _error = '数据格式无效: $e');
+        return;
+      }
+    }
+
+    setState(() {
+      _sending = true;
+      _response = null;
+      _error = null;
+    });
+
+    try {
+      final resp = await widget.app.device.cmdRaw(cmd, data);
+      setState(() {
+        _response = resp;
+        _sending = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _sending = false;
+      });
+    }
+  }
+
+  String _hex(Uint8List b) =>
+      b.map((x) => x.toRadixString(16).padLeft(2, '0')).join(' ');
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('发送原始命令'),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _cmdCtrl,
+              decoration: const InputDecoration(
+                labelText: '命令号',
+                hintText: '例如: 4018',
+              ),
+              keyboardType: TextInputType.number,
+              onSubmitted: (_) => _send(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _dataCtrl,
+              decoration: const InputDecoration(
+                labelText: '数据 (hex, 可选)',
+                hintText: '例如: 00 01 02',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('关闭'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _sending ? null : _send,
+                  child: _sending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('发送'),
+                ),
+              ],
+            ),
+            if (_response != null) ...[
+              const SizedBox(height: 16),
+              const Text('响应:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              SelectableText(
+                _hex(_response!),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                '错误: $_error',
+                style: const TextStyle(color: Colors.red),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

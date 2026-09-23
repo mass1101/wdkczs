@@ -8,7 +8,7 @@ import 'storage_service.dart';
 
 /// 字典（密钥字典）模型 + 持久化
 ///
-/// 内部按 nfcapp 约定存储（id 用时间戳生成，不引入 uuid 依赖）；
+/// 内部按无感刷卡助手约定存储（id 用时间戳生成，不引入 uuid 依赖）；
 /// 序列化采用 CU 兼容格式（`#RRGGBB` 颜色、keys 为字节数组），
 /// 因此导出的 .dic 文件与文件夹 Bundle 可被 ChameleonUltra 直接导入，
 /// 反之亦可导入 CU 导出的字典。

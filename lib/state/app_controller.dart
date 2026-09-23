@@ -263,8 +263,12 @@ class AppController extends ChangeNotifier {
     try {
       final active = await device.cmdSlotGetActive();
       currentSlot = active;
+      await storage.setCurrentSlot(active);
       await loadSlotEmuSettings(active);
-    } catch (_) {}
+    } catch (_) {
+      // 围栏固件无 getActiveSlot 命令，回退到本地缓存的激活槽
+      currentSlot = await storage.getCurrentSlot();
+    }
   }
 
   Future<void> setAnimationMode(AnimationMode mode) async {
@@ -498,6 +502,7 @@ class AppController extends ChangeNotifier {
     try {
       await device.cmdSlotSetActive(slot);
       currentSlot = slot;
+      await storage.setCurrentSlot(slot);
       if (enabledSlots[slot].$1 /* hf */ ) {
         final s = await device.cmdMf1GetEmuSettings();
         slotEmuSettings[slot] = s;

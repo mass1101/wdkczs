@@ -1,6 +1,6 @@
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
-import 'package:nfctool_app/services/crypto1.dart';
+import 'package:wgkczs/services/crypto1.dart';
 
 // static_nested 的 Dart FFI 真值验证（gen2 合成样本）
 // 合成用 app 实测过的 Crypto1（与 C crypto1_word/setLfsr 位序同构）

@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'card_library.dart';
 import 'geofence.dart';
 
-/// 电子围栏 Provider（对齐 CU geofence_provider.dart，nfcapp 原生化：
+/// 电子围栏 Provider（对齐 CU geofence_provider.dart，无感刷卡助手原生化：
 /// 复用 SaveCard/CardLibraryStorage/uploadCardToSlot，CLI 走注入的设备回调）
 ///
 /// 位置唯一来源是原生 geofence_native_channel：原生 GeofenceService 先把

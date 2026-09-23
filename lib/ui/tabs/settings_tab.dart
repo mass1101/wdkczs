@@ -13,7 +13,6 @@ import '../../services/device_service.dart';
 import '../../services/log_service.dart';
 import '../../state/app_controller.dart';
 import '../screens/card_subscription_screen.dart';
-import '../screens/fence_subscription_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/qr_code_scanner.dart';
 
@@ -314,23 +313,7 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   // ========== 订阅入口（弹窗显示） ==========
-  Future<void> _showFenceSubscription() async {
-    if (!_app.isActivated) {
-      _toast('激活后使用该功能');
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.5),
-      builder: (_) => Dialog.fullscreen(child: const FenceSubscriptionScreen()),
-    );
-  }
-
   Future<void> _showCardSubscription() async {
-    if (!_app.isActivated) {
-      _toast('激活后使用该功能');
-      return;
-    }
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.5),
@@ -417,7 +400,6 @@ class _SettingsTabState extends State<SettingsTab> {
                     title: '设备信息',
                     child: Column(
                       children: [
-                        _infoRow('云端固件版本', _cloudFirmwareVersion ?? '加载中...'),
                         _infoRow('固件版本', info.gitVersion.isEmpty ? '--' : info.gitVersion),
                         _infoRow('芯片编号', info.chipId.isEmpty ? '--' : info.chipId),
                         _infoRow('蓝牙地址', info.bleAddress.isEmpty ? '--' : info.bleAddress),
@@ -426,57 +408,12 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                   ),
-                  // 全局设置
-                  SectionCard(
-                    title: '全局设置',
-                    child: Column(
-                      children: [
-                        _dropdownRow<bool>('蓝牙配对', _app.settings.blePairing,
-                            const [false, true], (v) => v ? '需要密码' : '无需密码',
-                            _app.setBlePairing),
-                        _infoRow('蓝牙密码', _app.settings.blePairingKey,
-                            onTap: _editPairingKey),
-                        _animationRow(),
-                        _actionRow('短按按钮A', _app.settings.pressBtnA, (v) {
-                          _app.setPressBtnA(v);
-                        }),
-                        _actionRow('短按按钮B', _app.settings.pressBtnB, (v) {
-                          _app.setPressBtnB(v);
-                        }),
-                        _actionRow('长按按钮A', _app.settings.longPressBtnA, (v) {
-                          _app.setLongPressBtnA(v);
-                        }),
-                        _actionRow('长按按钮B', _app.settings.longPressBtnB, (v) {
-                          _app.setLongPressBtnB(v);
-                        }),
-                      ],
-                    ),
-                  ),
-                  // 调试日志
-                    SectionCard(
-                      title: '调试',
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '查看应用调试日志',
-                            style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
-                          ),
-                          ActionButton(
-                            label: '查看日志',
-                            icon: Icons.article,
-                            color: primary,
-                            onTap: _showLogs,
-                          ),
-                        ],
-                      ),
-                    ),
-                    // 关于
+                  // 关于
                   SectionCard(
                     title: '关于',
                     child: Column(
                       children: [
-                        _infoRow('应用名称', 'NFC Tool'),
+                        _infoRow('应用名称', '无感卡槽管理助手'),
                         _infoRow('适用设备', 'Chameleon Ultra / CU- 系列'),
                         const SizedBox(height: 8),
                         const Text(
@@ -502,16 +439,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     primary,
                     iconColor: _app.isActivated ? const Color(0xFFFFD700) : null,
                   ),
-                  _sideBtn('读取设置', Icons.download, _refresh, primary),
-                  _sideBtn('保存设置', Icons.save, _saveSettings, primary),
-                  _sideBtn('恢复出厂', Icons.refresh, _resetSettings, primary),
-                  _sideBtn('清除数据', Icons.cleaning_services, _wipeFds, primary),
-                  _sideBtn('清除配对', Icons.link_off, _deleteBonds, primary),
-                  _sideBtn('更新固件', Icons.system_update_alt, _dfuUpdate, primary),
                   _sideBtn('本地刷入', Icons.upload_file, _dfuUpdateFromLocal, primary),
-                  _sideBtn('围栏订阅', Icons.fence, _showFenceSubscription, primary),
-                  _sideBtn('卡片订阅', Icons.credit_card, _showCardSubscription, primary),
-                  _sideBtn('轮询设置', Icons.timer, _showPollingSettings, primary),
                   const SizedBox(height: 16),
                 ],
               ),

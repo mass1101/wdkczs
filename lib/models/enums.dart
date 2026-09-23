@@ -1,44 +1,59 @@
-/// 设备命令码（对应逆向 bb 枚举）
+/// 设备命令码（对齐无感刷卡助手「围栏固件 v6.0」实测命令号：
+/// 基础命令 1000-1038 使用原版协议编号——libapp.so 枚举字符串 + 固件命令表
+/// （0x3FD44/0x3FEC0）实测确认：1019=getSlotInfo、1023=getEnabledSlots、
+/// 1038=getAllSlotNicks、1003=setActiveSlot、5000=em410xSetEmuId 等；
+/// 围栏固件不支持的官方命令保留在高位 12000+ 避免误触发。）
 enum Cmd {
-  getAppVersion(1000),
-  changeDeviceMode(1001),
-  getDeviceMode(1002),
-  setActiveSlot(1003),
-  setSlotTagType(1004),
-  setSlotDataDefault(1005),
-  setSlotEnable(1006),
-  setSlotTagNick(1007),
-  getSlotTagNick(1008),
-  slotDataConfigSave(1009),
-  enterBootloader(1010),
-  getDeviceChipId(1011),
-  getDeviceAddress(1012),
-  saveSettings(1013),
-  resetSettings(1014),
-  setAnimationMode(1015),
-  getAnimationMode(1016),
-  getGitVersion(1017),
-  getActiveSlot(1018),
-  getSlotInfo(1019),
-  wipeFds(1020),
-  deleteSlotTagNick(1021),
-  getEnabledSlots(1023),
-  deleteSlotSenseType(1024),
-  getBatteryInfo(1025),
-  getButtonPressConfig(1026),
-  setButtonPressConfig(1027),
-  getLongButtonPressConfig(1028),
-  setLongButtonPressConfig(1029),
-  setBlePairingKey(1030),
-  getBlePairingKey(1031),
-  deleteAllBleBonds(1032),
-  getDeviceModel(1033),
-  getDeviceSettings(1034),
-  getDeviceCapabilities(1035),
-  getBlePairingEnable(1036),
-  setBlePairingEnable(1037),
-  getAllSlotNicks(1038),
-  getPollingDelay(1041),
+  // ===== 基础命令 1000-1038（固件实测存在）=====
+  getAppVersion(1000), // CMD_GET_APP_VERSION
+  changeDeviceMode(1001), // CMD_CHANGE_DEVICE_MODE
+  getDeviceMode(1002), // CMD_GET_DEVICE_MODE
+  setActiveSlot(1003), // CMD_SET_ACTIVE_SLOT
+  setSlotTagType(1004), // CMD_SET_SLOT_TAG_TYPE
+  setSlotDataDefault(1005), // CMD_SET_SLOT_DATA_DEFAULT
+  setSlotEnable(1006), // CMD_SET_SLOT_ENABLE
+  setSlotTagNick(1007), // CMD_SET_SLOT_TAG_NICK
+  getSlotTagNick(1008), // CMD_GET_SLOT_TAG_NICK
+  slotDataConfigSave(1009), // CMD_SLOT_DATA_CONFIG_SAVE
+  enterBootloader(1010), // CMD_ENTER_BOOTLOADER
+  getDeviceChipId(1011), // CMD_GET_DEVICE_CHIP_ID
+  getDeviceAddress(1012), // CMD_GET_DEVICE_ADDRESS
+  saveSettings(1013), // CMD_SAVE_SETTINGS
+  resetSettings(1014), // CMD_RESET_SETTINGS
+  setAnimationMode(1015), // CMD_SET_ANIMATION_MODE
+  getAnimationMode(1016), // CMD_GET_ANIMATION_MODE
+  getGitVersion(1017), // CMD_GET_GIT_VERSION
+  getActiveSlot(1018), // CMD_GET_ACTIVE_SLOT（固件存在；原版 App 用 getSlotInfo 判断激活槽）
+  getSlotInfo(1019), // CMD_GET_SLOT_INFO
+  wipeFds(1020), // CMD_WIPE_FDS
+  deleteSlotTagNick(1021), // CMD_DELETE_SLOT_TAG_NICK
+  getSlotInfoSlotCountProbe(1022), // CMD_GET_SLOT_INFO_SLOT_COUNT_PROBE（固件空缺）
+  getEnabledSlots(1023), // CMD_GET_ENABLED_SLOTS
+  deleteSlotSenseType(1024), // CMD_DELETE_SLOT_SENSE_TYPE
+  getBatteryInfo(1025), // CMD_GET_BATTERY_INFO
+  mf1ReadEmuBlockData(4008), // CMD_MF1_GET_BLOCK_DATA（官方编号；围栏固件未实现该命令，导出卡数据会失败）
+  mf1WriteEmuBlockData(4000), // CMD_MF1_LOAD_BLOCK_DATA（官方编号）
+  mf0NtagReadEmuPageData(4021), // CMD_MF0_NTAG_READ_EMU_PAGE_DATA（官方编号）
+  mf0NtagWriteEmuPageData(4022), // CMD_MF0_NTAG_WRITE_EMU_PAGE_DATA（官方编号）
+  setBlePairingKey(1030), // CMD_SET_BLE_PAIRING_KEY（固件实测 1030）
+  hf14aSetAntiCollData(4001), // CMD_MF1_SET_ANTI_COLLISION（官方编号）
+  getDeviceModel(1033), // CMD_GET_DEVICE_MODEL（固件实测 1033）
+  getDeviceCapabilities(1035), // CMD_GET_DEVICE_CAPABILITIES（固件实测 1035）
+  getBlePairingEnable(1036), // CMD_GET_BLE_PAIRING_ENABLE
+  setBlePairingEnable(1037), // CMD_SET_BLE_PAIRING_ENABLE
+  getAllSlotNicks(1038), // CMD_GET_ALL_SLOT_NICKS
+
+  // ===== 围栏固件不支持的官方命令 → 高位 12000+ =====
+  getButtonPressConfig(12026), // 围栏固件无此命令
+  setButtonPressConfig(12027), // 围栏固件无此命令
+  getLongButtonPressConfig(12028), // 围栏固件无此命令
+  setLongButtonPressConfig(12029), // 围栏固件无此命令
+  getBlePairingKey(12031), // 固件命令号不确定，保留高位
+  deleteAllBleBonds(12032), // 围栏固件无此命令
+  getDeviceSettings(12034), // 围栏固件无此命令
+
+  // ===== 轮询命令（官方 1041-1052）=====
+  getPollingDelay(1041), // 围栏固件无，保留官方编号
   setPollingDelay(1042),
   setPollingEnable(1043),
   setActivation(1044),
@@ -49,7 +64,7 @@ enum Cmd {
   setPollingSlots(1049),
   getPollingAdaptive(1051),
   setPollingAdaptive(1052),
-  hf14aScan(2000),
+  hf14aScan(2000), // 围栏固件无，保留官方编号
   mf1DetectSupport(2001),
   mf1DetectPrng(2002),
   mf1StaticNestedAcquire(2003),
@@ -67,7 +82,7 @@ enum Cmd {
   mf1CheckKeysOnBlock(2015),
   hf14aGetConfig(2200),
   hf14aSetConfig(2201),
-  em410xScan(3000),
+  em410xScan(3000), // 围栏固件无，保留官方编号
   em410xWriteToT55xx(3001),
   hidproxScan(3002),
   hidproxWriteToT55xx(3003),
@@ -75,14 +90,11 @@ enum Cmd {
   vikingWriteToT55xx(3005),
   em410xElectraWriteToT55xx(3006),
   adcGenericRead(3009),
-  mf1WriteEmuBlockData(4000),
-  hf14aSetAntiCollData(4001),
-  mf1SetDetectionEnable(4004),
+  mf1SetDetectionEnable(4004), // 围栏固件无，保留官方编号
   mf1GetDetectionCount(4005),
   mf1GetDetectionLog(4006),
   mf1GetDetectionEnable(4007),
-  mf1ReadEmuBlockData(4008),
-  mf1GetEmulatorConfig(4009),
+  mf1GetEmulatorConfig(4009), // 围栏固件无，保留官方编号
   mf1GetGen1aMode(4010),
   mf1SetGen1aMode(4011),
   mf1GetGen2Mode(4012),
@@ -94,9 +106,7 @@ enum Cmd {
   hf14aGetAntiCollData(4018),
   mf0NtagGetUidMagicMode(4019),
   mf0NtagSetUidMagicMode(4020),
-  mf0NtagReadEmuPageData(4021),
-  mf0NtagWriteEmuPageData(4022),
-  mf0NtagGetVersionData(4023),
+  mf0NtagGetVersionData(4023), // 围栏固件无，保留官方编号
   mf0NtagSetVersionData(4024),
   mf0NtagGetSignatureData(4025),
   mf0NtagSetSignatureData(4026),
@@ -115,8 +125,8 @@ enum Cmd {
   mf1GetFieldOffDoReset(4039),
   mf1GetPrngType(4040),
   mf1SetPrngType(4041),
-  em410xSetEmuId(5000),
-  em410xGetEmuId(5001),
+  em410xSetEmuId(5000), // CMD_EM410X_SET_EMU_ID（源文件实测 5000，非 1030）
+  em410xGetEmuId(5001), // 围栏固件无，保留官方编号
   hidproxSetEmuId(5002),
   hidproxGetEmuId(5003),
   vikingSetEmuId(5004),

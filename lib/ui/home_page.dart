@@ -1,19 +1,13 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import '../main.dart';
 import '../state/app_controller.dart';
-import '../ui/tabs/ic_tab.dart';
-import '../ui/tabs/id_tab.dart';
 import '../ui/tabs/library_tab.dart';
 import '../ui/tabs/settings_tab.dart';
 import '../ui/tabs/slot_manager_tab.dart';
-import 'screens/geofence_list.dart';
 import 'widgets/common.dart';
 
-/// 主框架：蓝底标题栏 + 胶囊按钮、六 Tab（IC卡/ID卡/卡槽/卡包/电子围栏/设置）、右下角 FAB
+/// 主框架：蓝底标题栏 + 胶囊按钮、三 Tab（卡槽/卡包/设置）、右下角 FAB
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -25,55 +19,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late final AppController _app;
   late final TabController _tabController;
   bool _discovering = false;
-  StreamSubscription<dynamic>? _overlaySub;
-  Timer? _overlayDataTimer;
 
   @override
   void initState() {
     super.initState();
     _app = AppScope.instance.controller;
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       _app.setTab(_tabController.index);
     });
     _app.addListener(_onAppChanged);
-    _overlaySub = FlutterOverlayWindow.overlayListener.listen(_onOverlayEvent);
-    _overlayDataTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (_app.geofence.overlayActive) {
-        _app.geofence.pushOverlayData();
-      }
-    });
   }
 
   @override
   void dispose() {
     _app.removeListener(_onAppChanged);
-    _overlayDataTimer?.cancel();
-    _overlaySub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
 
   void _onAppChanged() {
     if (mounted) setState(() {});
-  }
-
-  void _onOverlayEvent(dynamic event) {
-    if (event == 'restore' || event == 'close') {
-      FlutterOverlayWindow.closeOverlay();
-      if (!mounted) return;
-      _app.geofence.setOverlayActive(false);
-      _tabController.animateTo(4);
-    } else if (event is Map) {
-      final type = event['type'];
-      if (type == 'overlay_error' || type == 'overlay_info') {
-        final msg = event['message']?.toString() ?? 'unknown error';
-        try {
-          _app.geofence
-              .addLog('悬浮窗${type == 'overlay_error' ? '错误' : '信息'}: $msg');
-        } catch (_) {}
-      }
-    }
   }
 
   Future<void> _connect() async {
@@ -120,7 +86,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: Center(
               child: Transform.translate(
                 offset: const Offset(0, 5),
-                child: Text('NFCAPP',
+                child: Text('无感助手',
                     style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
@@ -139,11 +105,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               unselectedLabelColor: const Color(0xFF666666),
               labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               tabs: const [
-                Tab(text: 'IC卡'),
-                Tab(text: 'ID卡'),
                 Tab(text: '卡槽'),
                 Tab(text: '卡包'),
-                 Tab(text: '围栏'),
                 Tab(text: '设置'),
               ],
             ),
@@ -153,11 +116,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: TabBarView(
               controller: _tabController,
               children: [
-                const IcTab(),
-                const IdTab(),
                 const SlotManagerTab(),
                 const LibraryTab(),
-                const GeofenceScreen(),
                 const SettingsTab(),
               ],
             ),

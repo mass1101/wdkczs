@@ -180,7 +180,10 @@ Future<SaveCard?> readSlotDump(
   int slot,
   bool isHf, {
   String? name,
+  int? readCmd,
 }) async {
+  int originalSlot = -1;
+  DeviceMode? originalMode;
   try {
     final slotTypes = await device.cmdSlotGetInfo();
     if (slot < 0 || slot >= slotTypes.length) return null;
@@ -192,6 +195,14 @@ Future<SaveCard?> readSlotDump(
     } catch (_) {
       return null;
     }
+
+    // 记录读取前现场，结束后恢复（围栏固件无 getActiveSlot 时 originalSlot 保持 -1，仅恢复模式）
+    try {
+      originalSlot = await device.cmdSlotGetActive();
+    } catch (_) {}
+    try {
+      originalMode = await device.cmdGetDeviceMode();
+    } catch (_) {}
 
     await device.cmdSlotSetActive(slot);
     await device.cmdChangeDeviceMode(DeviceMode.tag);
@@ -276,7 +287,10 @@ Future<SaveCard?> readSlotDump(
         currentBlock < blockCount;
         currentBlock += readCount
       ) {
-        final result = await device.cmdMf1EmuReadBlock(currentBlock, readCount);
+        final result = await device.cmdRaw(
+          readCmd ?? 4008,
+          Uint8List.fromList([currentBlock, readCount]),
+        );
         if (result.length >= 16) {
           binData.setRange(binDataIndex, binDataIndex + result.length, result);
           binDataIndex += result.length;
@@ -302,5 +316,15 @@ Future<SaveCard?> readSlotDump(
     return null;
   } catch (_) {
     return null;
+  } finally {
+    // 恢复原激活槽与设备模式（容错：固件不支持时静默跳过）
+    try {
+      if (originalSlot >= 0 && originalSlot != slot) {
+        await device.cmdSlotSetActive(originalSlot);
+      }
+      if (originalMode != null && originalMode != DeviceMode.tag) {
+        await device.cmdChangeDeviceMode(originalMode);
+      }
+    } catch (_) {}
   }
 }

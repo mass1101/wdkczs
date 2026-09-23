@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
-import 'package:nfctool_app/protobuf/dfu-cc.pb.dart';
+import 'package:wgkczs/protobuf/dfu-cc.pb.dart';
 
 /// nRF DFU 固件包解析（对应逆向 DfuZip）
 ///

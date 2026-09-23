@@ -8,7 +8,7 @@ import '../models/enums.dart';
 import 'storage_service.dart';
 
 /// 本地方案库：已保存卡片模型 + 持久化（对齐 CU savedCards / folders）
-/// 采用 nfcapp 原生约定：atqa/sak/ats 以 hex 字符串存储、data 为 16 进制行，
+/// 采用无感刷卡助手原生约定：atqa/sak/ats 以 hex 字符串存储、data 为 16 进制行，
 /// 不引入 uuid/crypto 依赖（id 用时间戳生成）。
 
 /// 判断是否 MIFARE Classic 卡（对齐 CU isMifareClassic）

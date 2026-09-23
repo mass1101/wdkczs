@@ -10,15 +10,25 @@ import '../models/enums.dart';
 import '../models/models.dart';
 import '../protocol/frame.dart';
 
-/// 设备异常（携带状态码）
+/// 设备异常（携带状态码、失败命令号与载荷长度）
 class DeviceException implements Exception {
   final int status;
   final String message;
-  DeviceException(this.status, this.message);
+  final int? cmd;
+  final int? payloadLen;
+
+  DeviceException(this.status, this.message, {this.cmd, this.payloadLen});
 
   @override
-  String toString() =>
-      '${DeviceStatus.message(status)} (status=$status) $message';
+  String toString() {
+    final ctx = [
+      if (cmd != null) 'cmd=$cmd',
+      if (payloadLen != null) 'len=$payloadLen',
+    ].join(' ');
+    return '${DeviceStatus.message(status)} (status=$status)'
+        '${ctx.isEmpty ? '' : ' [$ctx]'}'
+        '${message.isEmpty ? '' : ' $message'}';
+  }
 }
 
 /// 设备错误状态码集合（对应逆向 rk：HF 1-8 / LF 65-67 / 通用错误）
@@ -33,6 +43,7 @@ class DeviceService {
   final BleService _ble;
   bool _ready = false;
   final _pending = <int, Completer<Uint8List>>{};
+  final _sentPayload = <int, int>{};
   StreamSubscription? _sub;
   Future<void> _txQueue = Future.value();
 
@@ -82,13 +93,14 @@ class DeviceService {
           if (!UltraFrame.checkLrc(frame)) continue;
           final (cmd, status, data) = UltraFrame.decode(frame);
           final completer = _pending.remove(cmd);
-          if (completer != null) {
-            if (_isErrStatus(status)) {
-              completer.completeError(DeviceException(status, ''));
-            } else {
-              completer.complete(data);
+            if (completer != null) {
+              if (_isErrStatus(status)) {
+                completer.completeError(DeviceException(status, '',
+                    cmd: cmd, payloadLen: _sentPayload[cmd]));
+              } else {
+                completer.complete(data);
+              }
             }
-          }
         }
       } catch (e) {
         debugPrint('frame decode error: $e');
@@ -139,20 +151,42 @@ class DeviceService {
       {int timeout = UltraFrame.defaultTimeoutMs}) async {
     await ensureConnected();
     init();
+    final payload = data ?? Uint8List(0);
+    _sentPayload[cmd] = payload.length;
+    LogService.instance.log(
+        'TX cmd=$cmd len=${payload.length} data=${_hex(payload)}');
     final completer = Completer<Uint8List>();
     _pending[cmd] = completer;
-    final frame = UltraFrame.encode(cmd: cmd, data: data ?? Uint8List(0));
+    final frame = UltraFrame.encode(cmd: cmd, data: payload);
     try {
       await _ble.send(frame);
-      return await completer.future.timeout(Duration(milliseconds: timeout));
+      final resp = await completer.future.timeout(Duration(milliseconds: timeout));
+      LogService.instance.log('RX cmd=$cmd ok len=${resp.length}');
+      return resp;
     } on TimeoutException {
       _pending.remove(cmd);
-      throw DeviceException(-2, '读取响应超时($timeout ms)');
+      _sentPayload.remove(cmd);
+      throw DeviceException(-2, '读取响应超时($timeout ms)',
+          cmd: cmd, payloadLen: payload.length);
+    } on DeviceException catch (e) {
+      _pending.remove(cmd);
+      _sentPayload.remove(cmd);
+      LogService.instance.log('RX cmd=$cmd FAIL $e');
+      throw e;
     } catch (e) {
       _pending.remove(cmd);
+      _sentPayload.remove(cmd);
       rethrow;
     }
   }
+
+  /// 发送任意命令（调试用）
+  Future<Uint8List> cmdRaw(int cmd, [Uint8List? data]) async {
+    return _request(cmd, data);
+  }
+
+  static String _hex(Uint8List b) =>
+      b.map((x) => x.toRadixString(16).padLeft(2, '0')).join(' ');
 
   // ========== 设备基础命令（cmd 1000-1038） ==========
 
@@ -531,12 +565,12 @@ class DeviceService {
         Uint8List.fromList([enable ? 1 : 0]));
   }
 
-  /// 8 项 {hfName, lfName}
+  /// 所有槽位 {hfName, lfName}（槽数由固件响应决定）
   Future<List<(String?, String?)>> cmdSlotGetFreqNames() async {
     final r = await _request(Cmd.getAllSlotNicks.value, null);
     final list = <(String?, String?)>[];
     var pos = 0;
-    for (var n = 0; n < 8; n++) {
+    while (pos < r.length) {
       String? hf;
       String? lf;
       for (final freq in [2, 1]) {
@@ -1285,12 +1319,17 @@ class DeviceService {
     return r.length > 2 ? r.sublist(2) : r;
   }
 
+  /// 写入 Mifare Classic 仿真块数据
+  ///
+  /// 载荷布局（官方 ChameleonUltraGUI mf1LoadBlockData，cmd 4000）：
+  ///   [0]     起始块号
+  ///   [1..]   块数据，每块 16 字节，无块数量字段
   Future<void> cmdMf1EmuWriteBlock(int offset, Uint8List data) async {
     if (data.length % 16 != 0) {
       throw DeviceException(96, 'data length must be multiple of 16');
     }
     final b = Uint8List(1 + data.length);
-    b[0] = offset;
+    b[0] = offset & 0xFF;
     b.setRange(1, 1 + data.length, data);
     await _request(Cmd.mf1WriteEmuBlockData.value, b);
   }
@@ -1351,6 +1390,10 @@ class DeviceService {
     return r[0] == 1;
   }
 
+  /// 读取 Mifare Classic 仿真块数据
+  ///
+  /// 载荷布局（官方 mf1GetBlockData，cmd 4008）：[起始块号, 块数量]
+  /// 围栏固件命令表中未实现 4008，调用会返回 invalid cmd，导出卡数据为空。
   Future<Uint8List> cmdMf1EmuReadBlock(int offset, int length) async {
     final r = await _request(Cmd.mf1ReadEmuBlockData.value,
         Uint8List.fromList([offset, length]));

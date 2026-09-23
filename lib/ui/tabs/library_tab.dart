@@ -225,7 +225,6 @@ class _LibraryTabState extends State<LibraryTab> {
                 label: '云端备份',
                 icon: Icons.cloud_upload,
                 onTap: () {
-                  if (!_app.isActivated) return _toast('激活后使用该功能');
                   if (!_connected) return _toast('请先连接设备后使用');
                   _cloudBackup();
                 },
@@ -234,7 +233,6 @@ class _LibraryTabState extends State<LibraryTab> {
                 label: '云端备份管理',
                 icon: Icons.cloud_queue,
                 onTap: () {
-                  if (!_app.isActivated) return _toast('激活后使用该功能');
                   if (!_connected) return _toast('请先连接设备后使用');
                   _cloudBackupManager();
                 },
