@@ -19,7 +19,8 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.47.5
+          # 3.47 起最低 iOS 15，要支持 iOS 14 必须用 3.44（最后支持 iOS 14 的稳定版）
+          flutter-version: 3.44.0
           channel: stable
           cache: true
 

@@ -58,6 +58,14 @@ dependencies:
   ed25519_edwards: ^0.3.1
   mobile_scanner: ^7.0.1
 
+# 压低两个传递依赖的版本门槛，使 pubspec.lock 与 Flutter 3.44（Dart 3.10，
+# 最后一个支持 iOS 14 的稳定版）兼容：
+# - shared_preferences_android 2.4.28 要求 Dart ^3.12
+# - xml 7.0.1 要求 Dart ^3.11（dbus 只要求 >=6.6.1，回压无冲突）
+dependency_overrides:
+  shared_preferences_android: 2.4.8
+  xml: 6.6.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
