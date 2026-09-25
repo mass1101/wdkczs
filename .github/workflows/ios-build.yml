@@ -30,10 +30,26 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
-      - name: Build iOS (unsigned)
+      - name: Build iOS
         run: flutter build ios --release --no-codesign
 
-      - name: Package unsigned IPA
+      - name: Ad-hoc sign with application-identifier entitlement
+        run: |
+          # Runner.entitlements 里 $(TeamIdentifierPrefix) 只在 Xcode 构建期展开，
+          # ad-hoc 签名直接替换成空，得到纯 bundle id
+          sed 's/\$(TeamIdentifierPrefix)//' ios/Runner/Runner.entitlements > build/ios/Runner.entitlements
+          cd build/ios/iphoneos
+          /usr/bin/codesign --force --sign - --timestamp=none \
+            --entitlements ../Runner.entitlements Runner.app/Runner
+          for fw in Runner.app/Frameworks/*.framework; do
+            [ -f "$fw/$(basename "$fw" .framework)" ] && \
+              /usr/bin/codesign --force --sign - --timestamp=none "$fw" || true
+          done
+          /usr/bin/codesign --force --sign - --timestamp=none Runner.app
+          echo '--- entitlements of Runner ---'
+          /usr/bin/codesign -d --entitlements - Runner.app 2>&1 || true
+
+      - name: Package IPA
         run: |
           cd build/ios/iphoneos
           mkdir Payload
