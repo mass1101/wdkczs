@@ -413,8 +413,8 @@ class _SettingsTabState extends State<SettingsTab> {
                     title: '关于',
                     child: Column(
                       children: [
-                        _infoRow('应用名称', '无感卡槽管理助手'),
-                        _infoRow('适用设备', 'Chameleon Ultra / CU- 系列'),
+                        _infoRow('应用名称', '无感卡槽读取助手'),
+                        _infoRow('适用设备', 'Chameleon Ultra 第三方软件“无感刷卡助手”的卡槽数据提取'),
                         const SizedBox(height: 8),
                         const Text(
                           '仅用于学习与研究目的，请遵守当地法律法规。',

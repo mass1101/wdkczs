@@ -86,7 +86,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: Center(
               child: Transform.translate(
                 offset: const Offset(0, 5),
-                child: Text('无感助手',
+                child: Text('无感卡槽读取助手',
                     style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
