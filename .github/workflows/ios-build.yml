@@ -35,19 +35,19 @@ jobs:
 
       - name: Ad-hoc sign with application-identifier entitlement
         run: |
-          # Runner.entitlements 里 $(TeamIdentifierPrefix) 只在 Xcode 构建期展开，
-          # ad-hoc 签名直接替换成空，得到纯 bundle id
+          # $(TeamIdentifierPrefix) 只在 Xcode 构建期展开，ad-hoc 签名直接替换成空
           sed 's/\$(TeamIdentifierPrefix)//' ios/Runner/Runner.entitlements > build/ios/Runner.entitlements
           cd build/ios/iphoneos
-          /usr/bin/codesign --force --sign - --timestamp=none \
-            --entitlements ../Runner.entitlements Runner.app/Runner
           for fw in Runner.app/Frameworks/*.framework; do
             [ -f "$fw/$(basename "$fw" .framework)" ] && \
               /usr/bin/codesign --force --sign - --timestamp=none "$fw" || true
           done
-          /usr/bin/codesign --force --sign - --timestamp=none Runner.app
-          echo '--- entitlements of Runner ---'
-          /usr/bin/codesign -d --entitlements - Runner.app 2>&1 || true
+          # entitlements 必须加在最后一步 bundle 签名上，
+          # 先签 binary 再签 bundle 会被 bundle 签名覆盖掉
+          /usr/bin/codesign --force --sign - --timestamp=none \
+            --entitlements ../Runner.entitlements Runner.app
+          /usr/bin/codesign -d --entitlements - Runner.app 2>&1 | tee entitlements.txt
+          grep -q 'application-identifier' entitlements.txt
 
       - name: Package IPA
         run: |
