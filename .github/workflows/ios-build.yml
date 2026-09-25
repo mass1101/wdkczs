@@ -1,0 +1,46 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build iOS (unsigned)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir Payload
+          cp -R Runner.app Payload/
+          zip -qry wgkczs-ios-unsigned.ipa Payload
+          mv wgkczs-ios-unsigned.ipa "$GITHUB_WORKSPACE"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wgkczs-ios-unsigned
+          path: wgkczs-ios-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
