@@ -255,28 +255,9 @@ class DeviceService {
     await _request(Cmd.setSlotTagNick.value, b);
   }
 
-  /// 返回 null 表示未设置
-  Future<String?> cmdSlotGetFreqName(int slot, int freq) async {
-    try {
-      final r = await _request(Cmd.getSlotTagNick.value,
-          Uint8List.fromList([slot, freq]));
-      return utf8.decode(r, allowMalformed: true);
-    } on DeviceException catch (e) {
-      if (e.status == 113) return null;
-      rethrow;
-    }
-  }
 
   Future<void> cmdSlotSaveSettings() async {
     await _request(Cmd.slotDataConfigSave.value, null);
-  }
-
-  Future<void> cmdSaveSettings() async {
-    await _request(Cmd.saveSettings.value, null);
-  }
-
-  Future<void> cmdResetSettings() async {
-    await _request(Cmd.resetSettings.value, null);
   }
 
   Future<String> cmdGetDeviceChipId() async {
@@ -289,14 +270,6 @@ class DeviceService {
     return r.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
   }
 
-  Future<void> cmdSetAnimationMode(AnimationMode mode) async {
-    await _request(Cmd.setAnimationMode.value, Uint8List.fromList([mode.value]));
-  }
-
-  Future<AnimationMode> cmdGetAnimationMode() async {
-    final r = await _request(Cmd.getAnimationMode.value, null);
-    return AnimationMode.from(r[0]);
-  }
 
   Future<String> cmdGetGitVersion() async {
     final r = await _request(Cmd.getGitVersion.value, null);
@@ -319,25 +292,6 @@ class DeviceService {
     return list;
   }
 
-  Future<void> cmdWipeFds() async {
-    await _request(Cmd.wipeFds.value, null);
-  }
-
-  /// 恢复出厂设置（cmd 1020），发送后设备会断开连接，不等待响应
-  Future<void> cmdFactoryReset() async {
-    final task = _txQueue.then((_) async {
-      await ensureConnected();
-      init();
-      final frame = UltraFrame.encode(cmd: Cmd.wipeFds.value, data: Uint8List(0));
-      try {
-        await _ble.send(frame);
-      } catch (_) {
-        // 设备可能已断开
-      }
-    });
-    _txQueue = task.then<void>((_) {}, onError: (_) {});
-    return task;
-  }
 
   // ========== 激活命令（cmd 1044-1045） ==========
 
@@ -357,63 +311,13 @@ class DeviceService {
     return (r[0] == 1, r.length > 1 ? r[1] : 0);
   }
 
-  /// 清除设备端激活授权（对齐 CU deactivate, cmd 1047）
-  Future<bool> cmdDeactivate() async {
-    final r = await _request(Cmd.deactivate.value, null);
-    return r.isNotEmpty && r[0] == 0x00;
-  }
 
   // ========== 轮询命令（cmd 1041-1052） ==========
 
-  Future<int> cmdGetPollingDelay() async {
-    final r = await _request(Cmd.getPollingDelay.value, null);
-    if (r.length < 2) return 0;
-    return r[0] | (r[1] << 8);
-  }
 
-  Future<void> cmdSetPollingDelay(int ms) async {
-    await _request(Cmd.setPollingDelay.value,
-        Uint8List.fromList([(ms >> 8) & 0xFF, ms & 0xFF]));
-  }
 
-  Future<void> cmdSetPollingEnable(bool enable) async {
-    await _request(Cmd.setPollingEnable.value,
-        Uint8List.fromList([enable ? 1 : 0]));
-  }
 
-  Future<bool> cmdGetPollingEnable() async {
-    final r = await _request(Cmd.getPollingEnable.value, null);
-    return r.isNotEmpty && r[0] == 1;
-  }
 
-  Future<void> cmdSetPollingSlots(List<bool> slots) async {
-    final arr = Uint8List((slots.length + 7) >> 3);
-    for (var i = 0; i < slots.length; i++) {
-      if (slots[i]) arr[i >> 3] |= 1 << (i & 7);
-    }
-    await _request(Cmd.setPollingSlots.value, arr);
-  }
-
-  Future<List<bool>> cmdGetPollingSlots() async {
-    final r = await _request(Cmd.getPollingSlots.value, null);
-    final slots = List<bool>.filled(80, false);
-    for (var i = 0; i < slots.length; i++) {
-      if (i >> 3 < r.length) {
-        slots[i] = (r[i >> 3] & (1 << (i & 7))) != 0;
-      }
-    }
-    return slots;
-  }
-
-  Future<bool> cmdGetPollingAdaptive() async {
-    final r = await _request(Cmd.getPollingAdaptive.value, null);
-    return r.isNotEmpty && r[0] == 1;
-  }
-
-  Future<void> cmdSetPollingAdaptive(bool enable) async {
-    await _request(Cmd.setPollingAdaptive.value,
-        Uint8List.fromList([enable ? 1 : 0]));
-  }
 
   Future<bool> cmdSlotDeleteFreqName(int slot, int freq) async {
     try {
@@ -448,44 +352,9 @@ class DeviceService {
     return BatteryInfo(voltage: bd.getUint16(0), level: r[2]);
   }
 
-  Future<ButtonAction> cmdGetButtonPressAction(int btn) async {
-    final r = await _request(Cmd.getButtonPressConfig.value,
-        Uint8List.fromList([btn]));
-    return ButtonAction.from(r[0]);
-  }
 
-  Future<void> cmdSetButtonPressAction(int btn, ButtonAction action) async {
-    await _request(Cmd.setButtonPressConfig.value,
-        Uint8List.fromList([btn, action.value]));
-  }
 
-  Future<ButtonAction> cmdGetButtonLongPressAction(int btn) async {
-    final r = await _request(Cmd.getLongButtonPressConfig.value,
-        Uint8List.fromList([btn]));
-    return ButtonAction.from(r[0]);
-  }
 
-  Future<void> cmdSetButtonLongPressAction(int btn, ButtonAction action) async {
-    await _request(Cmd.setLongButtonPressConfig.value,
-        Uint8List.fromList([btn, action.value]));
-  }
-
-  Future<void> cmdBleSetPairingKey(String key) async {
-    if (!RegExp(r'^\d{6}$').hasMatch(key)) {
-      throw DeviceException(96, 'Invalid key, must be 6 digits');
-    }
-    await _request(Cmd.setBlePairingKey.value,
-        Uint8List.fromList(key.codeUnits));
-  }
-
-  Future<String> cmdBleGetPairingKey() async {
-    final r = await _request(Cmd.getBlePairingKey.value, null);
-    return String.fromCharCodes(r);
-  }
-
-  Future<void> cmdBleDeleteAllBonds() async {
-    await _request(Cmd.deleteAllBleBonds.value, null);
-  }
 
   // ========== DFU 固件刷写（对齐 CU DFUCommunicator） ==========
 
@@ -545,24 +414,10 @@ class DeviceService {
     );
   }
 
-  Future<Set<int>> cmdGetSupportedCmds() async {
-    final r = await _request(Cmd.getDeviceCapabilities.value, null);
-    final s = <int>{};
-    final bd = ByteData.sublistView(r);
-    for (var i = 0; i < r.length; i += 2) {
-      s.add(bd.getUint16(i));
-    }
-    return s;
-  }
 
   Future<bool> cmdBleGetPairingMode() async {
     final r = await _request(Cmd.getBlePairingEnable.value, null);
     return r[0] == 1;
-  }
-
-  Future<void> cmdBleSetPairingMode(bool enable) async {
-    await _request(Cmd.setBlePairingEnable.value,
-        Uint8List.fromList([enable ? 1 : 0]));
   }
 
   /// 所有槽位 {hfName, lfName}（槽数由固件响应决定）
@@ -641,136 +496,11 @@ class DeviceService {
     return r[0];
   }
 
-  /// 静态嵌套采集
-  Future<Mf1AcquireStaticNestedRes> cmdMf1AcquireStaticNested(
-      {required int block,
-      required KeyType keyType,
-      required Uint8List key,
-      required int targetBlock,
-      required KeyType targetKeyType}) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(10);
-    b[0] = keyType.value;
-    b[1] = block;
-    b.setRange(2, 8, key);
-    b[8] = targetKeyType.value;
-    b[9] = targetBlock;
-    final r = await _request(Cmd.mf1StaticNestedAcquire.value, b);
-    final uid = r.sublist(0, 4);
-    final atks = <(Uint8List, Uint8List)>[];
-    for (var i = 4; i + 8 <= r.length; i += 8) {
-      atks.add((r.sublist(i, i + 4), r.sublist(i + 4, i + 8)));
-    }
-    return Mf1AcquireStaticNestedRes(uid: uid, atks: atks);
-  }
 
-  /// Darkside 采集
-  Future<Mf1DarksideRes> cmdMf1AcquireDarkside({
-    required int block,
-    required KeyType keyType,
-    required bool isFirst,
-    int syncMax = 30,
-  }) async {
-    // 对齐小程序：无前置射频复位/唤醒，直接采集（e4e6f1e 实测前置复位/scan
-    // 反致 HF tag not found 甚至设备 RF 异常，复位/唤醒假说已证伪）
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(4);
-    b[0] = keyType.value;
-    b[1] = block;
-    b[2] = isFirst ? 1 : 0;
-    b[3] = syncMax;
-    final r = await _request(Cmd.mf1DarksideAcquire.value, b,
-        timeout: 10000 * syncMax); // ignore: strict_raw_type
-    if (r.length == 1) {
-      return Mf1DarksideRes(status: r[0], uid: null, nt: null, par: null, ks: null, nr: null, ar: null);
-    }
-    return Mf1DarksideRes(
-      status: r[0],
-      uid: r.sublist(1, 5),
-      nt: r.sublist(5, 9),
-      par: r.sublist(9, 17),
-      ks: r.sublist(17, 25),
-      nr: r.sublist(25, 29),
-      ar: r.sublist(29, 33),
-    );
-  }
 
-  /// 检测 NT 距离
-  Future<Mf1NtDistanceRes> cmdMf1TestNtDistance({
-    required int block,
-    required KeyType keyType,
-    required Uint8List key,
-  }) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(8);
-    b[0] = keyType.value;
-    b[1] = block;
-    b.setRange(2, 8, key);
-    final r = await _request(Cmd.mf1DetectNtDist.value, b);
-    return Mf1NtDistanceRes(uid: r.sublist(0, 4), dist: r.sublist(4, 8));
-  }
 
-  /// 嵌套采集
-  Future<List<Mf1NestedRes>> cmdMf1AcquireNested({
-    required int block,
-    required KeyType keyType,
-    required Uint8List key,
-    required int targetBlock,
-    required KeyType targetKeyType,
-  }) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(10);
-    b[0] = keyType.value;
-    b[1] = block;
-    b.setRange(2, 8, key);
-    b[8] = targetKeyType.value;
-    b[9] = targetBlock;
-    final r = await _request(Cmd.mf1NestedAcquire.value, b,
-        timeout: 30000);
-    final list = <Mf1NestedRes>[];
-    for (var i = 0; i + 9 <= r.length; i += 9) {
-      list.add(Mf1NestedRes(
-        nt1: r.sublist(i, i + 4),
-        nt2: r.sublist(i + 4, i + 8),
-        par: r[i + 8],
-      ));
-    }
-    return list;
-  }
 
-  /// 校验块密钥，返回是否匹配
-  Future<bool> cmdMf1CheckBlockKey({
-    required int block,
-    required KeyType keyType,
-    required Uint8List key,
-  }) async {
-    try {
-      await assureDeviceMode(DeviceMode.reader);
-      final b = Uint8List(8);
-      b[0] = keyType.value;
-      b[1] = block;
-      b.setRange(2, 8, key);
-      await _request(Cmd.mf1AuthOneKeyBlock.value, b);
-      return true;
-    } on DeviceException catch (e) {
-      if (e.status == 6) return false;
-      rethrow;
-    }
-  }
 
-  /// 读取一个块（16 字节）
-  Future<Uint8List> cmdMf1ReadBlock({
-    required int block,
-    required KeyType keyType,
-    required Uint8List key,
-  }) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(8);
-    b[0] = keyType.value;
-    b[1] = block;
-    b.setRange(2, 8, key);
-    return _request(Cmd.mf1ReadOneBlock.value, b);
-  }
 
   /// 写入一个块（16 字节）
   Future<void> cmdMf1WriteBlock({
@@ -1014,23 +744,6 @@ class DeviceService {
     });
   }
 
-  /// 重置 UID（对应逆向 wipeUID：空卡体逐块 Gen1a 写入）
-  Future<void> wipeUid() async {
-    final body = emptyCardBody();
-    await _mf1Gen1aAuth(() async {
-      for (var s = 0; s < 16; s++) {
-        for (var b = 0; b < 4; b++) {
-          final data = _hexToBytes(body[s].split('\n')[b]);
-          final cmd = await cmdHf14aRaw(
-              appendCrc: true, data: Uint8List.fromList([0xA0, 4 * s + b]), keepRfField: true);
-          if (cmd.isEmpty || cmd[0] != 10) throw DeviceException(-1, 'Gen1a write failed 1');
-          final bodyRes = await cmdHf14aRaw(appendCrc: true, data: data, keepRfField: true);
-          if (bodyRes.isEmpty || bodyRes[0] != 10) throw DeviceException(-1, 'Gen1a write failed 2');
-        }
-      }
-    });
-  }
-
   /// 修改卡号（对应逆向 writeUID：Gen1a 免密写 block0，失败则普通卡密钥写）
   Future<void> writeUid({
     required String uid,
@@ -1093,42 +806,6 @@ class DeviceService {
         await cmdMf1WriteBlock(block: 0, keyType: KeyType.keyB, key: b, data: block0);
       }
     }
-  }
-
-  /// Gen1a 后门授权三步（failed 0-3）：halt → 0x40(7bit) → 0x43 → 写授权 e100e1ee
-  /// 三步全部 ACK(0x0A) 即检测通过（UFUID/UID 后门卡特征），供检测与锁定复用
-  Future<void> _ufuidAuth() async {
-    try {
-      await mf1Halt();
-    } catch (e) {
-      throw DeviceException(-1, 'failed 0，不支持锁卡指令');
-    }
-    final r1 = await cmdHf14aRaw(dataBitLength: 7, data: Uint8List.fromList([0x40]), keepRfField: true)
-        .catchError((e) => throw DeviceException(-1, 'failed 1，不支持锁卡指令'));
-    if (r1.isEmpty || r1[0] != 10) throw DeviceException(-1, 'failed 1，不支持锁卡指令');
-    final r2 = await cmdHf14aRaw(data: Uint8List.fromList([0x43]), keepRfField: true)
-        .catchError((e) => throw DeviceException(-1, 'failed 2，不支持锁卡指令'));
-    if (r2.isEmpty || r2[0] != 10) throw DeviceException(-1, 'failed 2，不支持锁卡指令');
-    final r3 = await cmdHf14aRaw(data: _hexToBytes('e100e1ee'), keepRfField: true)
-        .catchError((e) => throw DeviceException(-1, 'failed 3，不支持锁卡指令'));
-    if (r3.isEmpty || r3[0] != 10) throw DeviceException(-1, 'failed 3，不支持锁卡指令');
-  }
-
-  /// 检测 UFUID 卡（对齐 2.8.3 lockUFUID 检测阶段）：只走授权三步，不写锁指令
-  Future<void> detectUfuid() async {
-    await assureDeviceMode(DeviceMode.reader);
-    await cmdHf14aScan();
-    await _ufuidAuth();
-  }
-
-  /// 锁 UFUID 卡（对应 2.8.3 lockUFUID 锁定阶段）：授权三步 + 0x85 锁块指令
-  Future<void> lockUfuid() async {
-    await assureDeviceMode(DeviceMode.reader);
-    await cmdHf14aScan();
-    await _ufuidAuth();
-    final r4 = await cmdHf14aRaw(data: _hexToBytes('850000000000000000000000000000081847'), keepRfField: true)
-        .catchError((e) => throw DeviceException(-1, 'failed 4，不支持锁卡指令'));
-    if (r4.isEmpty || r4[0] != 10) throw DeviceException(-1, 'failed 4，不支持锁卡指令');
   }
 
   /// 默认密钥表（用于普通卡写卡）
@@ -1217,89 +894,8 @@ class DeviceService {
     return Mf1CheckKeysOfSectorsRes(found: foundAll, sectorKeys: sectorKeysAll);
   }
 
-  /// HardNested 采集
-  Future<List<Mf1AcquireHardNestedRes>> cmdMf1AcquireHardNested({
-    required int block,
-    required KeyType keyType,
-    required Uint8List key,
-    required int targetBlock,
-    required KeyType targetKeyType,
-    bool slow = false,
-  }) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(11);
-    b[0] = slow ? 1 : 0;
-    b[1] = keyType.value;
-    b[2] = block;
-    b.setRange(3, 9, key);
-    b[9] = targetKeyType.value;
-    b[10] = targetBlock;
-    final r = await _request(Cmd.mf1HardnestedAcquire.value, b,
-        timeout: 30000);
-    final list = <Mf1AcquireHardNestedRes>[];
-    for (var i = 0; i + 9 <= r.length; i += 9) {
-      list.add(Mf1AcquireHardNestedRes(
-        nt: r.sublist(i, i + 4),
-        ntEnc: r.sublist(i + 4, i + 8),
-        par: r[i + 8],
-      ));
-    }
-    return list;
-  }
 
-  /// 加密静态嵌套采集（默认用破解专用密钥表）
-  Future<Mf1AcquireStaticEncryptedNestedDecoder> cmdMf1AcquireStaticEncryptedNested({
-    Uint8List? key,
-    int startSector = 0,
-    int maxSectors = 16,
-  }) async {
-    final k = key ?? _hexToBytes('A396EFA4E24F');
-    await assureDeviceMode(DeviceMode.reader);
-    final b = Uint8List(8);
-    b.setRange(0, 6, k);
-    b[6] = startSector;
-    b[7] = maxSectors;
-    final r = await _request(Cmd.mf1EncNestedAcquire.value, b, timeout: 30000);
-    final uid = r.sublist(0, 4);
-    final atks = <(int sector, KeyType keyType, int nt, int ntEnc, int par)>[];
-    for (var i = 4; i + 14 <= r.length; i += 14) {
-      final chunk = r.sublist(i, i + 14);
-      atks.add((startSector + (i - 4) ~/ 14, KeyType.keyA, chunk[0] | (chunk[1] << 8),
-          ByteData.sublistView(chunk).getUint32(3), chunk[2]));
-      atks.add((startSector + (i - 4) ~/ 14, KeyType.keyB, chunk[7] | (chunk[8] << 8),
-          ByteData.sublistView(chunk).getUint32(10), chunk[9]));
-    }
-    return Mf1AcquireStaticEncryptedNestedDecoder(uid: uid, atks: atks);
-  }
 
-  /// 批量校验块密钥
-  /// 对齐 CU mf1AuthMultipleKeys(mf1CheckKeysOnBlock)：
-  ///   请求 [block, keyType(0x60/61), count, keys...]，status==0 时取 data[1:] 为命中 key，
-  ///   非 0 status(如未命中候选的 status=6)视作未命中返回 null，**不抛异常**，
-  ///   以免中断整批候选验证（CU: resp.status==0 ? resp.data.sublist(1) : null）。
-  Future<Uint8List?> cmdMf1CheckKeysOfBlock({
-    required int block,
-    required KeyType keyType,
-    required List<Uint8List> keys,
-  }) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final n = Uint8List(3 + keys.length * 6);
-    n[0] = block;
-    n[1] = keyType.value;
-    n[2] = keys.length;
-    for (var i = 0; i < keys.length; i++) {
-      n.setRange(3 + i * 6, 3 + i * 6 + 6, keys[i]);
-    }
-    try {
-      final r = await _request(Cmd.mf1CheckKeysOnBlock.value, n,
-          // 对齐小程序动态超时公式 Vk + i*(keys+1)*100：单扇区单类型 i=1
-          timeout: 5 + keys.length * 100);
-      return r.length > 1 ? r.sublist(1) : null;
-    } on DeviceException {
-      // 非 0 status(常见未命中的 status=6)：对齐 CU 视作未命中返回 null，不中断
-      return null;
-    }
-  }
 
   // ========== 模拟命令（cmd 4000-4039） ==========
 
@@ -1385,20 +981,7 @@ class DeviceService {
     return list;
   }
 
-  Future<bool> cmdMf1GetDetectionEnable() async {
-    final r = await _request(Cmd.mf1GetDetectionEnable.value, null);
-    return r[0] == 1;
-  }
 
-  /// 读取 Mifare Classic 仿真块数据
-  ///
-  /// 载荷布局（官方 mf1GetBlockData，cmd 4008）：[起始块号, 块数量]
-  /// 围栏固件命令表中未实现 4008，调用会返回 invalid cmd，导出卡数据为空。
-  Future<Uint8List> cmdMf1EmuReadBlock(int offset, int length) async {
-    final r = await _request(Cmd.mf1ReadEmuBlockData.value,
-        Uint8List.fromList([offset, length]));
-    return r;
-  }
 
   Future<Mf1EmuSettings> cmdMf1GetEmuSettings() async {
     final r = await _request(Cmd.mf1GetEmulatorConfig.value, null);
@@ -1419,40 +1002,24 @@ class DeviceService {
     );
   }
 
-  Future<bool> cmdMf1GetGen1aMode() async {
-    final r = await _request(Cmd.mf1GetGen1aMode.value, null);
-    return r[0] == 1;
-  }
 
   Future<void> cmdMf1SetGen1aMode(bool enable) async {
     await _request(Cmd.mf1SetGen1aMode.value,
         Uint8List.fromList([enable ? 1 : 0]));
   }
 
-  Future<bool> cmdMf1GetGen2Mode() async {
-    final r = await _request(Cmd.mf1GetGen2Mode.value, null);
-    return r[0] == 1;
-  }
 
   Future<void> cmdMf1SetGen2Mode(bool enable) async {
     await _request(Cmd.mf1SetGen2Mode.value,
         Uint8List.fromList([enable ? 1 : 0]));
   }
 
-  Future<bool> cmdMf1GetAntiCollMode() async {
-    final r = await _request(Cmd.mf1GetBlockAntiCollMode.value, null);
-    return r[0] == 1;
-  }
 
   Future<void> cmdMf1SetAntiCollMode(bool enable) async {
     await _request(Cmd.mf1SetBlockAntiCollMode.value,
         Uint8List.fromList([enable ? 1 : 0]));
   }
 
-  Future<int> cmdMf1GetWriteMode() async {
-    final r = await _request(Cmd.mf1GetWriteMode.value, null);
-    return r[0];
-  }
 
   Future<void> cmdMf1SetWriteMode(int mode) async {
     await _request(Cmd.mf1SetWriteMode.value, Uint8List.fromList([mode]));
@@ -1523,12 +1090,6 @@ class DeviceService {
     return r.isEmpty ? 0 : r[0];
   }
 
-  /// 读取 NTAG 页数上限
-  Future<int> cmdMf0EmuGetPageCount() async {
-    await assureDeviceMode(DeviceMode.tag);
-    final r = await _request(Cmd.mf0NtagGetPageCount.value, null);
-    return r.isEmpty ? 0 : r[0];
-  }
 
   /// 读取 NTAG 计数器（返回 (value24bit, 撕裂标志 resetTearing==0xBD)）
   Future<(int, bool)> cmdMf0EmuGetCounterData(int index) async {
@@ -1553,12 +1114,6 @@ class DeviceService {
         ]));
   }
 
-  /// 读取 NTAG 写保护模式（0=normal 1=denied 2=deceive 3=shadow）
-  Future<int> cmdMf0EmuGetWriteMode() async {
-    await assureDeviceMode(DeviceMode.tag);
-    final r = await _request(Cmd.mf0NtagGetWriteMode.value, null);
-    return r.isEmpty ? 0 : r[0];
-  }
 
   /// 设置 NTAG 写保护模式
   Future<void> cmdMf0EmuSetWriteMode(int mode) async {
@@ -1566,12 +1121,6 @@ class DeviceService {
     await _request(Cmd.mf0NtagSetWriteMode.value, Uint8List.fromList([mode]));
   }
 
-  /// 读取 NTAG UID Magic Mode（Gen2）
-  Future<bool> cmdMf0EmuGetMagicMode() async {
-    await assureDeviceMode(DeviceMode.tag);
-    final r = await _request(Cmd.mf0NtagGetUidMagicMode.value, null);
-    return r.isNotEmpty && r[0] == 1;
-  }
 
   /// 设置 NTAG UID Magic Mode（Gen2）
   Future<void> cmdMf0EmuSetMagicMode(bool enable) async {
@@ -1587,12 +1136,6 @@ class DeviceService {
         Uint8List.fromList([enable ? 1 : 0]));
   }
 
-  /// 读取 NTAG 密码检测开关
-  Future<bool> cmdMf0EmuGetDetectionEnable() async {
-    await assureDeviceMode(DeviceMode.tag);
-    final r = await _request(Cmd.mf0NtagGetDetectionEnable.value, null);
-    return r.isNotEmpty && r[0] == 1;
-  }
 
   /// 读取 NTAG 已检测密码数量
   Future<int> cmdMf0EmuGetDetectionCount() async {
@@ -1632,53 +1175,9 @@ class DeviceService {
 
   // ========== LF 命令（cmd 3000-3009） ==========
 
-  Future<Em410xScanRes> cmdEm410xScan() async {
-    await assureDeviceMode(DeviceMode.reader);
-    final r = await _request(Cmd.em410xScan.value, null);
-    if (r.length == 5) {
-      return Em410xScanRes(tagType: 103, id: r);
-    }
-    return Em410xScanRes(tagType: r[0] | (r[1] << 8), id: r.sublist(2));
-  }
 
-  Future<void> cmdEm410xWriteToT55xx(
-      Uint8List id, Uint8List newKey, List<Uint8List> oldKeys) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final n = Uint8List(5 + 4 + oldKeys.length * 4);
-    n.setRange(0, 5, id);
-    n.setRange(5, 9, newKey);
-    for (var i = 0; i < oldKeys.length; i++) {
-      n.setRange(9 + i * 4, 9 + i * 4 + 4, oldKeys[i]);
-    }
-    await _request(Cmd.em410xWriteToT55xx.value, n);
-  }
 
-  /// LF 写 T55xx（EM4100/HID/维根）
-  Future<void> cmdLfWriteToT55xx(int cmd, Uint8List id, Uint8List newKey, List<Uint8List> oldKeys) async {
-    await assureDeviceMode(DeviceMode.reader);
-    final n = Uint8List(id.length + 4 + oldKeys.length * 4);
-    n.setRange(0, id.length, id);
-    n.setRange(id.length, id.length + 4, newKey);
-    for (var i = 0; i < oldKeys.length; i++) {
-      n.setRange(id.length + 4 + i * 4, id.length + 4 + i * 4 + 4, oldKeys[i]);
-    }
-    await _request(cmd, n);
-  }
 
-  Future<HidProxScanRes> cmdHidProxScan() async {
-    await assureDeviceMode(DeviceMode.reader);
-    final r = await _request(Cmd.hidproxScan.value, null);
-    final bd = ByteData.sublistView(r);
-    return HidProxScanRes(
-      format: r[0],
-      fc: bd.getUint32(1),
-      cn: (bd.getUint32(5) * 4294967296) + bd.getUint32(5) == 0
-          ? bd.getUint32(5)
-          : 0,
-      il: r[9],
-      oem: bd.getUint16(11),
-    );
-  }
 
   // ========== LF 模拟卡 ID（cmd 5002-5013，对齐 CU set*EmulatorID） ==========
 
@@ -1770,19 +1269,6 @@ class DeviceService {
       56: 'SmartMX with MIFARE Classic 4K',
     };
     return map[sak];
-  }
-
-  /// 扫描并设置反碰撞数据到模拟卡
-  Future<void> scanAndSetAntiColl() async {
-    await assureDeviceMode(DeviceMode.reader);
-    final tags = await cmdHf14aScan();
-    if (tags.isEmpty) throw DeviceException(1, '未发现卡片');
-    final tag = tags.first;
-    await cmdHf14aSetAntiCollData(
-        uid: tag.uid,
-        atqa: tag.atqa,
-        sak: Uint8List.fromList([tag.sak]),
-        ats: tag.ats);
   }
 
   /// 释放设备（切回标签模式）
