@@ -23,19 +23,12 @@ class StorageService {
   static const _kBackupLastMap = 'nfctool_backup_last_map';
   static const _kBackupEndpoint = 'nfctool_backup_endpoint';
   static const _kDefaultBackupEndpoint = 'https://card.zzx1101.tk:6363';
-  static const _kWatchdog = 'nfctool_watchdog';
-  static const _kActivated = 'nfctool_activated';
-  static const _kRemainingBoots = 'nfctool_remaining_boots';
-  static const _kActivatedChipId = 'nfctool_activated_chip_id';
 
   SharedPreferences? _prefs;
 
   Future<SharedPreferences> get _p async {
     return _prefs ??= await SharedPreferences.getInstance();
   }
-
-  /// 暴露底层 SharedPreferences 实例（供围栏等模块持久化）
-  Future<SharedPreferences> get prefs => _p;
 
   // ========== 密钥文件 ==========
 
@@ -260,49 +253,6 @@ class StorageService {
   Future<void> clearCrackResume() async {
     final p = await _p;
     await p.remove(_kCrackResume);
-  }
-
-  // ========== 后台看门狗（对齐 CU watchdog.dart） ==========
-
-  Future<bool> getWatchdogEnabled() async {
-    final p = await _p;
-    return p.getBool(_kWatchdog) ?? false;
-  }
-
-  Future<void> setWatchdogEnabled(bool value) async {
-    final p = await _p;
-    await p.setBool(_kWatchdog, value);
-  }
-
-  // ========== 激活状态（对齐 CU SharedPreferencesProvider.setActivated） ==========
-
-  Future<bool> getActivated() async {
-    final p = await _p;
-    return p.getBool(_kActivated) ?? false;
-  }
-
-  Future<void> setActivated(bool value, {String? chipId, int? remainingBoots}) async {
-    final p = await _p;
-    await p.setBool(_kActivated, value);
-    if (chipId != null) await p.setString(_kActivatedChipId, chipId);
-    if (remainingBoots != null) await p.setInt(_kRemainingBoots, remainingBoots);
-  }
-
-  Future<String> getActivatedChipId() async {
-    final p = await _p;
-    return p.getString(_kActivatedChipId) ?? '';
-  }
-
-  Future<int> getRemainingBoots() async {
-    final p = await _p;
-    return p.getInt(_kRemainingBoots) ?? 0;
-  }
-
-  Future<bool> isActivatedForChip(String chipId) async {
-    if (chipId.isEmpty) return false;
-    final p = await _p;
-    final stored = p.getString(_kActivatedChipId) ?? '';
-    return stored == chipId;
   }
 
   /// 解析 16 进制字符串为字节

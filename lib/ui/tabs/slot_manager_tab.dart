@@ -265,59 +265,6 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
     );
   }
 
-  Future<void> _batchBackupToLibrary() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('批量备份到卡包'),
-        content: Text('将读取所有 $_slotCount 个卡槽的数据并添加到卡包，确定继续？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    var added = 0, skipped = 0;
-    _setProgress(0);
-
-    for (var slot = 0; slot < _slotCount; slot++) {
-      _setProgress(((slot + 1) / _slotCount * 100).round());
-      for (final isHf in [true, false]) {
-        final card = await readSlotDump(_app.device, slot, isHf, readCmd: 6070);
-        if (card == null) {
-          skipped++;
-          continue;
-        }
-        card.name = _slotName(
-          slot,
-          isHf
-              ? _slotTypes.length > slot
-                    ? _slotTypes[slot].$1
-                    : 0
-              : _slotTypes.length > slot
-              ? _slotTypes[slot].$2
-              : 0,
-        );
-        card.updatedAt = DateTime.now();
-        await _lib.upsertCard(card);
-        added++;
-      }
-    }
-
-    _setProgress(-1);
-    if (!mounted) return;
-    _toast(added > 0 ? '备份完成：添加 $added 张，跳过 $skipped' : '所有卡槽为空');
-    await _reload();
-  }
-
   Future<void> _batchBackupToCloud() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -593,36 +540,12 @@ class _SlotManagerTabState extends State<SlotManagerTab> {
                 ],
               ),
               padding: EdgeInsets.zero,
-              child: PopupMenuButton<String>(
-                icon: const Icon(Icons.cloud_upload, color: Colors.white, size: 16),
+              child: IconButton(
+                onPressed: _batchBackupToCloud,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                onSelected: (value) {
-                  if (value == 'batch_library') _batchBackupToLibrary();
-                  if (value == 'batch_cloud') _batchBackupToCloud();
-                },
-                itemBuilder: (ctx) => [
-                  PopupMenuItem(
-                    value: 'batch_library',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.save, size: 16),
-                        const SizedBox(width: 8),
-                        const Text('备份到卡包'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'batch_cloud',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cloud_upload, size: 16),
-                        const SizedBox(width: 8),
-                        const Text('备份到云端'),
-                      ],
-                    ),
-                  ),
-                ],
+                icon: const Icon(Icons.cloud_upload, color: Colors.white, size: 16),
+                tooltip: '批量备份到云端',
               ),
             ),
           ),
@@ -785,39 +708,6 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
     );
   }
 
-  Future<void> _backupToLibrary(bool isHf) async {
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('备份到卡包'),
-        content: Text(
-          '确定读取卡槽 ${widget.slot + 1} ${isHf ? '高频' : '低频'}数据并添加到卡包？',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-    if (accepted != true) return;
-
-    final card = await readSlotDump(widget.app.device, widget.slot, isHf, readCmd: 6070);
-    if (card == null) {
-      widget.onToast('卡槽为空');
-      return;
-    }
-    card.name = isHf ? _hfName : _lfName;
-    card.updatedAt = DateTime.now();
-    await widget.lib.upsertCard(card);
-    widget.onToast('已添加到卡包');
-  }
-
   Future<void> _backupToCloud(bool isHf) async {
     final accepted = await showDialog<bool>(
       context: context,
@@ -877,19 +767,10 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
                     showDialog(
                       context: context,
                       builder: (ctx) => AlertDialog(
-                        title: const Text('导出'),
-                        content: Text('备份到卡包: ${widget.slot + 1}'),
-                        actions: [
-                          TextButton(
-                            onPressed: () async {
-                              Navigator.pop(ctx);
-                              for (final isHf in [true, false]) {
-                                await _backupToLibrary(isHf);
-                              }
-                            },
-                            child: const Text('导出到卡包'),
-                          ),
-                          TextButton(
+                         title: const Text('导出'),
+                         content: Text('备份到云端: ${widget.slot + 1}'),
+                         actions: [
+                           TextButton(
                             onPressed: () async {
                               Navigator.pop(ctx);
                               for (final isHf in [true, false]) {
@@ -926,19 +807,6 @@ class _SlotSettingsDialogState extends State<SlotSettingsDialog> {
               isHf: false,
             ),
             const Divider(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  for (final isHf in [true, false]) {
-                    _backupToLibrary(isHf);
-                  }
-                },
-                icon: const Icon(Icons.save),
-                label: const Text('备份到卡包'),
-              ),
-            ),
-            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(

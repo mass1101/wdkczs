@@ -2,19 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../ble/ble_service.dart';
-import '../models/enums.dart';
 import '../models/models.dart';
-import '../services/card_backup.dart';
 import '../services/card_library.dart';
 import '../helpers/activation.dart';
 import '../services/device_service.dart';
 import '../services/dfu_zip.dart';
-import '../services/geofence_provider.dart';
-import '../services/slot_writer.dart';
 import '../services/storage_service.dart';
 
 /// 全局应用状态（设备连接、卡数据、设置）
@@ -26,19 +21,11 @@ class AppController extends ChangeNotifier {
   AppController() {
     device = DeviceService(ble);
     storage = StorageService();
-    final geo = GeofenceProvider();
-    geofence = geo;
     device.init();
-    installAutoBackupHook();
     ble.status.addListener(_onBleStatus);
-    _initGeofence();
-    _loadActivationState();
   }
 
   bool get connected => ble.isConnected;
-
-  // 电子围栏
-  late final GeofenceProvider geofence;
 
   // IC 卡状态
   CardState card = CardState.withDefaultData();
@@ -52,31 +39,16 @@ class AppController extends ChangeNotifier {
   List<(bool, bool)> enabledSlots = List.generate(8, (_) => (false, false));
   List<(String?, String?)> slotNames = List.generate(8, (_) => (null, null));
   List<(int, int)> slotTypes = List.generate(8, (_) => (0, 4));
-  List<Mf1EmuSettings> slotEmuSettings = List.generate(
-    8,
-    (_) => Mf1EmuSettings(
-      detection: false,
-      gen1a: false,
-      gen2: false,
-      antiColl: true,
-      write: 0,
-    ),
-  );
 
   int tabIndex = 0;
   int currentSlot = 0;
   bool _processing = false;
 
-  // 激活状态（对齐 CU appState.isActivated/remainingBoots）
-  // CU: isActivated = isActivatedForChip(currentChipId)，启动时 currentChipId='' → false
+  // 激活状态（由设备固件实时读取）
   bool _isActivated = false;
   int _remainingBoots = 0;
   bool get isActivated => deviceInfo.chipId.isNotEmpty && _isActivated;
   int get remainingBoots => isActivated ? _remainingBoots : 0;
-
-  /// 每槽的 UID/SAK/ATQA 展示数据（读卡槽时刷新）
-  final List<({String uid, String sak, String atqa})> slotCardIds =
-      List.generate(8, (_) => (uid: '', sak: '', atqa: ''));
 
   bool get processing => _processing;
 
@@ -96,79 +68,7 @@ class AppController extends ChangeNotifier {
   }
 
   void _onBleStatus() {
-    if (connected) {
-      scheduleAutoBackup(storage);
-    }
     notifyListeners();
-  }
-
-  Future<void> _initGeofence() async {
-    final prefs = await storage.prefs;
-    geofence.setHandlers(
-      activateSlot: (slot) {
-        try {
-          device.cmdSlotSetActive(slot - 1);
-          currentSlot = slot - 1;
-          return true;
-        } catch (_) {
-          return false;
-        }
-      },
-      isConnected: () => connected,
-      isActivated: () => _isActivated,
-      uploadCard: (card, slot) async {
-        await slotWriterUpload(card, slot);
-      },
-      readHfSlot: (slot) => readHfSlot(slot),
-    );
-    geofence.setConnected(connected);
-    await geofence.load(prefs);
-    ble.status.addListener(_syncGeofenceConnected);
-  }
-
-  void _syncGeofenceConnected() {
-    geofence.setConnected(connected);
-    geofence.refreshEnabledState();
-  }
-
-  /// 卡库卡片写入某槽（供围栏自动上传复用，与卡库页同一实现）
-  Future<void> slotWriterUpload(SaveCard card, int slot) {
-    return uploadCardToSlot(device, card, slot);
-  }
-
-  /// 读取某 HF 槽的完整数据为 SaveCard（供围栏滚动码轮询遍历比对）
-  Future<SaveCard?> readHfSlot(int slot) async {
-    await device.cmdSlotSetActive(slot);
-    final anti = await device.cmdHf14aGetAntiCollData();
-    if (anti == null) return null;
-    final uid = anti.uidHex;
-    // 先按 Mifare Classic 读取（16 块 × 每扇区逐块）
-    final blocks = <String>[];
-    try {
-      for (var sector = 0; sector < 16; sector++) {
-        final raw = await device.cmdMf1EmuReadBlock(sector * 4, 4);
-        if (raw.length < 64) return null;
-        for (var b = 0; b < 4; b++) {
-          blocks.add(
-            raw
-                .sublist(b * 16, b * 16 + 16)
-                .map((x) => x.toRadixString(16).padLeft(2, '0'))
-                .join(),
-          );
-        }
-      }
-    } catch (_) {
-      return null;
-    }
-    return SaveCard(
-      uid: uid,
-      name: '',
-      tag: TagType.mifare1K,
-      sak: anti.sak,
-      atqa: anti.atqaHex,
-      ats: anti.atsHex,
-      data: blocks,
-    );
   }
 
   void setTab(int index) {
@@ -206,16 +106,9 @@ class AppController extends ChangeNotifier {
       deviceInfo.version = await this.device.cmdGetAppVersion();
       deviceInfo.gitVersion = await this.device.cmdGetGitVersion();
       deviceInfo.chipId = await this.device.cmdGetDeviceChipId();
-      // 连接即缓存芯片编号（对齐 CU verifyActivation → saveChipId）
+      // 连接即缓存芯片编号，供云端备份取设备标识
       if (deviceInfo.chipId.isNotEmpty) {
         await storage.saveChipId(deviceInfo.chipId);
-        // 切换设备：立即按当前 chipId 的本地激活状态重置内存
-        // （对齐 CU isActivated getter 实时查 isActivatedForChip(currentChipId)，
-        //  避免显示上一台设备的状态；固件实时值由下方 verifyActivation 刷新）
-        _isActivated = await storage.isActivatedForChip(deviceInfo.chipId);
-        _remainingBoots =
-            _isActivated ? await storage.getRemainingBoots() : 0;
-        notifyListeners();
       }
       deviceInfo.bleAddress = await this.device.cmdBleGetAddress();
       deviceInfo.model = (await this.device.cmdGetDeviceModel()).toString();
@@ -258,185 +151,29 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 读取当前卡槽的模拟设置（需先切到该槽）
-  Future<void> loadActiveSlotEmuSettings() async {
-    try {
-      final active = await device.cmdSlotGetActive();
-      currentSlot = active;
-      await storage.setCurrentSlot(active);
-      await loadSlotEmuSettings(active);
-    } catch (_) {
-      // 围栏固件无 getActiveSlot 命令，回退到本地缓存的激活槽
-      currentSlot = await storage.getCurrentSlot();
-    }
-  }
-
-  Future<void> setAnimationMode(AnimationMode mode) async {
-    settings.animation = mode;
-    notifyListeners();
-    try {
-      await device.cmdSetAnimationMode(mode);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  Future<void> setBlePairingKey(String key) async {
-    settings.blePairingKey = key;
-    notifyListeners();
-    try {
-      await device.cmdBleSetPairingKey(key);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  Future<void> setBlePairing(bool v) async {
-    settings.blePairing = v;
-    notifyListeners();
-    try {
-      await device.cmdBleSetPairingMode(v);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  Future<void> setPressBtnA(ButtonAction a) async {
-    settings.pressBtnA = a;
-    notifyListeners();
-    try {
-      await device.cmdSetButtonPressAction(65, a);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  Future<void> setPressBtnB(ButtonAction a) async {
-    settings.pressBtnB = a;
-    notifyListeners();
-    try {
-      await device.cmdSetButtonPressAction(66, a);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  Future<void> setLongPressBtnA(ButtonAction a) async {
-    settings.longPressBtnA = a;
-    notifyListeners();
-    try {
-      await device.cmdSetButtonLongPressAction(65, a);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  Future<void> setLongPressBtnB(ButtonAction a) async {
-    settings.longPressBtnB = a;
-    notifyListeners();
-    try {
-      await device.cmdSetButtonLongPressAction(66, a);
-      await device.cmdSaveSettings();
-    } catch (_) {}
-  }
-
-  /// 验证激活状态（对齐 CU verifyActivation）
+  /// 验证激活状态
   Future<void> verifyActivation(String chipId) async {
     if (chipId.isEmpty) return;
     await storage.saveChipId(chipId);
-    await _syncActivationFromFirmware(chipId);
+    await _syncActivationFromFirmware();
     notifyListeners();
   }
 
-  /// 从设备固件同步激活状态（对齐 CU _syncActivationFromFirmware）
-  Future<void> _syncActivationFromFirmware(String chipId) async {
+  /// 从设备固件同步激活状态
+  Future<void> _syncActivationFromFirmware() async {
     if (!connected) return;
     try {
-      var (activated, remaining) = await device.cmdGetActivation();
-      // 已激活设备可能被服务端撤销，轮询检查
-      if (activated && chipId.isNotEmpty) {
-        final revoked = await checkChipRevokedOnline(chipId);
-        if (revoked) {
-          final ok = await device.cmdDeactivate();
-          if (ok) {
-            activated = false;
-            remaining = 0;
-          }
-        }
-      }
-      final localActivated = await storage.isActivatedForChip(chipId);
-      final localRemaining = await storage.getRemainingBoots();
-      // 仅当与本地存储不一致时才写存储；但内存状态始终同步固件
-      // （切换设备时即使值相同也需更新 _isActivated，避免显示上一台设备的状态）
-      if (activated != localActivated || remaining != localRemaining) {
-        await storage.setActivated(activated,
-            chipId: chipId, remainingBoots: remaining);
-      }
+      final (activated, remaining) = await device.cmdGetActivation();
       _isActivated = activated;
       _remainingBoots = remaining;
-      notifyListeners();
-      geofence.refreshEnabledState();
     } catch (_) {}
   }
 
-  /// 设置激活状态（对齐 CU setActivated）
+  /// 设置激活状态
   Future<void> setActivated(bool value, {String? chipId, int? remainingBoots}) async {
-    await storage.setActivated(value, chipId: chipId, remainingBoots: remainingBoots);
     _isActivated = value;
     _remainingBoots = remainingBoots ?? 0;
     notifyListeners();
-  }
-
-  /// 加载激活状态
-  /// 对齐 CU：启动时 currentChipId 为空 → isActivated 直接 false，
-  /// 激活状态在连接设备后由 verifyActivation/_syncActivationFromFirmware 刷新
-  Future<void> _loadActivationState() async {
-    notifyListeners();
-  }
-
-  /// DFU 固件刷写（对齐 CU flashFirmwareFromUrl 流程：多 URL 回退下载 → 解析 → setPRN → getMTU → flashFirmware）
-  Future<void> dfuUpdateFromUrls(
-    List<String> urls, {
-    void Function(int progress)? onProgress,
-  }) async {
-    final image = await dfuDownloadAndParse(urls);
-    await device.dfuUpdateImage(
-      header: image.header,
-      body: image.body,
-      onProgress: onProgress,
-    );
-  }
-
-  /// 仅下载并解析固件包（不刷写），返回 (header=dat, body=bin)
-  /// 对齐 CU：下载与校验在 enterDFU 之前完成，避免 bootloader 期间下载断连
-  Future<({Uint8List header, Uint8List body})> dfuDownloadAndParse(
-      List<String> urls) async {
-    Uint8List? content;
-    String? lastError;
-    for (final url in urls) {
-      try {
-        content = await _httpGetBytes(url);
-        lastError = null;
-        break;
-      } catch (e) {
-        lastError = e.toString();
-      }
-    }
-    if (lastError != null) {
-      throw Exception('All firmware URLs failed: $lastError');
-    }
-    final zip = DfuZip(content!);
-    final image = zip.getAppImage();
-    if (image == null) {
-      throw Exception('无法从固件包解析 application 镜像');
-    }
-    return (header: image.header, body: image.body);
-  }
-
-  /// DFU 固件刷写（从本地 zip 文件）
-  Future<void> dfuUpdateFromFile(Uint8List zipBytes, {
-    void Function(int progress)? onProgress,
-  }) async {
-    final image = dfuParseFile(zipBytes);
-    await device.dfuUpdateImage(
-      header: image.header,
-      body: image.body,
-      onProgress: onProgress,
-    );
   }
 
   /// 仅解析本地固件包（不刷写），返回 (header, body)
@@ -449,76 +186,6 @@ class AppController extends ChangeNotifier {
     return (header: image.header, body: image.body);
   }
 
-  Future<Uint8List> _httpGetBytes(String url) async {
-    final res = await http
-        .get(Uri.parse(url))
-        .timeout(const Duration(seconds: 120));
-    if (res.statusCode != 200) {
-      throw Exception('下载固件失败: HTTP ${res.statusCode}');
-    }
-    return res.bodyBytes;
-  }
-
-  void setButtonModePairing(bool v) {
-    settings.buttonModePairing = v;
-    notifyListeners();
-  }
-
-  /// 数据变更后刷新 UI
-  void refreshUi() => notifyListeners();
-
-  Future<void> loadSlotEmuSettings(int slot) async {
-    if (slot < enabledSlots.length && enabledSlots[slot].$1 /* hf */ ) {
-      await device.cmdSlotSetActive(slot);
-      final s = await device.cmdMf1GetEmuSettings();
-      slotEmuSettings[slot] = s;
-      notifyListeners();
-    }
-  }
-
-  /// 更新指定槽的模拟配置（Mf1EmuSettings 不可变，复制新对象）
-  void updateSlotEmu(
-    int slot, {
-    bool? detection,
-    bool? gen1a,
-    bool? gen2,
-    bool? antiColl,
-    int? write,
-  }) {
-    final cur = slotEmuSettings[slot];
-    slotEmuSettings[slot] = Mf1EmuSettings(
-      detection: detection ?? cur.detection,
-      gen1a: gen1a ?? cur.gen1a,
-      gen2: gen2 ?? cur.gen2,
-      antiColl: antiColl ?? cur.antiColl,
-      write: write ?? cur.write,
-    );
-    notifyListeners();
-  }
-
-  /// 切换到指定卡槽：设置 active 槽并读取该槽模拟设置与卡片标识
-  Future<void> selectSlot(int slot) async {
-    if (slot == currentSlot) return;
-    try {
-      await device.cmdSlotSetActive(slot);
-      currentSlot = slot;
-      await storage.setCurrentSlot(slot);
-      if (enabledSlots[slot].$1 /* hf */ ) {
-        final s = await device.cmdMf1GetEmuSettings();
-        slotEmuSettings[slot] = s;
-        final anti = await device.cmdHf14aGetAntiCollData();
-        if (anti != null) {
-          slotCardIds[slot] = (
-            uid: anti.uidHex,
-            sak: anti.sakHex,
-            atqa: anti.atqaHex,
-          );
-        }
-      }
-    } catch (_) {}
-    notifyListeners();
-  }
-
   @override
   void dispose() {
     ble.status.removeListener(_onBleStatus);
@@ -527,3 +194,4 @@ class AppController extends ChangeNotifier {
     super.dispose();
   }
 }
+

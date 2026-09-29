@@ -4,15 +4,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-
 import '../../helpers/activation.dart';
 import '../../main.dart';
-import '../../models/enums.dart';
 import '../../services/device_service.dart';
-import '../../services/log_service.dart';
 import '../../state/app_controller.dart';
-import '../screens/card_subscription_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/qr_code_scanner.dart';
 
@@ -27,41 +22,15 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   AppController get _app => AppScope.instance.controller;
   DeviceService get _dev => _app.device;
-  String? _cloudFirmwareVersion;
   String _chipId = '';
   late final TextEditingController _activationCodeController = TextEditingController();
-  late final TextEditingController _pollingDelayController = TextEditingController();
-  int? _pollingDelay;
-  bool _pollingEnabled = false;
-  bool _pollingAdaptive = false;
-  List<bool> _pollingSlots = List.filled(80, false);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refresh();
-      _loadCloudFirmwareVersion();
     });
-  }
-
-  Future<void> _loadCloudFirmwareVersion() async {
-    try {
-      final resp = await http
-          .get(Uri.parse(
-              'https://raw.giteeusercontent.com/zzx1101/JL-version/raw/master/80lx-version.json'))
-          .timeout(const Duration(seconds: 10));
-      if (resp.statusCode != 200) return;
-      final lines = resp.body.split('\n');
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.startsWith('version:')) {
-          final v = trimmed.substring('version:'.length).trim();
-          if (mounted) setState(() => _cloudFirmwareVersion = v);
-          return;
-        }
-      }
-    } catch (_) {}
   }
 
   Future<void> _refresh() async {
@@ -82,100 +51,7 @@ class _SettingsTabState extends State<SettingsTab> {
       ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
   }
 
-  // ========== 全局设置 ==========
-  Future<void> _saveSettings() async {
-    try {
-      final s = _app.settings;
-      await _dev.cmdSetAnimationMode(s.animation);
-      // ButtonType: A=65, B=66（对齐固件 ASCII ord，CU ButtonType.a(65)/b(66)）
-      await _dev.cmdSetButtonPressAction(65, s.pressBtnA);
-      await _dev.cmdSetButtonPressAction(66, s.pressBtnB);
-      await _dev.cmdSetButtonLongPressAction(65, s.longPressBtnA);
-      await _dev.cmdSetButtonLongPressAction(66, s.longPressBtnB);
-      if (s.blePairing) {
-        await _dev.cmdBleSetPairingMode(true);
-        if (s.blePairingKey != '0000') {
-          await _dev.cmdBleSetPairingKey(s.blePairingKey);
-        }
-      } else {
-        await _dev.cmdBleSetPairingMode(false);
-      }
-      await _dev.cmdSaveSettings();
-      _toast('设置已保存');
-    } catch (e) {
-      _toast('保存失败: $e');
-    }
-  }
-
-  Future<void> _resetSettings() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('恢复出厂设置', style: TextStyle(fontSize: 16)),
-        content: const Text('将清除所有卡槽数据与配置，确定继续？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await _dev.cmdFactoryReset();
-      _toast('已恢复出厂设置');
-      await _app.disconnect();
-      await _refresh();
-    } catch (e) {
-      _toast('操作失败: $e');
-    }
-  }
-
-  Future<void> _wipeFds() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('清除模拟卡数据', style: TextStyle(fontSize: 16)),
-        content: const Text('将清除所有模拟卡槽的扇区数据，确定继续？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await _dev.cmdWipeFds();
-      _toast('已清除');
-    } catch (e) {
-      _toast('操作失败: $e');
-    }
-  }
-
-  Future<void> _deleteBonds() async {
-    try {
-      await _dev.cmdBleDeleteAllBonds();
-      _toast('已清除蓝牙配对信息');
-    } catch (e) {
-      _toast('操作失败: $e');
-    }
-  }
-
   // ========== 固件刷写（对齐 CU flashFile 流程） ==========
-  static const _firmwareUrls = [
-    'https://raw.giteeusercontent.com/zzx1101/JL-version/raw/master/80LXWL-dfu-full.zip',
-  ];
-
-  Future<void> _dfuUpdate() async {
-    if (!_app.connected) {
-      _toast('设备未连接');
-      return;
-    }
-    await _performDfuFlash(
-      title: '正在下载固件...',
-      prepare: () => _app.dfuDownloadAndParse(_firmwareUrls),
-    );
-  }
-
   Future<void> _dfuUpdateFromLocal() async {
     if (!_app.connected) {
       _toast('设备未连接');
@@ -278,106 +154,6 @@ class _SettingsTabState extends State<SettingsTab> {
       if (attempt >= 4 && found.length == 1) return found[0];
     }
     throw Exception('未发现 DFU 设备，请确认设备已进入 DFU 模式');
-  }
-
-  // ========== 配对密钥编辑 ==========
-  Future<void> _editPairingKey() async {
-    final controller = TextEditingController(text: _app.settings.blePairingKey);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('配对密钥', style: TextStyle(fontSize: 16)),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          maxLength: 6,
-          decoration: const InputDecoration(hintText: '6 位数字'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-    if (result != null && result.isNotEmpty) {
-      try {
-        await _app.setBlePairingKey(result);
-        _toast('已设置配对密钥');
-      } catch (e) {
-        _toast('设置失败: $e');
-      }
-    }
-  }
-
-  // ========== 订阅入口（弹窗显示） ==========
-  Future<void> _showCardSubscription() async {
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.5),
-      builder: (_) => Dialog.fullscreen(child: const CardSubscriptionScreen()),
-    );
-  }
-
-  /// 查看日志
-  void _showLogs() {
-    final logs = LogService.instance.logs;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            const Text('调试日志', style: TextStyle(fontSize: 16)),
-            const Spacer(),
-            TextButton(
-              onPressed: () async {
-                final allLogs = logs.join('\n');
-                await Clipboard.setData(ClipboardData(text: allLogs));
-                if (mounted) {
-                  ScaffoldMessenger.of(context)
-                    ..clearSnackBars()
-                    ..showSnackBar(SnackBar(content: const Text('已复制全部日志'), duration: const Duration(seconds: 2)));
-                }
-              },
-              child: const Text('复制全部'),
-            ),
-            TextButton(
-              onPressed: () {
-                LogService.instance.clear();
-                Navigator.pop(ctx);
-                _showLogs();
-              },
-              child: const Text('清除'),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 500,
-          child: logs.isEmpty
-              ? const Center(child: Text('暂无日志'))
-              : ListView.builder(
-                  itemCount: logs.length,
-                  itemBuilder: (_, i) => SelectableText(
-                    logs[i],
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
   }
 
   // ========== UI ==========
@@ -660,225 +436,6 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  // ========== 轮询设置弹窗 ==========
-  Future<void> _showPollingSettings() async {
-    try {
-      _pollingDelay = await _dev.cmdGetPollingDelay();
-      _pollingEnabled = await _dev.cmdGetPollingEnable();
-      _pollingAdaptive = await _dev.cmdGetPollingAdaptive();
-      _pollingSlots = await _dev.cmdGetPollingSlots();
-    } catch (_) {}
-    _pollingDelayController.text = (_pollingDelay ?? 0).toString();
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, sbSetState) => AlertDialog(
-          title: const Text('轮询设置', style: TextStyle(fontSize: 16)),
-          content: SizedBox(
-            width: 450,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 轮询延迟
-                  const Text('轮询延迟:', style: TextStyle(fontSize: 13)),
-                  const SizedBox(height: 8),
-                  if (_pollingDelay != null)
-                    Text(
-                      _pollingEnabled
-                          ? '当前轮询延迟: ${_pollingDelay}ms'
-                          : '轮询已关闭',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(ctx)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.6),
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _pollingDelayController,
-                          keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: '轮询延迟 (ms)',
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () async {
-                        final value =
-                            int.tryParse(_pollingDelayController.text);
-                        if (value == null || value < 0) return;
-                        try {
-                          await _dev.cmdSetPollingDelay(value);
-                          await _dev.cmdSetPollingEnable(true);
-                          await _dev.cmdSaveSettings();
-                          sbSetState(() {
-                            _pollingDelay = value;
-                            _pollingEnabled = true;
-                          });
-                        } catch (_) {}
-                      },
-                      child: const Text('保存'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () async {
-                        try {
-                          if (_pollingEnabled) {
-                            await _dev.cmdSetPollingEnable(false);
-                            await _dev.cmdSaveSettings();
-                            sbSetState(() => _pollingEnabled = false);
-                          } else {
-                            await _dev.cmdSetPollingEnable(true);
-                            await _dev.cmdSaveSettings();
-                            sbSetState(() => _pollingEnabled = true);
-                          }
-                        } catch (_) {}
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _pollingEnabled
-                            ? Colors.red.shade50
-                            : Colors.green.shade50,
-                        foregroundColor: _pollingEnabled
-                            ? Colors.red.shade700
-                            : Colors.green.shade700,
-                      ),
-                      child: Text(_pollingEnabled
-                          ? '关闭轮询'
-                          : '恢复轮询'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // 智能自适应延迟
-                Row(
-                  children: [
-                    const Expanded(child: Text('智能自适应延迟')),
-                    Switch(
-                      value: _pollingAdaptive,
-                      onChanged: (value) async {
-                        sbSetState(() => _pollingAdaptive = value);
-                        try {
-                          await _dev.cmdSetPollingAdaptive(value);
-                          await _dev.cmdSaveSettings();
-                        } catch (_) {}
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '开启后会自动调整卡槽的轮询延迟',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(ctx)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.6),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                // 参与轮询的卡槽
-                const Text('参与轮询的卡槽:', style: TextStyle(fontSize: 13)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (var i = 0; i < _pollingSlots.length; i++)
-                      InkWell(
-                        borderRadius: BorderRadius.circular(4),
-                        onTap: () => sbSetState(() {
-                          _pollingSlots[i] = !_pollingSlots[i];
-                        }),
-                        child: Container(
-                          width: 36,
-                          height: 26,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: _pollingSlots[i]
-                                ? Theme.of(ctx)
-                                    .colorScheme
-                                    .primary
-                                    .withValues(alpha: 0.18)
-                                : Theme.of(ctx)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: _pollingSlots[i]
-                                  ? Theme.of(ctx).colorScheme.primary
-                                  : Theme.of(ctx)
-                                      .colorScheme
-                                      .outlineVariant,
-                            ),
-                          ),
-                          child: Text(
-                            (i + 1).toString(),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _pollingSlots[i]
-                                  ? Theme.of(ctx).colorScheme.primary
-                                  : Theme.of(ctx).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => sbSetState(() {
-                        _pollingSlots = List.filled(80, true);
-                      }),
-                      child: const Text('全选'),
-                    ),
-                    TextButton(
-                      onPressed: () => sbSetState(() {
-                        _pollingSlots = List.filled(80, false);
-                      }),
-                      child: const Text('清空'),
-                    ),
-                    const Spacer(),
-                    ElevatedButton(
-                      onPressed: () async {
-                        try {
-                          await _dev.cmdSetPollingSlots(_pollingSlots);
-                          await _dev.cmdSaveSettings();
-                        } catch (_) {}
-                      },
-                      child: const Text('保存槽位'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-      ),
-    );
-  }
-
   Widget _sideBtn(String label, IconData icon, VoidCallback? onTap, Color color, {Color? iconColor}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -915,63 +472,6 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  /// 下拉选择行：label + 下拉菜单（value 默认显示读取到的当前选项）
-  Widget _dropdownRow<T>(String label, T value, List<T> options,
-      String Function(T) itemLabel, ValueChanged<T> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 72,
-              child: Text(label,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666)))),
-          Expanded(
-            child: DropdownButton<T>(
-              value: value,
-              isExpanded: true,
-              isDense: true,
-              underline: const SizedBox.shrink(),
-              style: const TextStyle(
-                  fontSize: 13, color: Color(0xFF333333)),
-              icon: const Icon(Icons.arrow_drop_down,
-                  color: Color(0xFFBBBBBB)),
-              items: options.map((o) => DropdownMenuItem(
-                    value: o,
-                    child: Text(itemLabel(o),
-                        style: const TextStyle(fontSize: 13)),
-                  )).toList(),
-              onChanged: (v) {
-                if (v != null) onChanged(v);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 动画模式下拉
-  Widget _animationRow() {
-    return _dropdownRow<AnimationMode>(
-      '动画模式',
-      _app.settings.animation,
-      AnimationMode.values,
-      (m) => m.label,
-      _app.setAnimationMode,
-    );
-  }
-
-  /// 按钮动作下拉（短按/长按按钮A/B）
-  Widget _actionRow(String label, ButtonAction value, ValueChanged<ButtonAction> onChanged) {
-    return _dropdownRow<ButtonAction>(
-      label,
-      value,
-      ButtonAction.values,
-      (a) => a.label,
-      onChanged,
-    );
-  }
 }
 
 /// DFU 刷写进度对话框（带进度百分比显示）

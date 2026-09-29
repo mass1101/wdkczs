@@ -6,8 +6,6 @@ import 'package:flutter/services.dart';
 
 import '../../services/card_backup.dart';
 import '../../services/card_library.dart';
-import 'card_cloud_analyze_screen.dart';
-import 'card_compare_screen.dart';
 import 'card_edit_dialog.dart';
 import 'dump_editor.dart';
 
@@ -285,26 +283,6 @@ class _CardViewDialogState extends State<CardViewDialog> {
                           widget.onChanged?.call();
                         }
                       });
-                    },
-                  ),
-                if (isClassic)
-                  ActionChip(
-                    label: const Text('云端分析'),
-                    avatar: const Icon(Icons.cloud_upload_outlined, size: 18),
-                    onPressed: () =>
-                        CardCloudAnalyzeScreen.launch(context, _card),
-                  ),
-                if (isClassic || isUltralight)
-                  ActionChip(
-                    label: const Text('比较'),
-                    avatar: const Icon(Icons.compare_arrows, size: 18),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CardCompareScreen(card: _card),
-                        ),
-                      );
                     },
                   ),
                 if (widget.onMove != null)

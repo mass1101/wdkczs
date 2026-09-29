@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -224,20 +223,6 @@ Future<bool> uploadCards(
   }
 }
 
-Timer? _autoBackupTimer;
-
-/// 卡库写入后调度增量备份（2 秒防抖，对齐 CU setCards 自动备份）
-Future<void> scheduleAutoBackup([StorageService? storage]) async {
-  _autoBackupTimer?.cancel();
-  _autoBackupTimer = Timer(const Duration(seconds: 2), () async {
-    await backupCards(storage ?? StorageService());
-  });
-}
-
-/// 注册卡库写入后自动增量备份（启动时调用一次）
-void installAutoBackupHook() {
-  CardLibraryStorage.onCardsChanged = () => scheduleAutoBackup();
-}
 
 /// 全量备份：每次上传全部卡片，不区分备份时间（对齐 CU backupCards）
 Future<int> backupCards(

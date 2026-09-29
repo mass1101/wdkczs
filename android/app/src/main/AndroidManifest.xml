@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 网络权限：云端备份/订阅同步/电子围栏同步/Mifare 在线分析均依赖 -->
+    <!-- 网络权限：云端备份与激活校验依赖 -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- BLE 权限：Android 12+ 运行时授权；低版本用位置权限 -->
@@ -12,13 +12,6 @@
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
     <application
         android:label="无感卡槽读取助手"
@@ -51,27 +44,6 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-
-        <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="电子围栏悬浮窗，用于展示围栏匹配状态"/>
-        </service>
-
-        <service
-            android:name=".GeofenceService"
-            android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="location">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="geofence_monitoring"/>
-        </service>
-        <service
-            android:name=".WatchdogService"
-            android:exported="false"
-            android:stopWithTask="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -49,23 +49,6 @@ bool validateActivationCode(String chipId, String inputCode) {
       Uint8List.fromList(sig));
 }
 
-Future<bool> checkChipRevokedOnline(String chipId) async {
-  try {
-    final resp = await http
-        .get(
-          Uri.parse('$_activationCheckServerUrl/api/activation/revoked')
-              .replace(queryParameters: {'chip_id': chipId}),
-        )
-        .timeout(const Duration(seconds: 5));
-    if (resp.statusCode != 200) return false;
-    final data = jsonDecode(resp.body) as Map<String, dynamic>?;
-    if (data == null) return false;
-    return data['revoked'] == true;
-  } catch (_) {
-    return false;
-  }
-}
-
 Future<String?> checkActivationOnline(String chipId, String inputCode) async {
   try {
     final resp = await http

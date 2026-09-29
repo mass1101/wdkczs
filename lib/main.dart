@@ -1,40 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
-import 'helpers/overlay_window.dart';
 import 'state/app_controller.dart';
 import 'ui/home_page.dart';
 import 'ui/widgets/common.dart';
-import 'services/notification_service.dart';
-import 'services/storage_service.dart';
-import 'services/watchdog.dart';
-
-@pragma('vm:entry-point')
-void overlayMain() {
-  WidgetsFlutterBinding.ensureInitialized();
-  try {
-    FlutterOverlayWindow.shareData('overlay_boot');
-    runApp(const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: OverlayWindowApp(),
-    ));
-  } catch (e, st) {
-    debugPrint('overlayMain error: $e\n$st');
-    FlutterOverlayWindow.shareData('overlay_boot_error');
-  }
-}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const NfcToolApp());
-  _initBackground();
-}
-
-void _initBackground() async {
-  await NotificationService.instance.init();
-  if (await StorageService().getWatchdogEnabled()) {
-    await Watchdog.start();
-  }
 }
 
 class NfcToolApp extends StatelessWidget {
