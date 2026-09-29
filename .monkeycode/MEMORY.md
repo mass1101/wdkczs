@@ -187,7 +187,6 @@ Entries discovered by the Agent during task execution should follow this format:
   - 删 import 前先 grep 该文件对该模块的**函数**调用：`cardSaveToBin` 定义在 `services/card_backup.dart`，`card_view_dialog.dart` 依赖它做 bin 导出，误删 import 会让整包编译失败（`compileFlutterBuildRelease` 报 "isn't defined"）。
   - Gradle 8.14.3 / AGP 8.13.2 / Kotlin 2.2.20 的 deprecation warning 与 `Already watching path` 异常均无害。
 
-
 [User Instruction Summary]
 - Date: 2026-09-14
 - Context: 用户要求卡库新建卡片 SAK 输入 08 时块 0 数据里存 08；查看对话框导出按钮按卡型区分 bin/json（均覆盖 CU 行为）
