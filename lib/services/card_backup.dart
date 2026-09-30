@@ -223,40 +223,6 @@ Future<bool> uploadCards(
   }
 }
 
-
-/// 全量备份：每次上传全部卡片，不区分备份时间（对齐 CU backupCards）
-Future<int> backupCards(
-  StorageService storage, {
-  List<SaveCard>? all,
-  Map<String, DateTime>? lastBackup,
-  String? chipId,
-  Map<String, dynamic>? deviceStatus,
-  bool Function(int uploaded)? onComplete,
-}) async {
-  final cards = all ?? await CardLibraryStorage().getCards();
-  final last = lastBackup ?? await storage.getCardLastBackupMap();
-  final toUpload = List<SaveCard>.of(cards);
-
-  if (toUpload.isEmpty) return 0;
-
-  final ok = await uploadCards(
-    storage,
-    toUpload,
-    chipId: chipId,
-    deviceStatus: deviceStatus,
-  );
-  if (ok) {
-    final now = DateTime.now();
-    final updated = <String, DateTime>{...last};
-    for (final card in toUpload) {
-      updated[card.id] = now;
-    }
-    await storage.setCardsLastBackupMap(updated);
-    onComplete?.call(toUpload.length);
-  }
-  return ok ? toUpload.length : 0;
-}
-
 /// 手动一键备份全部（不经增量过滤）
 Future<BackupResult> backupAllCardsToCloud(
   StorageService storage, {
