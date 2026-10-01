@@ -21,7 +21,7 @@ class StorageService {
   static const _kBackupToken = 'nfctool_backup_token';
   static const _kBackupLastMap = 'nfctool_backup_last_map';
   static const _kBackupEndpoint = 'nfctool_backup_endpoint';
-  static const _kDefaultBackupEndpoint = 'https://card.zzx1101.tk:6363';
+  static const _kDefaultBackupEndpoint = 'https://card.190542194.xyz:6363';
 
   SharedPreferences? _prefs;
 
@@ -164,7 +164,7 @@ class StorageService {
     await p.setString(_kCloudEndpoint, endpoint);
   }
 
-  // ========== 云端卡库备份（对齐 CU backup.dart，接 card.zzx1101.tk 服务器） ==========
+  // ========== 云端卡库备份（对齐 CU backup.dart，接 card.190542194.xyz 服务器） ==========
 
   /// 设备芯片编号（连接设备时自动缓存，对齐 CU app_last_chip_id）
   Future<String> getChipId() async {

@@ -10,7 +10,7 @@ const _activationPublicKeyHex =
 
 const _salt = 'CHAMELEON_ULTRA_2024';
 
-const _activationCheckServerUrl = 'https://card.zzx1101.tk:6363';
+const _activationCheckServerUrl = 'https://card.190542194.xyz:6363';
 
 /// Returns (max_boot_count, signature) parsed from an activation code.
 /// max_boot_count = 0 means unlimited (permanent).

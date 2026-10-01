@@ -8,7 +8,7 @@ import '../models/enums.dart';
 import 'card_library.dart';
 import 'storage_service.dart';
 
-/// 云端卡库备份/还原（对齐 CU helpers/backup.dart，接 card.zzx1101.tk 服务器）。
+/// 云端卡库备份/还原（对齐 CU helpers/backup.dart，接 card.190542194.xyz 服务器）。
 /// 序列化采用 CU CardSave JSON 形状 + bin_data，保证与 CU 服务器/客户端互操作。
 
 /// 无感刷卡助手 TagType → CU TagType.name（服务器 `tag_type` 字段用 CU 枚举名）
